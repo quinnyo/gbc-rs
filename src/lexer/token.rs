@@ -16,6 +16,7 @@ pub struct TokenIterator {
     index: usize,
     start: usize,
     current: char,
+    input_exhausted: bool,
     chars: Vec<char>
 }
 
@@ -27,6 +28,7 @@ impl TokenIterator {
             index: 0,
             start: 0,
             current: '\0',
+            input_exhausted: false,
             chars: text.chars().into_iter().collect()
         }
     }
@@ -44,7 +46,7 @@ impl TokenIterator {
     }
 
     pub fn assert_char(&self, c: char, message: String) -> Result<(), LexerError> {
-        if self.current != c {
+        if self.current != c || self.input_exhausted {
             Err(LexerError {
                 file_index: self.file_index,
                 index: self.index,
@@ -106,6 +108,7 @@ impl TokenIterator {
 
         let mut last = '\0';
         let mut end_index = self.index;
+        let mut limited = false;
         while self.peek().is_some() {
             self.next();
             match cb(self.current, last) {
@@ -121,6 +124,7 @@ impl TokenIterator {
                 TokenChar::Delimeter => {
                     raw.push(self.current);
                     end_index += 1;
+                    limited = true;
                     break;
                 },
                 TokenChar::Invalid => {
@@ -129,6 +133,10 @@ impl TokenIterator {
                 }
             }
             last = self.current;
+        }
+
+        if !limited && self.peek().is_none() {
+            self.input_exhausted = true;
         }
 
         Ok(InnerToken {

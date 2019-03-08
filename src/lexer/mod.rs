@@ -83,16 +83,21 @@ impl LexerFile {
 
     fn error(&self, err: LexerError) -> LexerError {
         let (line, col) = self.get_line_and_col(err.index);
+        let line_source = self.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
+        let col_pointer = str::repeat(" ", col);
+        let message = format!(
+            "In file \"{}\" on line {}, column {}: {}\n\n{}\n{}^--- Here",
+            self.path.display(),
+            line + 1,
+            col + 1,
+            err.message,
+            line_source,
+            col_pointer
+        );
         LexerError {
             file_index: err.file_index,
             index: err.index,
-            message: format!(
-                "In file \"{}\" on line {}, column {}: {}",
-                self.path.display(),
-                line + 1,
-                col + 1,
-                err.message
-            )
+            message
         }
     }
 
@@ -279,7 +284,6 @@ impl Lexer {
 
     fn collect_inner_string(iter: &mut TokenIterator, delimeter: char) -> Result<InnerToken, LexerError> {
         let t = iter.collect(false, |c, p| {
-
             // Ignore escape slashes
             if c == '\\' && p != '\\' {
                 TokenChar::Ignore
@@ -290,6 +294,10 @@ impl Lexer {
                     'n' => TokenChar::Valid('\n'),
                     'r' => TokenChar::Valid('\r'),
                     't' => TokenChar::Valid('\t'),
+                    '\'' => {
+                        TokenChar::Valid('\'')
+                    },
+                    '"' => TokenChar::Valid('"'),
                     _ => TokenChar::Ignore
                 }
 
@@ -397,7 +405,7 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_newlinews() {
+    fn test_tokens_newlinews() {
         assert_eq!(tfs("\n\r\n\n\r"), vec![
             tk!(Newline, 0, 1, "\n", "\n"),
             tk!(Newline, 1, 2, "\r", "\r"),
@@ -408,7 +416,7 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_name() {
+    fn test_tokens_name() {
         assert_eq!(tfs("INCLUDE"), vec![tk!(Name, 0, 7, "INCLUDE", "INCLUDE")]);
         assert_eq!(tfs("hl"), vec![tk!(Name, 0, 2, "hl", "hl")]);
         assert_eq!(tfs("a"), vec![tk!(Name, 0, 1, "a", "a")]);
@@ -419,7 +427,7 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_number_literal() {
+    fn test_tokens_number_literal() {
         assert_eq!(tfs("20_48"), vec![
             tk!(NumberLiteral, 0, 5, "20_48", "2048")
         ]);
@@ -442,28 +450,36 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_number_literal_hex_incomplete() {
-        assert_eq!(tfe("$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".");
+    fn test_tokens_number_literal_hex_incomplete() {
+        assert_eq!(tfe("$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
     }
 
     #[test]
-    fn text_tokens_string_literal() {
+    fn test_tokens_string_literal() {
         assert_eq!(tfs("'Hello World'"), vec![
             tk!(StringLiteral, 0, 13, "'Hello World'", "Hello World")
         ]);
         assert_eq!(tfs("\"Hello World\""), vec![
             tk!(StringLiteral, 0, 13, "\"Hello World\"", "Hello World")
         ]);
+        assert_eq!(tfs("'\"'"), vec![
+            tk!(StringLiteral, 0, 3, "'\"'", "\"")
+        ]);
+        assert_eq!(tfs("\"'\""), vec![
+            tk!(StringLiteral, 0, 3, "\"'\"", "'")
+        ]);
     }
 
     #[test]
-    fn text_tokens_string_literal_unclosed() {
-        assert_eq!(tfe("'Hello World").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.");
-        assert_eq!(tfe("\"Hello World").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.");
+    fn test_tokens_string_literal_unclosed() {
+        assert_eq!(tfe("'Hello World").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
+        assert_eq!(tfe("\"Hello World").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
+        assert_eq!(tfe("'''").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
+        assert_eq!(tfe("\"\"\"").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
     }
 
     #[test]
-    fn text_tokens_string_literal_escapes() {
+    fn test_tokens_string_literal_escapes() {
         assert_eq!(tfs("'\\n'"), vec![
             tk!(StringLiteral, 0, 4, "'\\n'", "\n")
         ]);
@@ -473,10 +489,16 @@ mod test {
         assert_eq!(tfs("'\\t'"), vec![
             tk!(StringLiteral, 0, 4, "'\\t'", "\t")
         ]);
+        assert_eq!(tfs("'\\''"), vec![
+            tk!(StringLiteral, 0, 4, "'\\\''", "'")
+        ]);
+        assert_eq!(tfs("\"\\\"\""), vec![
+            tk!(StringLiteral, 0, 4, "\"\\\"\"", "\"")
+        ]);
     }
 
     #[test]
-    fn text_tokens_string_punct() {
+    fn test_tokens_string_punct() {
         assert_eq!(tfs(","), vec![tk!(Comma, 0, 1, ",", ",")]);
         assert_eq!(tfs("."), vec![tk!(Point, 0, 1, ".", ".")]);
         assert_eq!(tfs(":"), vec![tk!(Colon, 0, 1, ":", ":")]);
@@ -505,7 +527,7 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_param_offset() {
+    fn test_tokens_param_offset() {
         assert_eq!(tfs("@param"), vec![tk!(Parameter, 0, 6, "@param", "param")]);
         assert_eq!(tfs("@param_foo"), vec![tk!(Parameter, 0, 10, "@param_foo", "param_foo")]);
         assert_eq!(tfs("@+4"), vec![tk!(Offset, 0, 3, "@+4", "+4")]);
@@ -513,12 +535,12 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_param_offset_incomplete() {
-        assert_eq!(tfe("@").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".");
+    fn test_tokens_param_offset_incomplete() {
+        assert_eq!(tfe("@").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here");
     }
 
     #[test]
-    fn text_tokens_comments() {
+    fn test_tokens_comments() {
         assert_eq!(tfs("2 ; A Comment"), vec![
             tk!(NumberLiteral, 0, 1, "2", "2"),
             tk!(Comment, 2, 13, "; A Comment", "; A Comment")
@@ -526,7 +548,7 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_multiline() {
+    fn test_tokens_multiline() {
         assert_eq!(tfs("a\n'Text'\n4"), vec![
             tk!(Name, 0, 1, "a", "a"),
             tk!(Newline, 1, 2, "\n", "\n"),
@@ -542,7 +564,7 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_group() {
+    fn test_tokens_group() {
         assert_eq!(tfs("``"), vec![
             LexerToken::TokenGroup(Vec::new())
         ]);
@@ -564,17 +586,17 @@ mod test {
     }
 
     #[test]
-    fn text_tokens_group_unclosed() {
-        assert_eq!(tfe("`a").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 3: Unclosed token group.");
-        assert_eq!(tfe("`a``a").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 6: Unclosed token group.");
-        assert_eq!(tfe("```").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed token group.");
+    fn test_tokens_group_unclosed() {
+        assert_eq!(tfe("`a").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
+        assert_eq!(tfe("`a``a").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
+        assert_eq!(tfe("```").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
     }
 
     #[test]
-    fn text_tokens_error_location() {
-        assert_eq!(tfe(" $").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".");
-        assert_eq!(tfe("\n$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".");
-        assert_eq!(tfe("\n\n$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".");
+    fn test_tokens_error_location() {
+        assert_eq!(tfe(" $").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".\n\n $\n ^--- Here");
+        assert_eq!(tfe("\n$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(tfe("\n\n$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
     }
 
 }
