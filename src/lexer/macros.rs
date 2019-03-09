@@ -16,7 +16,7 @@ pub enum MacroToken {
     NumberLiteral(InnerToken),
     StringLiteral(InnerToken),
     BinaryFile(InnerToken, Vec<u8>),
-    // BuiltinTransform(InnerToken, Vec<InnerToken>),
+    BuiltinCall(InnerToken, Vec<Vec<MacroToken>>),
     Comma(InnerToken),
     Point(InnerToken),
     Colon(InnerToken),
@@ -36,6 +36,13 @@ impl From<IncludeToken> for MacroToken {
             IncludeToken::NumberLiteral(inner) => MacroToken::NumberLiteral(inner),
             IncludeToken::StringLiteral(inner) => MacroToken::StringLiteral(inner),
             IncludeToken::BinaryFile(inner, bytes) => MacroToken::BinaryFile(inner, bytes),
+            IncludeToken::BuiltinCall(inner, args) => MacroToken::BuiltinCall(
+                inner,
+                args.into_iter().map(|tokens| {
+                    tokens.into_iter().map(MacroToken::from).collect()
+
+                }).collect()
+            ),
             IncludeToken::Comma(inner) => MacroToken::Comma(inner),
             IncludeToken::Point(inner) => MacroToken::Point(inner),
             IncludeToken::Colon(inner) => MacroToken::Colon(inner),
@@ -59,6 +66,7 @@ impl LexerToken for MacroToken {
             MacroToken::NumberLiteral(_) => TokenType::NumberLiteral,
             MacroToken::StringLiteral(_) => TokenType::StringLiteral,
             MacroToken::BinaryFile(_, _) => TokenType::BinaryFile,
+            MacroToken::BuiltinCall(_, _) => TokenType::BuiltinCall,
             MacroToken::Comma(_) => TokenType::Comma,
             MacroToken::Point(_) => TokenType::Point,
             MacroToken::Colon(_) => TokenType::Colon,
@@ -75,7 +83,7 @@ impl LexerToken for MacroToken {
     fn inner(&self) -> &InnerToken {
         match self {
             MacroToken::Name(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
-            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _)
+            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
                 &inner
@@ -86,7 +94,7 @@ impl LexerToken for MacroToken {
     fn into_inner(self) -> InnerToken {
         match self {
             MacroToken::Name(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
-            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _)
+            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
                 inner
@@ -182,13 +190,18 @@ impl MacroLexer {
             if token.is(TokenType::Name) && token.has_value("MACRO") {
 
                 // Grab name and argument tokens
-                // TODO check for re-definition and throw error
                 let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
+                // TODO check macro re-definition and throw error (both user and builtin)
+                // TODO Add support to LexerError to show a previously declared location based on
+                // another InnerToken
+
                 let arg_tokens = Self::parse_macro_def_arguments(&mut tokens)?;
 
                 // Collect Body Tokens
                 let mut body_tokens = Vec::new();
                 while !tokens.peek(TokenType::Name, Some("ENDMACRO")) {
+                    // TODO if token type is MACRO then raise error to prevent macro defs inside
+                    // other macros
                     body_tokens.push(tokens.get("while parsing macro body")?);
                 }
                 tokens.expect(TokenType::Name, Some("ENDMACRO"), "when parsing macro definition")?;
@@ -213,29 +226,70 @@ impl MacroLexer {
             let mut tokens = TokenIterator::new(tokens_without_macro_defs);
             while let Some(token) = tokens.next() {
                 if token.is(TokenType::Name) && tokens.peek(TokenType::OpenParen, None) {
-                    if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.value()) {
-                        let arg_tokens = Self::parse_macro_call_arguments(&mut tokens)?;
-                        // TODO check arguments lengths
-                        // TODO replace built-in macros with ValueTransforms(token, arguments)
-                        macro_calls.push(MacroCall {
-                            name: token.into_inner(),
-                            arguments: arg_tokens
-                        });
+                    let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.value()) {
+                        def
 
                     } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.value()) {
-                        let arg_tokens = Self::parse_macro_call_arguments(&mut tokens)?;
-                        // TODO check arguments lengths
-                        // TODO insert the expanded macro tokens into the out stream
-                        // TODO mark all expanded tokens as expanded
-                        // TODO replace all Parameters in the expanded tokens with copies of the matching arguments
-                        macro_calls.push(MacroCall {
-                            name: token.into_inner(),
-                            arguments: arg_tokens
-                        });
+                        def
 
                     } else {
                         return Err(token.error(format!("Invocation of undefined macro \"{}\"", token.value())));
-                        // TODO return error
+                    };
+
+                    let arg_tokens = Self::parse_macro_call_arguments(&mut tokens)?;
+                    if arg_tokens.len() != macro_def.arguments.len() {
+                        return Err(token.error(format!(
+                            "Incorrect number of parameters for invocation of macro \"{}\", expected {} parameter(s) but got {}",
+                            token.value(),
+                            macro_def.arguments.len(),
+                            arg_tokens.len()
+                        )));
+                    }
+
+                    // Add Macro Call
+                    macro_calls.push(MacroCall {
+                        name: token.clone().into_inner(),
+                        arguments: arg_tokens.clone()
+                    });
+
+                    // Replace builtin calls
+                    if macro_def.builtin {
+                        tokens_without_macro_calls.push(IncludeToken::BuiltinCall(
+                            token.into_inner(),
+                            arg_tokens.clone().into_iter().map(|tokens| {
+                                let mut expanded = Vec::new();
+                                for t in tokens {
+                                    // Expand token groups when calling builtin macros
+                                    // This allows us to have a "BYTESIZE" / "CYCLES" builtin
+                                    // macros
+                                    if let IncludeToken::TokenGroup(_, mut inner) = t {
+                                        expanded.append(&mut inner);
+
+                                    } else {
+                                        expanded.push(t);
+                                    }
+                                }
+                                expanded
+                            }).collect()
+                        ));
+
+                    // Expand user calls
+                    } else {
+                        let mut expanded = Vec::new();
+                        for token in macro_def.body.clone() {
+                            if token.is(TokenType::Parameter) {
+                                // TODO if a parameter name is not declared in the macro def raise an error
+                                // TODO expand all parameters inside the copied tokens with their
+                                // corresponding argument tokens
+                                // TODO flatten token groups from parameters
+                                // TODO append tokens
+
+                            } else {
+                                expanded.push(token);
+                            }
+                        }
+                        // TODO append to tokens_without_macro_calls
+                        expanded_macro_calls += 1;
                     }
 
                 } else {
@@ -269,7 +323,6 @@ impl MacroLexer {
         ))
 
     }
-
 
     fn get_macro_by_name<'a>(defs: &'a [MacroDefinition], name: &str) -> Option<&'a MacroDefinition> {
         for def in defs {
@@ -315,7 +368,7 @@ impl MacroLexer {
                 paren_depth -= 1;
             }
 
-            if tokens.peek(TokenType::Comma, None) {
+            if tokens.peek(TokenType::Comma, None) && paren_depth == 1 {
                 arg_tokens.push(next);
                 tokens.expect(TokenType::Comma, None, "")?;
                 arguments.push(mem::replace(&mut arg_tokens, Vec::new()));
@@ -339,6 +392,7 @@ impl MacroLexer {
             MacroDefinition::builtin("DBG", vec![]),
             MacroDefinition::builtin("ABS", vec!["value"]),
             MacroDefinition::builtin("MAX", vec!["a", "b"]),
+            MacroDefinition::builtin("STRUPR", vec!["str"]),
         ]
     }
 
@@ -484,7 +538,12 @@ mod test {
     #[test]
     fn test_macro_call_no_args() {
         let lexer = macro_lexer("DBG()");
-        assert!(lexer.tokens.is_empty());
+        assert_eq!(lexer.tokens, vec![
+           MacroToken::BuiltinCall(
+                itk!(0, 3, "DBG", "DBG"),
+                vec![]
+           )
+        ]);
         assert_eq!(lexer.macro_calls, vec![
             mcall!(itk!(0, 3, "DBG", "DBG"), vec![])
         ]);
@@ -493,7 +552,14 @@ mod test {
     #[test]
     fn test_macro_call_one_arg() {
         let lexer = macro_lexer("ABS(4)");
-        assert!(lexer.tokens.is_empty());
+        assert_eq!(lexer.tokens, vec![
+           MacroToken::BuiltinCall(
+                itk!(0, 3, "ABS", "ABS"),
+                vec![
+                    vec![mtk!(NumberLiteral, 4, 5, "4", "4")]
+                ]
+           )
+        ]);
         assert_eq!(lexer.macro_calls, vec![
             mcall!(itk!(0, 3, "ABS", "ABS"), vec![
                 vec![tk!(NumberLiteral, 4, 5, "4", "4")]
@@ -502,9 +568,41 @@ mod test {
     }
 
     #[test]
+    fn test_macro_call_unwrap_token_group_args() {
+        let lexer = macro_lexer("ABS(`a b`)");
+        assert_eq!(lexer.tokens, vec![
+           MacroToken::BuiltinCall(
+                itk!(0, 3, "ABS", "ABS"),
+                vec![
+                    vec![mtk!(Name, 5, 6, "a", "a"), mtk!(Name, 7, 8, "b", "b")]
+                ]
+           )
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "ABS", "ABS"), vec![
+                vec![IncludeToken::TokenGroup(
+                    itk!(4, 5, "`", "`"),
+                    vec![
+                        tk!(Name, 5, 6, "a", "a"),
+                        tk!(Name, 7, 8, "b", "b")
+                    ]
+                )]
+            ])
+        ]);
+    }
+
+    #[test]
     fn test_macro_call_multiple_args() {
         let lexer = macro_lexer("MAX(4, 2)");
-        assert!(lexer.tokens.is_empty());
+        assert_eq!(lexer.tokens, vec![
+           MacroToken::BuiltinCall(
+                itk!(0, 3, "MAX", "MAX"),
+                vec![
+                    vec![mtk!(NumberLiteral, 4, 5, "4", "4")],
+                    vec![mtk!(NumberLiteral, 7, 8, "2", "2")]
+                ]
+           )
+        ]);
         assert_eq!(lexer.macro_calls, vec![
             mcall!(itk!(0, 3, "MAX", "MAX"), vec![
                 vec![tk!(NumberLiteral, 4, 5, "4", "4")],
@@ -516,7 +614,45 @@ mod test {
     #[test]
     fn test_macro_call_expression_args() {
         let lexer = macro_lexer("MAX((4, 2) + (2 - 1), 2)");
-        assert!(lexer.tokens.is_empty());
+        assert_eq!(lexer.tokens, vec![
+           MacroToken::BuiltinCall(
+                itk!(0, 3, "MAX", "MAX"),
+                vec![
+                    vec![
+                        mtk!(OpenParen, 4, 5, "(", "("),
+                        mtk!(NumberLiteral, 5, 6, "4", "4"),
+                        mtk!(Comma, 6, 7, ",", ","),
+                        mtk!(NumberLiteral, 8, 9, "2", "2"),
+                        mtk!(CloseParen, 9, 10, ")", ")"),
+                        mtk!(Operator, 11, 12, "+", "+"),
+                        mtk!(OpenParen, 13, 14, "(", "("),
+                        mtk!(NumberLiteral, 14, 15, "2", "2"),
+                        mtk!(Operator, 16, 17, "-", "-"),
+                        mtk!(NumberLiteral, 18, 19, "1", "1"),
+                        mtk!(CloseParen, 19, 20, ")", ")"),
+                    ],
+                    vec![mtk!(NumberLiteral, 22, 23, "2", "2")]
+                ]
+           )
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "MAX", "MAX"), vec![
+                vec![
+                    tk!(OpenParen, 4, 5, "(", "("),
+                    tk!(NumberLiteral, 5, 6, "4", "4"),
+                    tk!(Comma, 6, 7, ",", ","),
+                    tk!(NumberLiteral, 8, 9, "2", "2"),
+                    tk!(CloseParen, 9, 10, ")", ")"),
+                    tk!(Operator, 11, 12, "+", "+"),
+                    tk!(OpenParen, 13, 14, "(", "("),
+                    tk!(NumberLiteral, 14, 15, "2", "2"),
+                    tk!(Operator, 16, 17, "-", "-"),
+                    tk!(NumberLiteral, 18, 19, "1", "1"),
+                    tk!(CloseParen, 19, 20, ")", ")"),
+                ],
+                vec![tk!(NumberLiteral, 22, 23, "2", "2")]
+            ])
+        ]);
     }
 
 }

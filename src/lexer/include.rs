@@ -10,16 +10,18 @@ use super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum IncludeToken {
     Newline(InnerToken),
     Name(InnerToken),
+    // TODO already parse Directives out here to avoid issues with macros
     Parameter(InnerToken),
     Offset(InnerToken),
     NumberLiteral(InnerToken),
     StringLiteral(InnerToken),
     TokenGroup(InnerToken, Vec<IncludeToken>),
     BinaryFile(InnerToken, Vec<u8>),
+    BuiltinCall(InnerToken, Vec<Vec<IncludeToken>>),
     Comma(InnerToken),
     Point(InnerToken),
     Colon(InnerToken),
@@ -42,6 +44,7 @@ impl LexerToken for IncludeToken {
             IncludeToken::StringLiteral(_) => TokenType::StringLiteral,
             IncludeToken::TokenGroup(_, _) => TokenType::TokenGroup,
             IncludeToken::BinaryFile(_, _) => TokenType::BinaryFile,
+            IncludeToken::BuiltinCall(_, _) => TokenType::BuiltinCall,
             IncludeToken::Comma(_) => TokenType::Comma,
             IncludeToken::Point(_) => TokenType::Point,
             IncludeToken::Colon(_) => TokenType::Colon,
@@ -57,7 +60,7 @@ impl LexerToken for IncludeToken {
     fn inner(&self) -> &InnerToken {
         match self {
             IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
-            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _)
+            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
                 &inner
@@ -68,7 +71,7 @@ impl LexerToken for IncludeToken {
     fn into_inner(self) -> InnerToken {
         match self {
             IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
-            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _)
+            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
                 inner

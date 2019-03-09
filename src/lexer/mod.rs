@@ -64,6 +64,7 @@ pub enum TokenType {
     StringLiteral,
     TokenGroup,
     BinaryFile,
+    BuiltinCall,
     Comma,
     Point,
     Colon,
