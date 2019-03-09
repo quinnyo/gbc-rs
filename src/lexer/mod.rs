@@ -8,6 +8,7 @@ use std::path::PathBuf;
 mod include;
 mod macros;
 mod token;
+#[cfg(test)] mod mocks;
 
 
 // Exports --------------------------------------------------------------------

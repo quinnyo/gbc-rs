@@ -29,7 +29,7 @@ impl TokenIterator {
             start: 0,
             current: '\0',
             input_exhausted: false,
-            chars: text.chars().into_iter().collect()
+            chars: text.chars().collect()
         }
     }
 
@@ -81,7 +81,7 @@ impl TokenIterator {
 
     pub fn peek(&mut self) -> Option<char> {
         let c = self.chars.get(self.index);
-        c.map(|c| *c)
+        c.cloned()
     }
 
     pub fn collect_single(&mut self) -> InnerToken {

@@ -6,12 +6,13 @@ use std::io::{Error as IOError, Read};
 
 
 // Modules --------------------------------------------------------------------
+mod compiler;
 mod lexer;
 mod traits;
 
 
 // Internal Dependencies ------------------------------------------------------
-use lexer::IncludeLexer;
+use compiler::Compiler;
 use traits::{FileError, FileReader};
 
 
@@ -30,14 +31,10 @@ fn main() {
         let reader = ProjectReader::new(main.clone());
         let main_file = PathBuf::from(main.file_name().unwrap());
 
-        // Create a new lexer
-        let mut lexer = IncludeLexer::new();
-
-        // TODO MacroLexer
-        match lexer.lex_file(&reader, &main_file) {
-            Ok(count) => println!("Parsed {} token(s)", count),
-            Err(err) => println!("{}", err)
+        if let Err(msg) = Compiler::compile(reader, main_file) {
+            eprintln!("{}", msg)
         }
+
     }
 }
 

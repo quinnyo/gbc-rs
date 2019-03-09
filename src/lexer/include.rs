@@ -75,31 +75,32 @@ impl<'a, T: FileReader> IncludeLexerState<'a, T> {
 
 // Include Level Lexer Implementation -----------------------------------------
 pub struct IncludeLexer {
-    files: Vec<LexerFile>,
-    tokens: Vec<IncludeToken>
+    pub files: Vec<LexerFile>,
+    pub tokens: Vec<IncludeToken>
 }
 
 impl IncludeLexer {
 
-    pub fn new() -> Self {
-        Self {
-            files: Vec::new(),
-            tokens: Vec::new()
-        }
-    }
-
-    pub fn lex_file<T: FileReader>(&mut self, file_reader: &T, child_path: &PathBuf) -> Result<usize, Box<dyn Error>>{
-        self.tokens = Self::lex_file_child(IncludeLexerState {
+    pub fn from_file<T: FileReader>(file_reader: &T, child_path: &PathBuf) -> Result<Self, Box<dyn Error>>{
+        let mut files = Vec::new();
+        let tokens = Self::include_child(IncludeLexerState {
             file_reader,
-            files: &mut self.files,
+            files: &mut files,
             parent_path: None,
             child_path,
             include_stack: Vec::new()
         })?;
-        Ok(self.tokens.len())
+        Ok(Self {
+            files,
+            tokens
+        })
     }
 
-    fn lex_file_child<T: FileReader>(state: IncludeLexerState<T>) -> Result<Vec<IncludeToken>, Box<dyn Error>>{
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    fn include_child<T: FileReader>(state: IncludeLexerState<T>) -> Result<Vec<IncludeToken>, Box<dyn Error>>{
 
         // Read in child file contents
         let (child_path, contents) = state.file_reader.read_file(state.parent_path, state.child_path)?;
@@ -137,7 +138,7 @@ impl IncludeLexer {
 
     ) -> Result<Vec<IncludeToken>, LexerError> {
 
-        let mut serialized = Vec::new();
+        let mut expanded = Vec::new();
 
         let mut tokens = tokens.into_iter();
         while let Some(token) = tokens.next() {
@@ -156,7 +157,7 @@ impl IncludeLexer {
                                 include_stack
                             };
 
-                            serialized.append(&mut Self::include_directive(
+                            expanded.append(&mut Self::include_directive(
                                 child_state,
                                 parent_file_index,
                                 token.start_index
@@ -176,7 +177,7 @@ impl IncludeLexer {
                                 child_path: &PathBuf::from(token.value.clone()),
                                 include_stack: state.include_stack.clone()
                             };
-                            serialized.push(Self::incbin_directive(
+                            expanded.push(Self::incbin_directive(
                                 child_state,
                                 token
                             )?);
@@ -186,15 +187,15 @@ impl IncludeLexer {
                     }
 
                 } else {
-                    serialized.push(token);
+                    expanded.push(token);
                 }
 
             } else {
-                serialized.push(token);
+                expanded.push(token);
             }
         }
 
-        Ok(serialized)
+        Ok(expanded)
 
     }
 
@@ -204,7 +205,7 @@ impl IncludeLexer {
         index: usize
 
     ) -> Result<Vec<IncludeToken>, LexerError> {
-        Self::lex_file_child(state).map_err(|err| {
+        Self::include_child(state).map_err(|err| {
             if let Some(err) = err.downcast_ref::<FileError>() {
                 LexerError {
                     file_index,
@@ -427,70 +428,9 @@ impl IncludeLexer {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-
     use std::path::PathBuf;
-    use std::collections::HashMap;
-    use std::error::Error;
-    use std::io::{Error as IOError, ErrorKind};
-    use super::{IncludeLexer, IncludeToken, InnerToken, FileReader, FileError};
-
-    #[derive(Default)]
-    struct MockFileReader {
-        base: PathBuf,
-        files: HashMap<PathBuf, String>,
-        binary_files: HashMap<PathBuf, Vec<u8>>
-    }
-
-    impl MockFileReader {
-        fn add_file<S: Into<String>>(&mut self, path: S, content: S) {
-            self.files.insert(PathBuf::from(path.into()), content.into());
-        }
-        fn add_binary_file<S: Into<String>>(&mut self, path: S, bytes: Vec<u8>) {
-            self.binary_files.insert(PathBuf::from(path.into()), bytes);
-        }
-    }
-
-    impl FileReader for MockFileReader {
-
-        fn read_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, String), FileError> {
-            let path = Self::resolve_path(&self.base, parent_path, child_path);
-            let contents = self.files.get(&path).map(|s| s.to_string()).ok_or_else(|| {
-                FileError {
-                    io: IOError::new(ErrorKind::NotFound, "No Mock file provided"),
-                    path: path.clone()
-                }
-            })?;
-            Ok((path, contents))
-        }
-
-        fn read_binary_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {
-            let path = Self::resolve_path(&self.base, parent_path, child_path);
-            let contents = self.binary_files.get(&path).map(|b| b.clone()).ok_or_else(|| {
-                FileError {
-                    io: IOError::new(ErrorKind::NotFound, "No Mock file provided"),
-                    path: path.clone()
-                }
-            })?;
-            Ok((path, contents))
-        }
-
-    }
-
-    fn tfs<S: Into<String>>(s: S) -> Vec<IncludeToken> {
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        let mut lexer = IncludeLexer::new();
-        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
-        assert_eq!(lexer.files.len(), 1);
-        lexer.tokens
-    }
-
-    fn tfe<S: Into<String>>(s: S) -> Result<usize, Box<dyn Error>> {
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        let mut lexer = IncludeLexer::new();
-        lexer.lex_file(&reader, &PathBuf::from("main.gb.s"))
-    }
+    use super::{IncludeLexer, IncludeToken, InnerToken};
+    use crate::lexer::mocks::{MockFileReader, tfs, tfe};
 
     macro_rules! tk {
         ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
@@ -525,8 +465,7 @@ mod test {
         reader.add_file("src/extra/bar.gb.s", "BAR");
         reader.add_file("src/abs.gb.s", "ABS");
 
-        let mut lexer = IncludeLexer::new();
-        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(1, NumberLiteral, 0, 2, "42", "42"),
             tkf!(0, Newline, 18, 19, "\n", "\n"),
@@ -547,8 +486,7 @@ mod test {
         reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
         reader.add_file("src/three.gb.s", "3");
 
-        let mut lexer = IncludeLexer::new();
-        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(0, NumberLiteral, 0, 1, "1", "1"),
             tkf!(0, Newline, 1, 2, "\n", "\n"),
@@ -568,8 +506,7 @@ mod test {
         reader.base = PathBuf::from("src");
         reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
 
-        let mut lexer = IncludeLexer::new();
-        let err = lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).unwrap_err();
+        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "LexerError: In file \"src/main.gb.s\" on line 2, column 9: File \"src/one.gb.s\" not found\n\nINCLUDE \'one.gb.s\'\n        ^--- Here");
 
     }
@@ -584,8 +521,7 @@ mod test {
         reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
         reader.add_file("src/three.gb.s", "@");
 
-        let mut lexer = IncludeLexer::new();
-        let err = lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).unwrap_err();
+        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "LexerError: In file \"src/three.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
@@ -605,8 +541,7 @@ mod test {
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
         reader.add_binary_file("src/second.bin", vec![42]);
 
-        let mut lexer = IncludeLexer::new();
-        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             IncludeToken::BinaryFile(itk!(7, 17, "'data.bin'", "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
             tkf!(0, Newline, 17, 18, "\n", "\n"),
@@ -621,9 +556,7 @@ mod test {
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
         reader.add_file("src/main.gb.s", "INCBIN 'data.bin'");
-
-        let mut lexer = IncludeLexer::new();
-        let err = lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).unwrap_err();
+        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "LexerError: In file \"src/main.gb.s\" on line 1, column 8: File \"src/data.bin\" not found\n\nINCBIN \'data.bin\'\n       ^--- Here");
 
     }
