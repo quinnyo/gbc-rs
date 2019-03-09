@@ -13,8 +13,14 @@ pub struct MacroLexer {
                 // flattening groups
             // TODO inserting the expanded macro tokens into the call site
 
-    // TODO now we no longer have
+    // TODO mark all inner tokens as being expanded
 
+}
+
+pub struct ValueLexer {
+    // TODO Parse Numbers
+    // TODO Combine Label Defs and Refs
+    // TODO Combine Operators
 }
 
 pub struct ExpressionLexer {

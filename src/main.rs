@@ -12,7 +12,7 @@ mod traits;
 
 // Internal Dependencies ------------------------------------------------------
 use lexer::IncludeLexer;
-use traits::FileReader;
+use traits::{FileError, FileReader};
 
 
 // CLI Interface --------------------------------------------------------------
@@ -47,6 +47,7 @@ struct ProjectReader {
 }
 
 impl ProjectReader {
+
     fn new(mut main: PathBuf) -> Self {
         let mut base = env::current_dir().unwrap();
         main.set_file_name("");
@@ -55,15 +56,26 @@ impl ProjectReader {
             base
         }
     }
+
+    fn read_file_inner(&self, full_path: &PathBuf) -> Result<(PathBuf, String), IOError> {
+        let mut file = File::open(full_path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        Ok((full_path.clone(), contents))
+    }
+
 }
 
 impl FileReader for ProjectReader {
-    fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), IOError> {
-        let full_path = Self::resolve_path(&self.base, parent, child);
-        let mut file = File::open(&full_path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        Ok((full_path, contents))
+    fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {
+        let path = Self::resolve_path(&self.base, parent, child);
+        self.read_file_inner(&path).map_err(|io| {
+            FileError {
+                io,
+                path
+            }
+        })
     }
+
 }
 

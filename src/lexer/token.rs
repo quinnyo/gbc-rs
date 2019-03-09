@@ -85,13 +85,13 @@ impl TokenIterator {
     }
 
     pub fn collect_single(&mut self) -> InnerToken {
-        InnerToken {
-            file_index: self.file_index,
-            start_index: self.index - 1,
-            end_index: self.index,
-            value: self.current.to_string(),
-            raw_value: self.current.to_string()
-        }
+        InnerToken::new(
+            self.file_index,
+            self.index - 1,
+            self.index,
+            self.current.to_string(),
+            self.current.to_string()
+        )
     }
 
     pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, LexerError> {
@@ -139,13 +139,13 @@ impl TokenIterator {
             self.input_exhausted = true;
         }
 
-        Ok(InnerToken {
-            file_index: self.file_index,
-            start_index: self.start,
+        Ok(InnerToken::new(
+            self.file_index,
+            self.start,
             end_index,
-            value: parsed.into_iter().collect(),
-            raw_value: raw.into_iter().collect()
-        })
+            raw.into_iter().collect(),
+            parsed.into_iter().collect()
+        ))
     }
 
 }

@@ -11,11 +11,16 @@ mod token;
 
 
 // Exports --------------------------------------------------------------------
-pub use self::include::Lexer as IncludeLexer;
+pub use self::include::IncludeLexer;
 pub use self::macros::MacroLexer;
 
 
 // Lexer Tokens ---------------------------------------------------------------
+pub trait LexerToken {
+    fn index(&self) -> (usize, usize);
+    fn error(&self, message: String) -> LexerError;
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct InnerToken {
     file_index: usize,
@@ -24,49 +29,24 @@ pub struct InnerToken {
     // Only used for error locations so we can trace back to the source code in macro expansions
     end_index: usize,
     raw_value: String,
-    value: String
+    value: String,
+    is_expanded: bool
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum LexerToken {
-    Newline(InnerToken),
-    Name(InnerToken),
-    Parameter(InnerToken),
-    Offset(InnerToken),
-    NumberLiteral(InnerToken),
-    StringLiteral(InnerToken),
-    TokenGroup(InnerToken, Vec<LexerToken>),
-    Comma(InnerToken),
-    Point(InnerToken),
-    Colon(InnerToken),
-    Operator(InnerToken),
-    Comment(InnerToken),
-    OpenParen(InnerToken),
-    CloseParen(InnerToken),
-    OpenBracket(InnerToken),
-    CloseBracket(InnerToken),
-}
-
-impl LexerToken {
-    fn index(&self) -> (usize, usize) {
-        match self {
-            LexerToken::Newline(inner) | LexerToken::Name(inner) | LexerToken::Parameter(inner) | LexerToken::Offset(inner) | LexerToken::NumberLiteral(inner)
-            | LexerToken::StringLiteral(inner) | LexerToken::TokenGroup(inner, _)
-            | LexerToken::Comma(inner) | LexerToken::Point(inner) | LexerToken::Colon(inner) | LexerToken::Operator(inner) | LexerToken::Comment(inner)
-            | LexerToken::OpenParen(inner) | LexerToken::CloseParen(inner) | LexerToken::OpenBracket(inner) | LexerToken::CloseBracket(inner) => {
-                (inner.file_index, inner.start_index)
-            }
-        }
-    }
-    fn error(&self, message: String) -> LexerError {
-        let (file_index, index) = self.index();
-        LexerError {
+impl InnerToken {
+    fn new(file_index: usize, start_index: usize, end_index: usize, raw_value: String, value: String) -> Self {
+        Self {
             file_index,
-            index,
-            message
+            start_index,
+            end_index,
+            raw_value,
+            value,
+            // TODO set in MacroLexer
+            is_expanded: false
         }
     }
 }
+
 
 // Lexer File Abstraction -----------------------------------------------------
 pub struct LexerFile {
@@ -173,5 +153,4 @@ impl fmt::Display for LexerError {
 }
 
 impl Error for LexerError {}
-
 
