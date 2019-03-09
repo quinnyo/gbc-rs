@@ -38,7 +38,6 @@ fn main() {
     }
 }
 
-
 // Helpers --------------------------------------------------------------------
 struct ProjectReader {
     base: PathBuf

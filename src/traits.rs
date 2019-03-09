@@ -15,7 +15,7 @@ pub trait FileReader {
             if let Some(parent) = parent {
                 let mut p = parent.clone();
                 p.set_file_name("");
-                full_path.push(p);
+                full_path.push(p.strip_prefix(base).unwrap());
             }
             full_path.push(child);
         }

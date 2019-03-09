@@ -1,6 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
 use std::error::Error;
+use std::io::Error as IOError;
 use std::path::PathBuf;
 
 
@@ -33,7 +34,7 @@ pub enum LexerToken {
     Offset(InnerToken),
     NumberLiteral(InnerToken),
     StringLiteral(InnerToken),
-    TokenGroup(Vec<LexerToken>),
+    TokenGroup(InnerToken, Vec<LexerToken>),
     Comma(InnerToken),
     Point(InnerToken),
     Colon(InnerToken),
@@ -43,6 +44,27 @@ pub enum LexerToken {
     CloseParen(InnerToken),
     OpenBracket(InnerToken),
     CloseBracket(InnerToken),
+}
+
+impl LexerToken {
+    fn index(&self) -> (usize, usize) {
+        match self {
+            LexerToken::Newline(inner) | LexerToken::Name(inner) | LexerToken::Parameter(inner) | LexerToken::Offset(inner) | LexerToken::NumberLiteral(inner)
+            | LexerToken::StringLiteral(inner) | LexerToken::TokenGroup(inner, _)
+            | LexerToken::Comma(inner) | LexerToken::Point(inner) | LexerToken::Colon(inner) | LexerToken::Operator(inner) | LexerToken::Comment(inner)
+            | LexerToken::OpenParen(inner) | LexerToken::CloseParen(inner) | LexerToken::OpenBracket(inner) | LexerToken::CloseBracket(inner) => {
+                (inner.file_index, inner.start_index)
+            }
+        }
+    }
+    fn error(&self, message: String) -> LexerError {
+        let (file_index, index) = self.index();
+        LexerError {
+            file_index,
+            index,
+            message
+        }
+    }
 }
 
 // Lexer File Abstraction -----------------------------------------------------
@@ -81,13 +103,16 @@ impl LexerFile {
         (line, col)
     }
 
-    fn error(&self, err: LexerError) -> LexerError {
-        let (line, col) = self.get_line_and_col(err.index);
-        let line_source = self.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
+    fn error(err: LexerError, files: &[LexerFile], include_files_stack: &[usize]) -> LexerError {
+        let file = &files[err.file_index];
+        let (line, col) = file.get_line_and_col(err.index);
+        let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
         let col_pointer = str::repeat(" ", col);
+
+        // TODO format include file list below error location
         let message = format!(
             "In file \"{}\" on line {}, column {}: {}\n\n{}\n{}^--- Here",
-            self.path.display(),
+            file.path.display(),
             line + 1,
             col + 1,
             err.message,
@@ -137,23 +162,136 @@ impl Lexer {
     }
 
     pub fn lex_file<T: FileReader>(&mut self, file_reader: &T, child_path: &PathBuf) -> Result<usize, Box<dyn Error>>{
-        self.lex_file_child(file_reader, None, child_path, 0)
+        Self::lex_file_child(
+            file_reader,
+            &mut self.files,
+            None,
+            child_path,
+            &mut self.tokens,
+            Vec::new()
+        )
         // TODO resolve includes directly in lexer
         // TODO show include paths in error
         // TODO expand macros in the initial parser
     }
 
-    fn lex_file_child<T: FileReader>(&mut self, file_reader: &T, parent_path: Option<&PathBuf>, child_path: &PathBuf, insert_at: usize) -> Result<usize, Box<dyn Error>>{
+    fn lex_file_child<T: FileReader>(
+        file_reader: &T,
+        files: &mut Vec<LexerFile>,
+        parent_path: Option<&PathBuf>,
+        child_path: &PathBuf,
+        tokens: &mut Vec<LexerToken>,
+        include_files_stack: Vec<usize>
+
+    ) -> Result<usize, Box<dyn Error>>{
+
+        // Read in file
         let (full_path, contents) = file_reader.read_file(parent_path, child_path)?;
-        let file = LexerFile::new(self.files.len(), contents, full_path);
-        let mut insert_tokens = Lexer::tokenize(&file, &file.contents).map_err(|err| {
-            file.error(err)
+        let new_parent_path = full_path.clone();
+
+        let file = LexerFile::new(files.len(), contents, full_path);
+        files.push(file);
+        let file = files.last().unwrap();
+
+        // Lex file tokens
+        let file_tokens = Lexer::tokenize(file, &file.contents).map_err(|err| {
+            LexerFile::error(err, files, &include_files_stack)
         })?;
-        let mut after_tokens = self.tokens.split_off(insert_at);
-        self.tokens.append(&mut insert_tokens);
-        self.tokens.append(&mut after_tokens);
-        self.files.push(file);
-        Ok(self.tokens.len())
+
+        // Resolve any includes in the tokenized file
+        let mut child_include_stack = include_files_stack.clone();
+        child_include_stack.push(file.index);
+
+        let mut file_tokens = Self::resolve_include_tokens(
+            file_reader,
+            files,
+            new_parent_path,
+            file.index,
+            file_tokens,
+            child_include_stack
+
+        ).map_err(|err| {
+            LexerFile::error(err, files, &include_files_stack)
+        })?;
+
+        // Append all tokens from the file and it's includes, and their includes etc.
+        tokens.append(&mut file_tokens);
+        Ok(tokens.len())
+
+    }
+
+    fn resolve_include_tokens<T: FileReader>(
+        file_reader: &T,
+        files: &mut Vec<LexerFile>,
+        parent_path: PathBuf,
+        parent_file_index: usize,
+        tokens: Vec<LexerToken>,
+        include_files_stack: Vec<usize>
+
+    ) -> Result<Vec<LexerToken>, LexerError> {
+        let mut serialized = Vec::new();
+        let mut tokens = tokens.into_iter();
+        while let Some(token) = tokens.next() {
+
+            // Find any INCLUDE directives
+            if let LexerToken::Name(ref name) = token {
+                if name.value == "INCLUDE" {
+                    match tokens.next() {
+                        Some(LexerToken::StringLiteral(path)) => {
+
+                            let token_index = path.start_index;
+                            let mut include_tokens = Vec::new();
+
+                            // Tokenize the included file
+                            Self::lex_file_child(
+                                file_reader,
+                                files,
+                                Some(&parent_path),
+                                &PathBuf::from(path.value),
+                                &mut include_tokens,
+                                include_files_stack.clone()
+
+                            ).map_err(|err| {
+                                if let Some(err) = err.downcast_ref::<IOError>() {
+                                    LexerError {
+                                        file_index: parent_file_index,
+                                        index: token_index,
+                                        message: err.description().to_string()
+                                    }
+
+                                } else if let Some(err) = err.downcast_ref::<LexerError>() {
+                                    LexerError {
+                                        file_index: err.file_index,
+                                        index: err.index,
+                                        message: err.message.clone()
+                                    }
+
+                                } else {
+                                    unreachable!();
+                                }
+                            })?;
+
+                            serialized.append(&mut include_tokens);
+
+                        },
+                        Some(other) => {
+                            return Err(other.error("Expected a StringLiteral instead.".to_string()));
+                        },
+                        None => {
+                            return Err(token.error("Expected a StringLiteral to follow.".to_string()));
+                        }
+                    }
+
+                } else {
+                    serialized.push(token);
+                }
+
+            } else {
+                serialized.push(token);
+            }
+
+        }
+        Ok(serialized)
     }
 
     fn tokenize(file: &LexerFile, text: &str) -> Result<Vec<LexerToken>, LexerError> {
@@ -244,11 +382,12 @@ impl Lexer {
                     return Ok(tokens);
 
                 } else {
+                    let index_token = iter.collect_single();
                     let group_start = iter.index();
                     let tokens = Self::collect_tokens(iter, true)?;
                     iter.assert_char('`', "Unclosed token group.".to_string())?;
                     iter.assert_index_changed(group_start, "Unclosed token group.".to_string())?;
-                    Some(LexerToken::TokenGroup(tokens))
+                    Some(LexerToken::TokenGroup(index_token, tokens))
                 },
                 // Operator
                 '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' => {
@@ -364,7 +503,7 @@ mod test {
     impl FileReader for MockFileReader {
         fn read_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, String), IOError> {
             let full_path = Self::resolve_path(&self.base, parent_path, child_path);
-            let contents = self.files.get(child_path).map(|s| s.to_string()).ok_or_else(|| {
+            let contents = self.files.get(&full_path).map(|s| s.to_string()).ok_or_else(|| {
                 IOError::new(ErrorKind::NotFound, "No Mock file provided")
             })?;
             Ok((full_path, contents))
@@ -399,9 +538,90 @@ mod test {
         }
     }
 
+    macro_rules! tkf {
+        ($file:expr, $tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
+            LexerToken::$tok(InnerToken {
+                file_index: $file,
+                start_index: $start,
+                end_index: $end,
+                raw_value: $raw.into(),
+                value: $parsed.into()
+            })
+        }
+    }
+
+    macro_rules! itk {
+        ($start:expr, $end:expr, $raw:expr, $parsed:expr) => {
+            InnerToken {
+                file_index: 0,
+                start_index: $start,
+                end_index: $end,
+                raw_value: $raw.into(),
+                value: $parsed.into()
+            }
+        }
+    }
+
     #[test]
     fn test_tokens_empty() {
         assert_eq!(tfs(""), vec![]);
+    }
+
+
+    #[test]
+    fn test_tokens_resolve_includes() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s'\nINCLUDE 'extra/bar.gb.s'\nINCLUDE '/abs.gb.s'");
+        reader.add_file("src/foo.gb.s", "42");
+        reader.add_file("src/extra/bar.gb.s", "BAR");
+        reader.add_file("src/abs.gb.s", "ABS");
+
+        let mut lexer = Lexer::new();
+        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        assert_eq!(lexer.tokens, vec![
+            tkf!(1, NumberLiteral, 0, 2, "42", "42"),
+            tkf!(0, Newline, 18, 19, "\n", "\n"),
+            tkf!(2, Name, 0, 3, "BAR", "BAR"),
+            tkf!(0, Newline, 43, 44, "\n", "\n"),
+            tkf!(3, Name, 0, 3, "ABS", "ABS"),
+        ]);
+
+    }
+
+    #[test]
+    fn test_tokens_resolve_nested_includes() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
+        reader.add_file("src/one.gb.s", "2\nINCLUDE 'extra/two.gb.s'\n4");
+        reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
+        reader.add_file("src/three.gb.s", "3");
+
+        let mut lexer = Lexer::new();
+        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        assert_eq!(lexer.tokens, vec![
+            tkf!(0, NumberLiteral, 0, 1, "1", "1"),
+            tkf!(0, Newline, 1, 2, "\n", "\n"),
+            tkf!(1, NumberLiteral, 0, 1, "2", "2"),
+            tkf!(1, Newline, 1, 2, "\n", "\n"),
+            tkf!(3, NumberLiteral, 0, 1, "3", "3"),
+            tkf!(1, Newline, 26, 27, "\n", "\n"),
+            tkf!(1, NumberLiteral, 27, 28, "4", "4"),
+        ]);
+
+    }
+
+    // TODO test errors in included files
+
+    // TODO test included file not found
+
+    #[test]
+    fn test_tokens_resolve_include_incomplete() {
+        assert_eq!(tfe("INCLUDE 4").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
+        assert_eq!(tfe("INCLUDE").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
     }
 
     #[test]
@@ -417,7 +637,7 @@ mod test {
 
     #[test]
     fn test_tokens_name() {
-        assert_eq!(tfs("INCLUDE"), vec![tk!(Name, 0, 7, "INCLUDE", "INCLUDE")]);
+        assert_eq!(tfs("INCLUDEX"), vec![tk!(Name, 0, 8, "INCLUDEX", "INCLUDEX")]);
         assert_eq!(tfs("hl"), vec![tk!(Name, 0, 2, "hl", "hl")]);
         assert_eq!(tfs("a"), vec![tk!(Name, 0, 1, "a", "a")]);
         assert_eq!(tfs("foo_bar"), vec![tk!(Name, 0, 7, "foo_bar", "foo_bar")]);
@@ -566,10 +786,10 @@ mod test {
     #[test]
     fn test_tokens_group() {
         assert_eq!(tfs("``"), vec![
-            LexerToken::TokenGroup(Vec::new())
+            LexerToken::TokenGroup(itk!(0, 1, "`", "`"), Vec::new())
         ]);
         assert_eq!(tfs("`a\n'Text'\n4`"), vec![
-            LexerToken::TokenGroup(vec![
+            LexerToken::TokenGroup(itk!(0, 1, "`", "`"), vec![
                 tk!(Name, 1, 2, "a", "a"),
                 tk!(Newline, 2, 3, "\n", "\n"),
                 tk!(StringLiteral, 3, 9, "'Text'", "Text"),
@@ -578,7 +798,7 @@ mod test {
             ])
         ]);
         assert_eq!(tfs("`\n\n`"), vec![
-            LexerToken::TokenGroup(vec![
+            LexerToken::TokenGroup(itk!(0, 1, "`", "`"), vec![
                 tk!(Newline, 1, 2, "\n", "\n"),
                 tk!(Newline, 2, 3, "\n", "\n"),
             ])
