@@ -16,7 +16,10 @@ impl Compiler {
         let include_lexer = IncludeLexer::from_file(&reader, &entry).map_err(|e| CompilerError::new("INCLUDE", e))?;
         let included_token_count = include_lexer.len();
         let macro_lexer = MacroLexer::try_from(include_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
-        println!("Included {} token(s), {} token(s) after macro expansions.", included_token_count, macro_lexer.len());
+        println!("Included {} token(s).", included_token_count);
+        println!("Found {} defined macro(s).", macro_lexer.macro_defs_count());
+        println!("Found {} macro call(s).", macro_lexer.macro_calls_count());
+        println!("{} token(s) after macro expansions.", macro_lexer.len());
         // TODO ValueLexer
         // TODO ExpressionLexer
         // TODO Parser
@@ -46,7 +49,7 @@ impl CompilerError {
 
 impl fmt::Display for CompilerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.source.description())
+        write!(f, "{}", self.source)
     }
 }
 

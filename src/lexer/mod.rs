@@ -14,12 +14,65 @@ mod token;
 // Exports --------------------------------------------------------------------
 pub use self::include::IncludeLexer;
 pub use self::macros::MacroLexer;
+pub use self::token::TokenIterator;
 
 
 // Lexer Tokens ---------------------------------------------------------------
 pub trait LexerToken {
-    fn index(&self) -> (usize, usize);
-    fn error(&self, message: String) -> LexerError;
+
+    fn typ(&self) -> TokenType;
+
+    fn inner(&self) -> &InnerToken;
+
+    fn error(&self, message: String) -> LexerError {
+        let (file_index, index) = self.index();
+        LexerError {
+            file_index,
+            index,
+            message
+        }
+    }
+
+    fn index(&self) -> (usize, usize) {
+        let inner = self.inner();
+        (inner.file_index, inner.start_index)
+    }
+
+    fn is(&self, typ: TokenType) -> bool {
+        self.typ() == typ
+    }
+
+    fn has_value(&self, value: &str) -> bool {
+        self.inner().value == value
+    }
+
+    fn value(&self) -> &str {
+        &self.inner().value
+    }
+
+    fn into_inner(self) -> InnerToken;
+
+}
+
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum TokenType {
+    Newline,
+    Name,
+    Parameter,
+    Offset,
+    NumberLiteral,
+    StringLiteral,
+    TokenGroup,
+    BinaryFile,
+    Comma,
+    Point,
+    Colon,
+    Operator,
+    Comment,
+    OpenParen,
+    CloseParen,
+    OpenBracket,
+    CloseBracket
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -53,18 +106,18 @@ impl InnerToken {
 pub struct LexerFile {
     index: usize,
     path: PathBuf,
-    prefix: String,
-    contents: String
+    contents: String,
+    include_stack: Vec<InnerToken>
 }
 
 impl LexerFile {
 
-    fn new(index: usize, contents: String, path: PathBuf) -> Self {
+    fn new(index: usize, contents: String, path: PathBuf, include_stack: Vec<InnerToken>) -> Self {
         Self {
             index,
             path,
-            prefix: format!("F{}#", index),
-            contents
+            contents,
+            include_stack
         }
     }
 
@@ -85,18 +138,7 @@ impl LexerFile {
         (line, col)
     }
 
-    fn error(
-        err: LexerError,
-        current_file_index: usize,
-        files: &[LexerFile],
-        include_stack: &[InnerToken]
-
-    ) -> LexerError {
-
-        // Only attach error location once in original source file
-        if current_file_index != err.file_index {
-            return err;
-        }
+    fn error(err: LexerError, files: &[LexerFile]) -> LexerError {
 
         let file = &files[err.file_index];
         let (line, col) = file.get_line_and_col(err.index);
@@ -104,8 +146,8 @@ impl LexerFile {
         let col_pointer = str::repeat(" ", col);
 
         // Build include stacktrace
-        let stack = if include_stack.len() > 1 {
-            format!("\n\n{}", include_stack.iter().rev().map(|token| {
+        let stack = if file.include_stack.len() > 0 {
+            format!("\n\n{}", file.include_stack.iter().rev().map(|token| {
                 let file = &files[token.file_index];
                 let (line, col) = file.get_line_and_col(token.start_index);
                 format!("included from file \"{}\" on line {}, column {}", file.path.display(), line + 1, col + 1)

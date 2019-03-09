@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::traits::{FileError, FileReader};
-use super::token::{TokenIterator, TokenChar};
-use super::{InnerToken, LexerError, LexerFile, LexerToken};
+use crate::traits::FileReader;
+use super::token::{TokenGenerator, TokenChar};
+use super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------
@@ -32,24 +32,50 @@ pub enum IncludeToken {
 }
 
 impl LexerToken for IncludeToken {
-    fn index(&self) -> (usize, usize) {
+    fn typ(&self) -> TokenType {
+        match self {
+            IncludeToken::Newline(_) => TokenType::Newline,
+            IncludeToken::Name(_) => TokenType::Name,
+            IncludeToken::Parameter(_) => TokenType::Parameter,
+            IncludeToken::Offset(_) => TokenType::Offset,
+            IncludeToken::NumberLiteral(_) => TokenType::NumberLiteral,
+            IncludeToken::StringLiteral(_) => TokenType::StringLiteral,
+            IncludeToken::TokenGroup(_, _) => TokenType::TokenGroup,
+            IncludeToken::BinaryFile(_, _) => TokenType::BinaryFile,
+            IncludeToken::Comma(_) => TokenType::Comma,
+            IncludeToken::Point(_) => TokenType::Point,
+            IncludeToken::Colon(_) => TokenType::Colon,
+            IncludeToken::Operator(_) => TokenType::Operator,
+            IncludeToken::Comment(_) => TokenType::Comment,
+            IncludeToken::OpenParen(_) => TokenType::OpenParen,
+            IncludeToken::CloseParen(_) => TokenType::CloseParen,
+            IncludeToken::OpenBracket(_) => TokenType::OpenBracket,
+            IncludeToken::CloseBracket(_) => TokenType::CloseBracket
+        }
+    }
+
+    fn inner(&self) -> &InnerToken {
         match self {
             IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
-                (inner.file_index, inner.start_index)
+                &inner
             }
         }
     }
-    fn error(&self, message: String) -> LexerError {
-        let (file_index, index) = self.index();
-        LexerError {
-            file_index,
-            index,
-            message
+
+    fn into_inner(self) -> InnerToken {
+        match self {
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _)
+            | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
+            | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
+                inner
+            }
         }
     }
+
 }
 
 
@@ -58,16 +84,14 @@ struct IncludeLexerState<'a, T: FileReader> {
     file_reader: &'a T,
     files: &'a mut Vec<LexerFile>,
     parent_path: Option<&'a PathBuf>,
-    child_path: &'a PathBuf,
-    include_stack: Vec<InnerToken>
+    child_path: &'a PathBuf
 }
 
 impl<'a, T: FileReader> IncludeLexerState<'a, T> {
 
-    fn split_off_child(mut self, parent_path: &'a PathBuf) -> (Self, Vec<InnerToken>) {
-        let include_stack = self.include_stack.clone();
+    fn split_off_child(mut self, parent_path: &'a PathBuf) -> Self {
         self.parent_path = Some(parent_path);
-        (self, include_stack)
+        self
     }
 
 }
@@ -82,14 +106,16 @@ pub struct IncludeLexer {
 impl IncludeLexer {
 
     pub fn from_file<T: FileReader>(file_reader: &T, child_path: &PathBuf) -> Result<Self, Box<dyn Error>>{
+
         let mut files = Vec::new();
         let tokens = Self::include_child(IncludeLexerState {
             file_reader,
             files: &mut files,
             parent_path: None,
-            child_path,
-            include_stack: Vec::new()
-        })?;
+            child_path
+
+        }, Vec::new(), 0, 0).map_err(|err| LexerFile::error(err, &files))?;
+
         Ok(Self {
             files,
             tokens
@@ -100,24 +126,32 @@ impl IncludeLexer {
         self.tokens.len()
     }
 
-    fn include_child<T: FileReader>(state: IncludeLexerState<T>) -> Result<Vec<IncludeToken>, Box<dyn Error>>{
+    fn include_child<T: FileReader>(
+        state: IncludeLexerState<T>,
+        include_stack: Vec<InnerToken>,
+        file_index: usize,
+        index: usize
+
+    ) -> Result<Vec<IncludeToken>, LexerError>{
 
         // Read in child file contents
-        let (child_path, contents) = state.file_reader.read_file(state.parent_path, state.child_path)?;
+        let (child_path, contents) = state.file_reader.read_file(state.parent_path, state.child_path).map_err(|err| {
+            LexerError {
+                file_index,
+                index,
+                message: format!("File \"{}\" not found", err.path.display())
+            }
+        })?;
 
         // Create new file abstraction
-        let file = LexerFile::new(state.files.len(), contents, child_path.clone());
-        let current_file_index = file.index;
-        state.files.push(file);
+        state.files.push(LexerFile::new(state.files.len(), contents, child_path.clone(), include_stack));
 
         // Create new lexer state for child file
-        let (mut state, include_stack) = state.split_off_child(&child_path);
+        let mut state = state.split_off_child(&child_path);
         let file = state.files.last().unwrap();
 
         // Lex child tokens
-        let child_tokens = Self::tokenize(file, &file.contents).map_err(|err| {
-            LexerFile::error(err, current_file_index, state.files, &state.include_stack)
-        })?;
+        let child_tokens = Self::tokenize(file, &file.contents)?;
 
         // Resolve any includes in the tokenized file
         Ok(Self::resolve_include_tokens(
@@ -125,9 +159,7 @@ impl IncludeLexer {
             child_tokens,
             &mut state,
 
-        ).map_err(|err| {
-            LexerFile::error(err, current_file_index, state.files, &include_stack)
-        })?)
+        )?)
 
     }
 
@@ -146,7 +178,7 @@ impl IncludeLexer {
                 if name.value == "INCLUDE" {
                     match tokens.next() {
                         Some(IncludeToken::StringLiteral(token)) => {
-                            let mut include_stack = state.include_stack.clone();
+                            let mut include_stack = state.files[parent_file_index].include_stack.clone();
                             include_stack.push(token.clone());
 
                             let child_state = IncludeLexerState {
@@ -154,13 +186,13 @@ impl IncludeLexer {
                                 files: state.files,
                                 parent_path: state.parent_path,
                                 child_path: &PathBuf::from(token.value.clone()),
-                                include_stack
                             };
 
                             expanded.append(&mut Self::include_directive(
                                 child_state,
                                 parent_file_index,
-                                token.start_index
+                                token.start_index,
+                                include_stack
                             )?);
                         },
                         Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
@@ -174,8 +206,7 @@ impl IncludeLexer {
                                 file_reader: state.file_reader,
                                 files: state.files,
                                 parent_path: state.parent_path,
-                                child_path: &PathBuf::from(token.value.clone()),
-                                include_stack: state.include_stack.clone()
+                                child_path: &PathBuf::from(token.value.clone())
                             };
                             expanded.push(Self::incbin_directive(
                                 child_state,
@@ -202,28 +233,11 @@ impl IncludeLexer {
     fn include_directive<T: FileReader>(
         state: IncludeLexerState<T>,
         file_index: usize,
-        index: usize
+        index: usize,
+        include_stack: Vec<InnerToken>
 
     ) -> Result<Vec<IncludeToken>, LexerError> {
-        Self::include_child(state).map_err(|err| {
-            if let Some(err) = err.downcast_ref::<FileError>() {
-                LexerError {
-                    file_index,
-                    index,
-                    message: format!("File \"{}\" not found", err.path.display())
-                }
-
-            } else if let Some(err) = err.downcast_ref::<LexerError>() {
-                LexerError {
-                    file_index: err.file_index,
-                    index: err.index,
-                    message: err.message.clone()
-                }
-
-            } else {
-                unreachable!();
-            }
-        })
+        Self::include_child(state, include_stack, file_index, index)
     }
 
     fn incbin_directive<T: FileReader>(
@@ -242,11 +256,11 @@ impl IncludeLexer {
     }
 
     fn tokenize(file: &LexerFile, text: &str) -> Result<Vec<IncludeToken>, LexerError> {
-        let mut iter = TokenIterator::new(&file, text);
+        let mut iter = TokenGenerator::new(&file, text);
         Self::collect_tokens(&mut iter, false)
     }
 
-    fn collect_tokens(iter: &mut TokenIterator, inside_token_group: bool) -> Result<Vec<IncludeToken>, LexerError> {
+    fn collect_tokens(iter: &mut TokenGenerator, inside_token_group: bool) -> Result<Vec<IncludeToken>, LexerError> {
         let mut tokens = Vec::new();
         while iter.peek().is_some() {
             let token = match iter.next() {
@@ -368,7 +382,7 @@ impl IncludeLexer {
         Ok(tokens)
     }
 
-    fn collect_inner_string(iter: &mut TokenIterator, delimeter: char) -> Result<InnerToken, LexerError> {
+    fn collect_inner_string(iter: &mut TokenGenerator, delimeter: char) -> Result<InnerToken, LexerError> {
         let t = iter.collect(false, |c, p| {
             // Ignore escape slashes
             if c == '\\' && p != '\\' {
@@ -398,7 +412,7 @@ impl IncludeLexer {
         Ok(t)
     }
 
-    fn collect_inner_name(iter: &mut TokenIterator, inclusive: bool) -> Result<InnerToken, LexerError> {
+    fn collect_inner_name(iter: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, LexerError> {
         Ok(iter.collect(inclusive, |c, _| {
             if let 'a'...'z' | 'A'...'Z' | '_' | '0'...'9' = c {
                 TokenChar::Valid(c)
@@ -409,7 +423,7 @@ impl IncludeLexer {
         })?)
     }
 
-    fn collect_number_literal(iter: &mut TokenIterator) -> Result<IncludeToken, LexerError> {
+    fn collect_number_literal(iter: &mut TokenGenerator) -> Result<IncludeToken, LexerError> {
         Ok(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
             if let '_' = c {
                 TokenChar::Ignore
@@ -523,6 +537,19 @@ mod test {
 
         let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "LexerError: In file \"src/three.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9");
+
+    }
+
+    #[test]
+    fn test_resolve_include_lexer_error() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
+        reader.add_file("src/one.gb.s", "@");
+
+        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
+        assert_eq!(err.to_string(), "LexerError: In file \"src/one.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
 
