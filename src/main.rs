@@ -11,7 +11,7 @@ mod traits;
 
 
 // Internal Dependencies ------------------------------------------------------
-use lexer::Lexer;
+use lexer::IncludeLexer;
 use traits::FileReader;
 
 
@@ -31,10 +31,13 @@ fn main() {
         let main_file = PathBuf::from(main.file_name().unwrap());
 
         // Create a new lexer
-        let mut lexer = Lexer::new();
-        let count = lexer.lex_file(&reader, &main_file).expect("Lexer failed");
-        println!("Parsed {} token(s)", count);
+        let mut lexer = IncludeLexer::new();
 
+        // TODO MacroLexer
+        match lexer.lex_file(&reader, &main_file) {
+            Ok(count) => println!("Parsed {} token(s)", count),
+            Err(err) => println!("{}", err)
+        }
     }
 }
 
