@@ -12,6 +12,7 @@ use super::include::IncludeToken;
 #[derive(Debug, Eq, PartialEq)]
 pub enum MacroToken {
     Name(InnerToken),
+    Reserved(InnerToken),
     Offset(InnerToken),
     NumberLiteral(InnerToken),
     StringLiteral(InnerToken),
@@ -32,6 +33,7 @@ impl From<IncludeToken> for MacroToken {
     fn from(token: IncludeToken) -> Self {
         match token {
             IncludeToken::Name(inner) => MacroToken::Name(inner),
+            IncludeToken::Reserved(inner) => MacroToken::Reserved(inner),
             IncludeToken::Offset(inner) => MacroToken::Offset(inner),
             IncludeToken::NumberLiteral(inner) => MacroToken::NumberLiteral(inner),
             IncludeToken::StringLiteral(inner) => MacroToken::StringLiteral(inner),
@@ -62,6 +64,7 @@ impl LexerToken for MacroToken {
     fn typ(&self) -> TokenType {
         match self {
             MacroToken::Name(_) => TokenType::Name,
+            MacroToken::Reserved(_) => TokenType::Reserved,
             MacroToken::Offset(_) => TokenType::Offset,
             MacroToken::NumberLiteral(_) => TokenType::NumberLiteral,
             MacroToken::StringLiteral(_) => TokenType::StringLiteral,
@@ -82,7 +85,7 @@ impl LexerToken for MacroToken {
 
     fn inner(&self) -> &InnerToken {
         match self {
-            MacroToken::Name(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
+            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
             | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
@@ -93,7 +96,7 @@ impl LexerToken for MacroToken {
 
     fn into_inner(self) -> InnerToken {
         match self {
-            MacroToken::Name(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
+            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
             | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
@@ -187,7 +190,7 @@ impl MacroLexer {
 
         // Extract Macro Definitions
         while let Some(token) = tokens.next() {
-            if token.is(TokenType::Name) && token.has_value("MACRO") {
+            if token.is(TokenType::Reserved) && token.has_value("MACRO") {
 
                 // Grab name and argument tokens
                 let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
@@ -199,12 +202,12 @@ impl MacroLexer {
 
                 // Collect Body Tokens
                 let mut body_tokens = Vec::new();
-                while !tokens.peek(TokenType::Name, Some("ENDMACRO")) {
+                while !tokens.peek(TokenType::Reserved, Some("ENDMACRO")) {
                     // TODO if token type is MACRO then raise error to prevent macro defs inside
                     // other macros
                     body_tokens.push(tokens.get("while parsing macro body")?);
                 }
-                tokens.expect(TokenType::Name, Some("ENDMACRO"), "when parsing macro definition")?;
+                tokens.expect(TokenType::Reserved, Some("ENDMACRO"), "when parsing macro definition")?;
 
                 // Add Macro Definition
                 user_macro_defs.push(MacroDefinition {

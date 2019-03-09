@@ -14,7 +14,7 @@ use super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 pub enum IncludeToken {
     Newline(InnerToken),
     Name(InnerToken),
-    // TODO already parse Directives out here to avoid issues with macros
+    Reserved(InnerToken),
     Parameter(InnerToken),
     Offset(InnerToken),
     NumberLiteral(InnerToken),
@@ -38,6 +38,7 @@ impl LexerToken for IncludeToken {
         match self {
             IncludeToken::Newline(_) => TokenType::Newline,
             IncludeToken::Name(_) => TokenType::Name,
+            IncludeToken::Reserved(_) => TokenType::Reserved,
             IncludeToken::Parameter(_) => TokenType::Parameter,
             IncludeToken::Offset(_) => TokenType::Offset,
             IncludeToken::NumberLiteral(_) => TokenType::NumberLiteral,
@@ -59,7 +60,7 @@ impl LexerToken for IncludeToken {
 
     fn inner(&self) -> &InnerToken {
         match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
@@ -70,7 +71,7 @@ impl LexerToken for IncludeToken {
 
     fn into_inner(self) -> InnerToken {
         match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
@@ -177,7 +178,7 @@ impl IncludeLexer {
 
         let mut tokens = tokens.into_iter();
         while let Some(token) = tokens.next() {
-            if let IncludeToken::Name(ref name) = token {
+            if let IncludeToken::Reserved(ref name) = token {
                 if name.value == "INCLUDE" {
                     match tokens.next() {
                         Some(IncludeToken::StringLiteral(token)) => {
@@ -271,7 +272,21 @@ impl IncludeLexer {
                 ' ' | '\t' => continue, // Ignore whitespace,
                 '\n' | '\r' => Some(IncludeToken::Newline(iter.collect_single())),
                 // Names
-                'a'...'z' | 'A'...'Z' | '_' => Some(IncludeToken::Name(Self::collect_inner_name(iter, true)?)),
+                'a'...'z' | 'A'...'Z' | '_' => {
+                    let name = Self::collect_inner_name(iter, true)?;
+                    match name.value.as_str() {
+                        "DB" | "DW" | "BW" | "DS" |
+                        "DS8" | "EQU" |
+                        "DS16" | "EQUS" | "BANK" |
+                        "MACRO" |
+                        "INCBIN" | "SECTION" | "INCLUDE" |
+                        "ENDMACRO" => {
+                            Some(IncludeToken::Reserved(name))
+                        },
+                        _ => Some(IncludeToken::Name(name))
+                    }
+
+                },
                 // Parameter / Offset
                 '@' => {
                     if let Some('+') | Some('-') = iter.peek() {
@@ -617,6 +632,22 @@ mod test {
         assert_eq!(tfs("_test"), vec![tk!(Name, 0, 5, "_test", "_test")]);
         assert_eq!(tfs("abcdefghijklmnopqrstuvwxyz"), vec![tk!(Name, 0, 26, "abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz")]);
         assert_eq!(tfs("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), vec![tk!(Name, 0, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]);
+    }
+
+    fn test_reserved() {
+        assert_eq!(tfs("DB"), vec![tk!(Name, 0, 2, "DB", "DB")]);
+        assert_eq!(tfs("DW"), vec![tk!(Name, 0, 2, "DW", "DW")]);
+        assert_eq!(tfs("BW"), vec![tk!(Name, 0, 2, "BW", "BW")]);
+        assert_eq!(tfs("DS8"), vec![tk!(Name, 0, 3, "DS8", "DS8")]);
+        assert_eq!(tfs("DS16"), vec![tk!(Name, 0, 4, "DS16", "DS16")]);
+        assert_eq!(tfs("EQU"), vec![tk!(Name, 0, 3, "EQU", "EQU")]);
+        assert_eq!(tfs("EQUS"), vec![tk!(Name, 0, 4, "EQUS", "EQUS")]);
+        assert_eq!(tfs("BANK"), vec![tk!(Name, 0, 4, "BANK", "BANK")]);
+        assert_eq!(tfs("MACRO"), vec![tk!(Name, 0, 5, "MACRO", "MACRO")]);
+        assert_eq!(tfs("INCBIN"), vec![tk!(Name, 0, 6, "INCBIN", "INCBIN")]);
+        assert_eq!(tfs("SECTION"), vec![tk!(Name, 0, 6, "SECTION", "SECTION")]);
+        assert_eq!(tfs("INCLUDE"), vec![tk!(Name, 0, 6, "INCLUDE", "INCLUDE")]);
+        assert_eq!(tfs("ENDMACRO"), vec![tk!(Name, 0, 7, "ENDMACRO", "ENDMACRO")]);
     }
 
     #[test]

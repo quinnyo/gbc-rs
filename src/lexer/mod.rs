@@ -58,6 +58,7 @@ pub trait LexerToken {
 pub enum TokenType {
     Newline,
     Name,
+    Reserved,
     Parameter,
     Offset,
     NumberLiteral,
