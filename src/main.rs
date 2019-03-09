@@ -64,6 +64,13 @@ impl ProjectReader {
         Ok((full_path.clone(), contents))
     }
 
+    fn read_binary_file_inner(&self, full_path: &PathBuf) -> Result<(PathBuf, Vec<u8>), IOError> {
+        let mut file = File::open(full_path)?;
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)?;
+        Ok((full_path.clone(), contents))
+    }
+
 }
 
 impl FileReader for ProjectReader {
@@ -77,5 +84,14 @@ impl FileReader for ProjectReader {
         })
     }
 
+    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {
+        let path = Self::resolve_path(&self.base, parent, child);
+        self.read_binary_file_inner(&path).map_err(|io| {
+            FileError {
+                io,
+                path
+            }
+        })
+    }
 }
 

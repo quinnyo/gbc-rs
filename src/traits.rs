@@ -21,7 +21,11 @@ impl fmt::Display for FileError {
 impl Error for FileError {}
 
 pub trait FileReader {
+
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError>;
+
+    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError>;
+
     fn resolve_path(base: &PathBuf, parent: Option<&PathBuf>, child: &PathBuf) -> PathBuf {
         let mut full_path = base.clone();
         if child.is_absolute() {
@@ -37,5 +41,6 @@ pub trait FileReader {
         }
         full_path
     }
+
 }
 

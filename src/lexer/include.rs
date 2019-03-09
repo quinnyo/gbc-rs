@@ -19,6 +19,7 @@ pub enum IncludeToken {
     NumberLiteral(InnerToken),
     StringLiteral(InnerToken),
     TokenGroup(InnerToken, Vec<IncludeToken>),
+    BinaryFile(InnerToken, Vec<u8>),
     Comma(InnerToken),
     Point(InnerToken),
     Colon(InnerToken),
@@ -34,7 +35,7 @@ impl LexerToken for IncludeToken {
     fn index(&self) -> (usize, usize) {
         match self {
             IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
-            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _)
+            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
                 (inner.file_index, inner.start_index)
@@ -165,6 +166,25 @@ impl IncludeLexer {
                         None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
                     }
 
+                } else if name.value == "INCBIN" {
+                    match tokens.next() {
+                        Some(IncludeToken::StringLiteral(token)) => {
+                            let child_state = IncludeLexerState {
+                                file_reader: state.file_reader,
+                                files: state.files,
+                                parent_path: state.parent_path,
+                                child_path: &PathBuf::from(token.value.clone()),
+                                include_stack: state.include_stack.clone()
+                            };
+                            serialized.push(Self::incbin_directive(
+                                child_state,
+                                token
+                            )?);
+                        },
+                        Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
+                        None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
+                    }
+
                 } else {
                     serialized.push(token);
                 }
@@ -203,6 +223,21 @@ impl IncludeLexer {
                 unreachable!();
             }
         })
+    }
+
+    fn incbin_directive<T: FileReader>(
+        state: IncludeLexerState<T>,
+        token: InnerToken
+
+    ) -> Result<IncludeToken, LexerError> {
+        let (_, bytes) = state.file_reader.read_binary_file(state.parent_path, state.child_path).map_err(|err| {
+            LexerError {
+                file_index: token.file_index,
+                index: token.start_index,
+                message: format!("File \"{}\" not found", err.path.display())
+            }
+        })?;
+        Ok(IncludeToken::BinaryFile(token, bytes))
     }
 
     fn tokenize(file: &LexerFile, text: &str) -> Result<Vec<IncludeToken>, LexerError> {
@@ -402,16 +437,21 @@ mod test {
     #[derive(Default)]
     struct MockFileReader {
         base: PathBuf,
-        files: HashMap<PathBuf, String>
+        files: HashMap<PathBuf, String>,
+        binary_files: HashMap<PathBuf, Vec<u8>>
     }
 
     impl MockFileReader {
         fn add_file<S: Into<String>>(&mut self, path: S, content: S) {
             self.files.insert(PathBuf::from(path.into()), content.into());
         }
+        fn add_binary_file<S: Into<String>>(&mut self, path: S, bytes: Vec<u8>) {
+            self.binary_files.insert(PathBuf::from(path.into()), bytes);
+        }
     }
 
     impl FileReader for MockFileReader {
+
         fn read_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, String), FileError> {
             let path = Self::resolve_path(&self.base, parent_path, child_path);
             let contents = self.files.get(&path).map(|s| s.to_string()).ok_or_else(|| {
@@ -422,6 +462,18 @@ mod test {
             })?;
             Ok((path, contents))
         }
+
+        fn read_binary_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {
+            let path = Self::resolve_path(&self.base, parent_path, child_path);
+            let contents = self.binary_files.get(&path).map(|b| b.clone()).ok_or_else(|| {
+                FileError {
+                    io: IOError::new(ErrorKind::NotFound, "No Mock file provided"),
+                    path: path.clone()
+                }
+            })?;
+            Ok((path, contents))
+        }
+
     }
 
     fn tfs<S: Into<String>>(s: S) -> Vec<IncludeToken> {
@@ -542,6 +594,44 @@ mod test {
     fn test_resolve_include_incomplete() {
         assert_eq!(tfe("INCLUDE 4").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
         assert_eq!(tfe("INCLUDE").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
+    }
+
+    #[test]
+    fn test_resolve_incbins() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_file("src/main.gb.s", "INCBIN 'data.bin'\nINCBIN 'second.bin'");
+        reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
+        reader.add_binary_file("src/second.bin", vec![42]);
+
+        let mut lexer = IncludeLexer::new();
+        lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        assert_eq!(lexer.tokens, vec![
+            IncludeToken::BinaryFile(itk!(7, 17, "'data.bin'", "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
+            tkf!(0, Newline, 17, 18, "\n", "\n"),
+            IncludeToken::BinaryFile(itk!(25, 37, "'second.bin'", "second.bin"), vec![42])
+        ]);
+
+    }
+
+    #[test]
+    fn test_resolve_nested_incbins_io_error() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_file("src/main.gb.s", "INCBIN 'data.bin'");
+
+        let mut lexer = IncludeLexer::new();
+        let err = lexer.lex_file(&reader, &PathBuf::from("main.gb.s")).unwrap_err();
+        assert_eq!(err.to_string(), "LexerError: In file \"src/main.gb.s\" on line 1, column 8: File \"src/data.bin\" not found\n\nINCBIN \'data.bin\'\n       ^--- Here");
+
+    }
+
+    #[test]
+    fn test_resolve_incbin_incomplete() {
+        assert_eq!(tfe("INCBIN 4").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 8: Expected a StringLiteral instead.\n\nINCBIN 4\n       ^--- Here");
+        assert_eq!(tfe("INCBIN").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCBIN\n^--- Here");
     }
 
     #[test]
