@@ -17,6 +17,7 @@ const MAX_EXPANSION_DEPTH: usize = 32;
 pub enum MacroToken {
     Name(InnerToken),
     Reserved(InnerToken),
+    Instruction(InnerToken),
     Offset(InnerToken),
     NumberLiteral(InnerToken),
     StringLiteral(InnerToken),
@@ -38,6 +39,7 @@ impl From<IncludeToken> for MacroToken {
         match token {
             IncludeToken::Name(inner) => MacroToken::Name(inner),
             IncludeToken::Reserved(inner) => MacroToken::Reserved(inner),
+            IncludeToken::Instruction(inner) => MacroToken::Instruction(inner),
             IncludeToken::Offset(inner) => MacroToken::Offset(inner),
             IncludeToken::NumberLiteral(inner) => MacroToken::NumberLiteral(inner),
             IncludeToken::StringLiteral(inner) => MacroToken::StringLiteral(inner),
@@ -72,6 +74,7 @@ impl LexerToken for MacroToken {
         match self {
             MacroToken::Name(_) => TokenType::Name,
             MacroToken::Reserved(_) => TokenType::Reserved,
+            MacroToken::Instruction(_) => TokenType::Instruction,
             MacroToken::Offset(_) => TokenType::Offset,
             MacroToken::NumberLiteral(_) => TokenType::NumberLiteral,
             MacroToken::StringLiteral(_) => TokenType::StringLiteral,
@@ -92,7 +95,7 @@ impl LexerToken for MacroToken {
 
     fn inner(&self) -> &InnerToken {
         match self {
-            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
+            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Instruction(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
             | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
@@ -103,7 +106,7 @@ impl LexerToken for MacroToken {
 
     fn inner_mut(&mut self) -> &mut InnerToken {
         match self {
-            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
+            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Instruction(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
             | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
@@ -114,7 +117,7 @@ impl LexerToken for MacroToken {
 
     fn into_inner(self) -> InnerToken {
         match self {
-            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
+            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Instruction(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
             | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
             | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
             | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
@@ -827,9 +830,9 @@ mod test {
     // TODO handle errors inside of macro expansions and show expanded macro in error message
     #[test]
     fn test_macro_user_call_no_args() {
-        let lexer = macro_lexer("FOO() MACRO FOO() ld 4 ENDMACRO");
+        let lexer = macro_lexer("FOO() MACRO FOO() op 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 18, 20, "ld", "ld", 0),
+            mtke!(Name, 18, 20, "op", "op", 0),
             mtke!(NumberLiteral, 21, 22, "4", "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
@@ -839,9 +842,9 @@ mod test {
 
     #[test]
     fn test_macro_user_call_one_arg() {
-        let lexer = macro_lexer("FOO(4) MACRO FOO(@a) ld @a ENDMACRO");
+        let lexer = macro_lexer("FOO(4) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 21, 23, "ld", "ld", 0),
+            mtke!(Name, 21, 23, "op", "op", 0),
             mtke!(NumberLiteral, 4, 5, "4", "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
@@ -878,9 +881,9 @@ mod test {
 
     #[test]
     fn test_macro_user_call_token_group_arg() {
-        let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) ld @a ENDMACRO");
+        let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 25, 27, "ld", "ld", 0),
+            mtke!(Name, 25, 27, "op", "op", 0),
             mtke!(Name, 5, 6, "a", "a", 0),
             mtke!(Name, 7, 8, "b", "b", 0),
         ]);
@@ -899,9 +902,9 @@ mod test {
 
     #[test]
     fn test_macro_user_call_multiple_args() {
-        let lexer = macro_lexer("FOO(4, 8) MACRO FOO(@a, @b) ld @b @a ENDMACRO");
+        let lexer = macro_lexer("FOO(4, 8) MACRO FOO(@a, @b) op @b @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 28, 30, "ld", "ld", 0),
+            mtke!(Name, 28, 30, "op", "op", 0),
             mtke!(NumberLiteral, 7, 8, "8", "8", 0),
             mtke!(NumberLiteral, 4, 5, "4", "4", 0),
         ]);

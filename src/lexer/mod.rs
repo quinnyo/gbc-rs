@@ -60,6 +60,7 @@ pub enum TokenType {
     Newline,
     Name,
     Reserved,
+    Instruction,
     Parameter,
     Offset,
     NumberLiteral,

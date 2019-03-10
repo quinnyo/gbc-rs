@@ -15,7 +15,7 @@ pub enum IncludeToken {
     Newline(InnerToken),
     Name(InnerToken),
     Reserved(InnerToken),
-    // TODO Instruction names
+    Instruction(InnerToken),
     Parameter(InnerToken),
     Offset(InnerToken),
     NumberLiteral(InnerToken),
@@ -40,6 +40,7 @@ impl LexerToken for IncludeToken {
             IncludeToken::Newline(_) => TokenType::Newline,
             IncludeToken::Name(_) => TokenType::Name,
             IncludeToken::Reserved(_) => TokenType::Reserved,
+            IncludeToken::Instruction(_) => TokenType::Instruction,
             IncludeToken::Parameter(_) => TokenType::Parameter,
             IncludeToken::Offset(_) => TokenType::Offset,
             IncludeToken::NumberLiteral(_) => TokenType::NumberLiteral,
@@ -61,7 +62,7 @@ impl LexerToken for IncludeToken {
 
     fn inner(&self) -> &InnerToken {
         match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Instruction(inner) |IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
@@ -72,7 +73,7 @@ impl LexerToken for IncludeToken {
 
     fn inner_mut(&mut self) -> &mut InnerToken {
         match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Instruction(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
@@ -83,7 +84,7 @@ impl LexerToken for IncludeToken {
 
     fn into_inner(self) -> InnerToken {
         match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Instruction(inner)| IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
@@ -295,6 +296,12 @@ impl IncludeLexer {
                         "ENDMACRO" => {
                             Some(IncludeToken::Reserved(name))
                         },
+                        "cp" | "di" | "ei" | "jp" | "jr" | "or" | "rl" | "rr" | "ld" |
+                        "adc" | "add" | "and" | "bit" | "ccf" | "cpl" | "daa" | "dec" | "inc" | "ldh" | "nop" | "pop" | "res" | "ret" | "rla" | "rlc" | "rra" | "rrc" | "rst" | "sbc" | "scf" | "set" | "sla" | "sra" | "srl" | "sub" | "xor" | "msg" | "brk" | "mul" | "div" |
+                        "incx" | "decx" | "addw" | "subw" | "ldxa" | "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "retx" | "swap" |
+                        "vsync" => {
+                            Some(IncludeToken::Instruction(name))
+                        },
                         _ => Some(IncludeToken::Name(name))
                     }
 
@@ -494,6 +501,16 @@ mod test {
         }
     }
 
+    macro_rules! token_types {
+        ($tok:ident, $id:expr) => {
+            assert_eq!(tfs($id), vec![tk!($tok, 0, $id.len(), $id, $id)]);
+        };
+        ($tok:ident, $id:expr, $($rest:expr), +) => {
+            token_types!($tok, $id);
+            token_types!($tok, $($rest),+)
+        }
+    }
+
     #[test]
     fn test_empty() {
         assert_eq!(tfs(""), vec![]);
@@ -646,20 +663,17 @@ mod test {
         assert_eq!(tfs("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), vec![tk!(Name, 0, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]);
     }
 
+    #[test]
     fn test_reserved() {
-        assert_eq!(tfs("DB"), vec![tk!(Name, 0, 2, "DB", "DB")]);
-        assert_eq!(tfs("DW"), vec![tk!(Name, 0, 2, "DW", "DW")]);
-        assert_eq!(tfs("BW"), vec![tk!(Name, 0, 2, "BW", "BW")]);
-        assert_eq!(tfs("DS8"), vec![tk!(Name, 0, 3, "DS8", "DS8")]);
-        assert_eq!(tfs("DS16"), vec![tk!(Name, 0, 4, "DS16", "DS16")]);
-        assert_eq!(tfs("EQU"), vec![tk!(Name, 0, 3, "EQU", "EQU")]);
-        assert_eq!(tfs("EQUS"), vec![tk!(Name, 0, 4, "EQUS", "EQUS")]);
-        assert_eq!(tfs("BANK"), vec![tk!(Name, 0, 4, "BANK", "BANK")]);
-        assert_eq!(tfs("MACRO"), vec![tk!(Name, 0, 5, "MACRO", "MACRO")]);
-        assert_eq!(tfs("INCBIN"), vec![tk!(Name, 0, 6, "INCBIN", "INCBIN")]);
-        assert_eq!(tfs("SECTION"), vec![tk!(Name, 0, 6, "SECTION", "SECTION")]);
-        assert_eq!(tfs("INCLUDE"), vec![tk!(Name, 0, 6, "INCLUDE", "INCLUDE")]);
-        assert_eq!(tfs("ENDMACRO"), vec![tk!(Name, 0, 7, "ENDMACRO", "ENDMACRO")]);
+        token_types!(Reserved, "DB", "DW", "BW", "DS8", "DS16", "EQU", "EQUS", "BANK", "MACRO", "SECTION", "ENDMACRO");
+    }
+
+    #[test]
+    fn test_instructions() {
+        token_types!(Instruction, "cp", "di", "ei", "jp", "jr", "or", "rl", "rr", "ld");
+        token_types!(Instruction, "adc", "add", "and", "bit", "ccf", "cpl", "daa", "dec", "inc", "ldh", "nop", "pop", "res", "ret", "rla", "rlc", "rra", "rrc", "rst", "sbc", "scf", "set", "sla", "sra", "srl", "sub", "xor", "msg", "brk", "mul", "div");
+        token_types!(Instruction, "incx", "decx", "addw", "subw", "ldxa", "halt", "push", "call", "reti", "ldhl", "rlca", "rrca", "stop", "retx", "swap");
+        token_types!(Instruction, "vsync");
     }
 
     #[test]
