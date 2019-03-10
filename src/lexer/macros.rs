@@ -675,6 +675,11 @@ mod test {
         ]);
     }
 
+    #[test]
+    fn test_strip_newlines() {
+        assert_eq!(tfm("\n\r"), vec![]);
+    }
+
     // Macro Definition -------------------------------------------------------
 
     // TODO handle macro definition errors
