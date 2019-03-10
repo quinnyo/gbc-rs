@@ -66,7 +66,7 @@ impl LexerToken for IncludeToken {
             | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
             | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
             | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
-                &inner
+                inner
             }
         }
     }
@@ -280,6 +280,7 @@ impl IncludeLexer {
                 'a'...'z' | 'A'...'Z' | '_' => {
                     let name = Self::collect_inner_name(iter, true)?;
                     match name.value.as_str() {
+                        // Split into Reserved Words
                         "DB" | "DW" | "BW" | "DS" |
                         "DS8" | "EQU" |
                         "DS16" | "EQUS" | "BANK" |
@@ -288,12 +289,14 @@ impl IncludeLexer {
                         "ENDMACRO" => {
                             Some(IncludeToken::Reserved(name))
                         },
+                        // Instructions
                         "cp" | "di" | "ei" | "jp" | "jr" | "or" | "rl" | "rr" | "ld" |
                         "adc" | "add" | "and" | "bit" | "ccf" | "cpl" | "daa" | "dec" | "inc" | "ldh" | "nop" | "pop" | "res" | "ret" | "rla" | "rlc" | "rra" | "rrc" | "rst" | "sbc" | "scf" | "set" | "sla" | "sra" | "srl" | "sub" | "xor" | "msg" | "brk" | "mul" | "div" |
                         "incx" | "decx" | "addw" | "subw" | "ldxa" | "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "retx" | "swap" |
                         "vsync" => {
                             Some(IncludeToken::Instruction(name))
                         },
+                        // All other names
                         _ => Some(IncludeToken::Name(name))
                     }
 
@@ -453,9 +456,18 @@ impl IncludeLexer {
     }
 
     fn collect_number_literal(iter: &mut TokenGenerator) -> Result<IncludeToken, LexerError> {
+        let mut float = false;
         Ok(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
             if let '_' = c {
                 TokenChar::Ignore
+
+            } else if let '.' = c {
+                if float {
+                    TokenChar::Invalid
+                } else {
+                    float = true;
+                    TokenChar::Valid(c)
+                }
 
             } else if let '0'...'9' = c {
                 TokenChar::Valid(c)
@@ -670,7 +682,6 @@ mod test {
 
     #[test]
     fn test_number_literal() {
-        // TODO parse floats
         assert_eq!(tfs("20_48"), vec![
             tk!(NumberLiteral, 0, 5, "20_48", "2048")
         ]);
@@ -689,6 +700,18 @@ mod test {
         assert_eq!(tfs("%1001_0020"), vec![
             tk!(NumberLiteral, 0, 8, "%1001_00", "%100100"),
             tk!(NumberLiteral, 8, 10, "20", "20")
+        ]);
+        assert_eq!(tfs("2.4"), vec![
+            tk!(NumberLiteral, 0, 3, "2.4", "2.4")
+        ]);
+        assert_eq!(tfs("2.4."), vec![
+            tk!(NumberLiteral, 0, 3, "2.4", "2.4"),
+            tk!(Point, 3, 4, ".", ".")
+        ]);
+        assert_eq!(tfs("2.4.1"), vec![
+            tk!(NumberLiteral, 0, 3, "2.4", "2.4"),
+            tk!(Point, 3, 4, ".", "."),
+            tk!(NumberLiteral, 4, 5, "1", "1"),
         ]);
     }
 

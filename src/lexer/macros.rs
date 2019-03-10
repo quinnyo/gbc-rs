@@ -216,11 +216,14 @@ impl MacroLexer {
         self.macro_calls.len()
     }
 
-    fn from_tokens(tokens: Vec<IncludeToken>, macro_calls: &mut Vec<MacroCall>) -> Result<(Vec<MacroDefinition>, Vec<MacroToken>), LexerError> {
+    fn from_tokens(
+        tokens: Vec<IncludeToken>,
+        macro_calls: &mut Vec<MacroCall>
+
+    ) -> Result<(Vec<MacroDefinition>, Vec<MacroToken>), LexerError> {
 
         let builtin_macro_defs = Self::builtin_macro_defs();
         let mut user_macro_defs = Vec::new();
-        //let mut macro_calls = Vec::new();
         let mut tokens_without_macro_defs = Vec::new();
 
         // Drop all newlines
@@ -413,10 +416,6 @@ impl MacroLexer {
         macro_call_id: usize
 
     ) -> Result<Vec<IncludeToken>, LexerError> {
-        // TODO When later errors happen should we show a "Error in file line... during expansion
-        // of marco from file ... line..." ?
-        // TODO The other lexers need to keep the MacroCalls as a reference and feed it into the
-        // LexerError
         let mut expanded = Vec::new();
         token.inner_mut().set_macro_call_id(macro_call_id);
         if token.is(TokenType::Parameter) {
