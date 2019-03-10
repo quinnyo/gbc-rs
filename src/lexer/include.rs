@@ -15,6 +15,7 @@ pub enum IncludeToken {
     Newline(InnerToken),
     Name(InnerToken),
     Reserved(InnerToken),
+    // TODO Instruction names
     Parameter(InnerToken),
     Offset(InnerToken),
     NumberLiteral(InnerToken),
@@ -550,7 +551,7 @@ mod test {
         reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
 
         let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "LexerError: In file \"src/main.gb.s\" on line 2, column 9: File \"src/one.gb.s\" not found\n\nINCLUDE \'one.gb.s\'\n        ^--- Here");
+        assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 2, column 9: File \"src/one.gb.s\" not found\n\nINCLUDE \'one.gb.s\'\n        ^--- Here");
 
     }
 
@@ -565,7 +566,7 @@ mod test {
         reader.add_file("src/three.gb.s", "@");
 
         let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "LexerError: In file \"src/three.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9");
+        assert_eq!(err.to_string(), "In file \"src/three.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
 
@@ -578,14 +579,14 @@ mod test {
         reader.add_file("src/one.gb.s", "@");
 
         let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "LexerError: In file \"src/one.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
+        assert_eq!(err.to_string(), "In file \"src/one.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
 
     #[test]
     fn test_resolve_include_incomplete() {
-        assert_eq!(tfe("INCLUDE 4").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
-        assert_eq!(tfe("INCLUDE").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
+        assert_eq!(tfe("INCLUDE 4").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
+        assert_eq!(tfe("INCLUDE").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
     }
 
     #[test]
@@ -613,14 +614,14 @@ mod test {
         reader.base = PathBuf::from("src");
         reader.add_file("src/main.gb.s", "INCBIN 'data.bin'");
         let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "LexerError: In file \"src/main.gb.s\" on line 1, column 8: File \"src/data.bin\" not found\n\nINCBIN \'data.bin\'\n       ^--- Here");
+        assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 1, column 8: File \"src/data.bin\" not found\n\nINCBIN \'data.bin\'\n       ^--- Here");
 
     }
 
     #[test]
     fn test_resolve_incbin_incomplete() {
-        assert_eq!(tfe("INCBIN 4").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 8: Expected a StringLiteral instead.\n\nINCBIN 4\n       ^--- Here");
-        assert_eq!(tfe("INCBIN").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCBIN\n^--- Here");
+        assert_eq!(tfe("INCBIN 4").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 8: Expected a StringLiteral instead.\n\nINCBIN 4\n       ^--- Here");
+        assert_eq!(tfe("INCBIN").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCBIN\n^--- Here");
     }
 
     #[test]
@@ -686,7 +687,7 @@ mod test {
 
     #[test]
     fn test_number_literal_hex_incomplete() {
-        assert_eq!(tfe("$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(tfe("$").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
     }
 
     #[test]
@@ -707,10 +708,10 @@ mod test {
 
     #[test]
     fn test_string_literal_unclosed() {
-        assert_eq!(tfe("'Hello World").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
-        assert_eq!(tfe("\"Hello World").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
-        assert_eq!(tfe("'''").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
-        assert_eq!(tfe("\"\"\"").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
+        assert_eq!(tfe("'Hello World").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
+        assert_eq!(tfe("\"Hello World").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
+        assert_eq!(tfe("'''").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
+        assert_eq!(tfe("\"\"\"").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
     }
 
     #[test]
@@ -771,7 +772,7 @@ mod test {
 
     #[test]
     fn test_param_offset_incomplete() {
-        assert_eq!(tfe("@").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here");
+        assert_eq!(tfe("@").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here");
     }
 
     #[test]
@@ -822,16 +823,16 @@ mod test {
 
     #[test]
     fn test_group_unclosed() {
-        assert_eq!(tfe("`a").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
-        assert_eq!(tfe("`a``a").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
-        assert_eq!(tfe("```").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
+        assert_eq!(tfe("`a").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
+        assert_eq!(tfe("`a``a").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
+        assert_eq!(tfe("```").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
     }
 
     #[test]
     fn test_error_location() {
-        assert_eq!(tfe(" $").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".\n\n $\n ^--- Here");
-        assert_eq!(tfe("\n$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
-        assert_eq!(tfe("\n\n$").unwrap_err().to_string(), "LexerError: In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(tfe(" $").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".\n\n $\n ^--- Here");
+        assert_eq!(tfe("\n$").unwrap_err().to_string(), "In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(tfe("\n\n$").unwrap_err().to_string(), "In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
     }
 
 }

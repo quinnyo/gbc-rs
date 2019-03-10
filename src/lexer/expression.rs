@@ -1,5 +1,5 @@
 pub struct ExpressionLexer {
-    // TODO 1. Combine all Expressions and replace their tokens with one new tokens
+    // TODO 1. Combine all Expressions and replace their tokens with one new Expression token
     // TODO 2. Start parsing the Tokens from start to end (instructions, directives)
     // TODO 3. Create sections slices and assign parsed entries to their section indicies
     // TODO 4. Calculate sizes of all entries

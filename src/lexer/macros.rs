@@ -854,6 +854,29 @@ mod test {
     }
 
     #[test]
+    fn test_macro_user_call_expression() {
+        let lexer = macro_lexer("FOO((4 + 2)) MACRO FOO(@a) @a ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(OpenParen, 4, 5, "(", "(", 0),
+            mtke!(NumberLiteral, 5, 6, "4", "4", 0),
+            mtke!(Operator, 7, 8, "+", "+", 0),
+            mtke!(NumberLiteral, 9, 10, "2", "2", 0),
+            mtke!(CloseParen, 10, 11, ")", ")", 0),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![
+                vec![
+                    tk!(OpenParen, 4, 5, "(", "("),
+                    tk!(NumberLiteral, 5, 6, "4", "4"),
+                    tk!(Operator, 7, 8, "+", "+"),
+                    tk!(NumberLiteral, 9, 10, "2", "2"),
+                    tk!(CloseParen, 10, 11, ")", ")"),
+                ]
+            ])
+        ]);
+    }
+
+    #[test]
     fn test_macro_user_call_token_group_arg() {
         let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) ld @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
@@ -942,7 +965,7 @@ mod test {
     fn test_macro_user_recursion_limit() {
         assert_eq!(
             macro_lexer_error("FOO() MACRO FOO() FOO() ENDMACRO"),
-            "LexerError: In file \"main.gb.s\" on line 1, column 19: Maximum recursion limit of 32 reached during expansion of macro \"FOO\"\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here"
+            "In file \"main.gb.s\" on line 1, column 19: Maximum recursion limit of 32 reached during expansion of macro \"FOO\"\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here"
         );
     }
 
