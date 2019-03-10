@@ -8,6 +8,10 @@ use super::{IncludeLexer, InnerToken, TokenIterator, LexerFile, LexerToken, Lexe
 use super::include::IncludeToken;
 
 
+// Statics --------------------------------------------------------------------
+const MAX_EXPANSION_DEPTH: usize = 32;
+
+
 // Include Specific Tokens ----------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
 pub enum MacroToken {
@@ -54,7 +58,10 @@ impl From<IncludeToken> for MacroToken {
             IncludeToken::CloseParen(inner) => MacroToken::CloseParen(inner),
             IncludeToken::OpenBracket(inner) => MacroToken::OpenBracket(inner),
             IncludeToken::CloseBracket(inner) => MacroToken::CloseBracket(inner),
-            _ => unreachable!()
+            token => {
+                println!("Token {:?} should not be passed through MacroLexer", token);
+                unreachable!()
+            }
         }
     }
 }
@@ -94,6 +101,17 @@ impl LexerToken for MacroToken {
         }
     }
 
+    fn inner_mut(&mut self) -> &mut InnerToken {
+        match self {
+            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
+            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
+            | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
+            | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
+                inner
+            }
+        }
+    }
+
     fn into_inner(self) -> InnerToken {
         match self {
             MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
@@ -110,20 +128,28 @@ impl LexerToken for MacroToken {
 
 // Macro Definitions ----------------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
+enum MacroArgumenType {
+    Any,
+    Tokens,
+    String,
+    Number
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct MacroDefinition {
     name: InnerToken,
-    arguments: Vec<InnerToken>,
+    arguments: Vec<(MacroArgumenType, InnerToken)>,
     // TODO when expanding set expanded to true for all body tokens
     body: Vec<IncludeToken>,
     builtin: bool
 }
 
 impl MacroDefinition {
-    fn builtin(name: &str, arguments: Vec<&str>) -> Self {
+    fn builtin(name: &str, arguments: Vec<(MacroArgumenType, &str)>) -> Self {
         Self {
             name: InnerToken::new(0, 0, 0, name.into(), name.into()),
-            arguments: arguments.into_iter().map(|name| {
-                InnerToken::new(0, 0, 0, format!("@{}", name), name.into())
+            arguments: arguments.into_iter().map(|(typ, name)| {
+                (typ, InnerToken::new(0, 0, 0, format!("@{}", name), name.into()))
 
             }).collect(),
             body: Vec::new(),
@@ -180,7 +206,7 @@ impl MacroLexer {
 
     fn from_tokens(tokens: Vec<IncludeToken>) -> Result<(Vec<MacroDefinition>, Vec<MacroCall>, Vec<MacroToken>), LexerError> {
 
-        let mut builtin_macro_defs = Self::builtin_macro_defs();
+        let builtin_macro_defs = Self::builtin_macro_defs();
         let mut user_macro_defs = Vec::new();
         let mut macro_calls = Vec::new();
         let mut tokens_without_macro_defs = Vec::new();
@@ -192,12 +218,12 @@ impl MacroLexer {
         while let Some(token) = tokens.next() {
             if token.is(TokenType::Reserved) && token.has_value("MACRO") {
 
-                // Grab name and argument tokens
-                let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
                 // TODO check macro re-definition and throw error (both user and builtin)
                 // TODO Add support to LexerError to show a previously declared location based on
                 // another InnerToken
+                let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
 
+                // TODO check for identical parameter names in definition
                 let arg_tokens = Self::parse_macro_def_arguments(&mut tokens)?;
 
                 // Collect Body Tokens
@@ -212,7 +238,7 @@ impl MacroLexer {
                 // Add Macro Definition
                 user_macro_defs.push(MacroDefinition {
                     name: name_token.into_inner(),
-                    arguments: arg_tokens.into_iter().map(|t| t.into_inner()).collect(),
+                    arguments: arg_tokens.into_iter().map(|t| (MacroArgumenType::Any, t.into_inner())).collect(),
                     body: body_tokens,
                     builtin: false
                 });
@@ -224,6 +250,8 @@ impl MacroLexer {
 
         // Recursively expand Macro Calls
         let mut tokens_without_macro_calls = Vec::new();
+        let mut expandsion_id = 0;
+        let mut expansion_depth = 0;
         loop {
             let mut expanded_macro_calls = 0;
             let mut tokens = TokenIterator::new(tokens_without_macro_defs);
@@ -272,7 +300,9 @@ impl MacroLexer {
                                         expanded.push(t);
                                     }
                                 }
-                                expanded
+                                // Filter out new lines
+                                expanded.into_iter().filter(|t| !t.is(TokenType::Newline)).collect()
+
                             }).collect()
                         ));
 
@@ -280,19 +310,15 @@ impl MacroLexer {
                     } else {
                         let mut expanded = Vec::new();
                         for token in macro_def.body.clone() {
-                            if token.is(TokenType::Parameter) {
-                                // TODO if a parameter name is not declared in the macro def raise an error
-                                // TODO expand all parameters inside the copied tokens with their
-                                // corresponding argument tokens
-                                // TODO flatten token groups from parameters
-                                // TODO append tokens
-
-                            } else {
-                                expanded.push(token);
-                            }
+                            // Recursively expand all body tokens
+                            expanded.append(&mut Self::expand_macro_token(&macro_def, &arg_tokens, token, expandsion_id)?);
                         }
-                        // TODO append to tokens_without_macro_calls
+                        tokens_without_macro_calls.append(
+                            // Filter out newlines
+                            &mut expanded.into_iter().filter(|t| !t.is(TokenType::Newline)).collect()
+                        );
                         expanded_macro_calls += 1;
+                        expandsion_id += 1;
                     }
 
                 } else {
@@ -301,21 +327,37 @@ impl MacroLexer {
             }
 
             if expanded_macro_calls > 0 {
+
                 // Try to expand any newly introduced calls from the current expansion
                 tokens_without_macro_defs = tokens_without_macro_calls.drain(0..).collect();
+                expansion_depth += 1;
+
+                if expansion_depth > MAX_EXPANSION_DEPTH {
+                    let last_macro_call = macro_calls.last().unwrap();
+                    return Err(last_macro_call.name.error(format!(
+                        "Maximum recursion limit of {} reached during expansion of macro \"{}\"",
+                        MAX_EXPANSION_DEPTH,
+                        last_macro_call.name.value
+                    )));
+                }
 
             } else {
                 break;
             }
         }
 
-        // TODO check for any left over parameter or token groups and error
-        for t in &tokens_without_macro_calls {
-            if t.is(TokenType::Parameter) {
-                // TODO return Err Unexpected Parameter outside of MacroDefinition
+        // Check for any left over parameter or token groups
+        for token in &tokens_without_macro_calls {
+            if token.is(TokenType::Parameter) {
+                return Err(token.error(format!(
+                    "Unexpected parameter \"{}\" outside of macro expansion",
+                    token.value()
+                )));
 
-            } else if t.is(TokenType::TokenGroup) {
-                // TODO return Err Unexpected TokenGroup outside of MacroCall
+            } else if token.is(TokenType::TokenGroup) {
+                return Err(token.error(format!(
+                    "Unexpected token group outside of macro expansion"
+                )));
             }
         }
 
@@ -325,6 +367,72 @@ impl MacroLexer {
             tokens_without_macro_calls.into_iter().map(MacroToken::from).collect()
         ))
 
+    }
+
+    fn expand_macro_token(
+        macro_def: &MacroDefinition,
+        arg_tokens: &[Vec<IncludeToken>],
+        mut token: IncludeToken,
+        expandsion_id: usize
+
+    ) -> Result<Vec<IncludeToken>, LexerError> {
+        let mut expanded = Vec::new();
+        token.inner_mut().set_expansion_id(expandsion_id);
+        if token.is(TokenType::Parameter) {
+            if let Some((index, _)) = Self::get_macro_def_param_by_name(&macro_def, token.value()) {
+
+                // Insert and expand the argument's tokens
+                let call_argument = arg_tokens[index].clone();
+                for mut token in call_argument {
+
+                    if let IncludeToken::TokenGroup(_, group) = token {
+                        for mut token in group {
+                            // TODO set source instead so LexerError can use it?
+                            token.inner_mut().set_expansion_id(expandsion_id);
+
+                            // Expand any inserted parameters or token groups
+                            expanded.append(&mut Self::expand_macro_token(
+                                &macro_def,
+                                &arg_tokens,
+                                token,
+                                expandsion_id
+                            )?);
+                        }
+
+                    } else {
+                        // TODO set source instead so LexerError can use it?
+                        token.inner_mut().set_expansion_id(expandsion_id);
+
+                        // Expand any inserted parameters or token groups
+                        expanded.append(&mut Self::expand_macro_token(
+                            &macro_def,
+                            &arg_tokens,
+                            token,
+                            expandsion_id
+                        )?);
+                    }
+                }
+
+            } else {
+                return Err(token.error(format!(
+                    "Unknown parameter in expansion of macro \"{}\", parameter is not part of the macro definition",
+                    token.value()
+                )));
+            }
+
+        } else {
+            expanded.push(token);
+        }
+        Ok(expanded)
+    }
+
+    fn get_macro_def_param_by_name<'a>(def: &'a MacroDefinition, name: &str) -> Option<(usize, &'a InnerToken)> {
+        for (index, (_, arg)) in def.arguments.iter().enumerate() {
+            if arg.value == name {
+                return Some((index, arg));
+            }
+        }
+        None
     }
 
     fn get_macro_by_name<'a>(defs: &'a [MacroDefinition], name: &str) -> Option<&'a MacroDefinition> {
@@ -392,10 +500,41 @@ impl MacroLexer {
 
     fn builtin_macro_defs() -> Vec<MacroDefinition> {
         vec![
+            // Noop
             MacroDefinition::builtin("DBG", vec![]),
-            MacroDefinition::builtin("ABS", vec!["value"]),
-            MacroDefinition::builtin("MAX", vec!["a", "b"]),
-            MacroDefinition::builtin("STRUPR", vec!["str"]),
+
+            // String Operations
+            MacroDefinition::builtin("STRUPR", vec![(MacroArgumenType::String, "text")]),
+            MacroDefinition::builtin("STRLWR", vec![(MacroArgumenType::String, "text")]),
+            MacroDefinition::builtin("STRSUB", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::Number, "index"), (MacroArgumenType::Number, "length")]),
+            MacroDefinition::builtin("STRIN", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "search")]),
+            MacroDefinition::builtin("STRPADR", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Number, "length")]),
+            MacroDefinition::builtin("STRPADL", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Number, "length")]),
+
+            // Geometry
+            MacroDefinition::builtin("SIN", vec![(MacroArgumenType::Number, "radians")]),
+            MacroDefinition::builtin("COS", vec![(MacroArgumenType::Number, "radians")]),
+            MacroDefinition::builtin("TAN", vec![(MacroArgumenType::Number, "radians")]),
+            MacroDefinition::builtin("ASIN", vec![(MacroArgumenType::Number, "radians")]),
+            MacroDefinition::builtin("ACOS", vec![(MacroArgumenType::Number, "radians")]),
+            MacroDefinition::builtin("ATAN", vec![(MacroArgumenType::Number, "radians")]),
+            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "y"), (MacroArgumenType::Number, "x")]),
+
+            // Math
+            MacroDefinition::builtin("LOG", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("EXP", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("FLOOR", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("CEIL", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("ROUND", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("SQRT", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("ABS", vec![(MacroArgumenType::Number, "value")]),
+            MacroDefinition::builtin("MAX", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")]),
+            MacroDefinition::builtin("MIN", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")]),
+            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "from"), (MacroArgumenType::Number, "to")]),
+
+            // Code
+            MacroDefinition::builtin("BYTESIZE", vec![(MacroArgumenType::Tokens, "tokens")]),
+            MacroDefinition::builtin("CYCLES", vec![(MacroArgumenType::Tokens, "tokens")]),
         ]
     }
 
@@ -405,11 +544,15 @@ impl MacroLexer {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use super::{MacroLexer, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken};
+    use super::{MacroLexer, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType};
     use crate::lexer::mocks::include_lex;
 
     fn macro_lexer<S: Into<String>>(s: S) -> MacroLexer {
         MacroLexer::try_from(include_lex(s)).expect("MacroLexer failed")
+    }
+
+    fn macro_lexer_error<S: Into<String>>(s: S) -> String {
+        MacroLexer::try_from(include_lex(s)).err().unwrap().to_string()
     }
 
     fn tfm<S: Into<String>>(s: S) -> Vec<MacroToken> {
@@ -442,6 +585,16 @@ mod test {
         }
     }
 
+    macro_rules! itke {
+        ($start:expr, $end:expr, $raw:expr, $parsed:expr, $id:expr) => {
+            {
+                let mut t = InnerToken::new(0, $start, $end, $raw.into(), $parsed.into());
+                t.set_expansion_id($id);
+                t
+            }
+        }
+    }
+
     macro_rules! tk {
         ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
             IncludeToken::$tok(itk!($start, $end, $raw, $parsed))
@@ -451,6 +604,16 @@ mod test {
     macro_rules! mtk {
         ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
             MacroToken::$tok(itk!($start, $end, $raw, $parsed))
+        }
+    }
+
+    macro_rules! mtke {
+        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr, $id:expr) => {
+            {
+                let mut t = itk!($start, $end, $raw, $parsed);
+                t.set_expansion_id($id);
+                MacroToken::$tok(t)
+            }
         }
     }
 
@@ -490,7 +653,7 @@ mod test {
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
             mdef!(itk!(6, 9, "FOO", "FOO"), vec![
-                itk!(10, 12, "@a", "a")
+                (MacroArgumenType::Any, itk!(10, 12, "@a", "a"))
 
             ], vec![])
         ]);
@@ -502,9 +665,9 @@ mod test {
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
             mdef!(itk!(6, 9, "FOO", "FOO"), vec![
-                itk!(10, 12, "@a", "a"),
-                itk!(14, 16, "@b", "b"),
-                itk!(18, 20, "@c", "c")
+                (MacroArgumenType::Any, itk!(10, 12, "@a", "a")),
+                (MacroArgumenType::Any, itk!(14, 16, "@b", "b")),
+                (MacroArgumenType::Any, itk!(18, 20, "@c", "c"))
 
             ], vec![])
         ]);
@@ -535,9 +698,9 @@ mod test {
         ]);
     }
 
-    // Macro Calls ------------------------------------------------------------
+    // Builtin Macro Calls ----------------------------------------------------
 
-    // TODO handle macro call errors
+    // TODO handle builtin macro call errors
     #[test]
     fn test_macro_call_no_args() {
         let lexer = macro_lexer("DBG()");
@@ -656,6 +819,131 @@ mod test {
                 vec![tk!(NumberLiteral, 22, 23, "2", "2")]
             ])
         ]);
+    }
+
+    // User Macro Calls -------------------------------------------------------
+
+    // TODO handle user macro call errors
+    // TODO handle errors inside of macro expansions and show expanded macro in error message
+    #[test]
+    fn test_macro_user_call_no_args() {
+        let lexer = macro_lexer("FOO() MACRO FOO() ld 4 ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(Name, 18, 20, "ld", "ld", 0),
+            mtke!(NumberLiteral, 21, 22, "4", "4", 0),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![])
+        ]);
+    }
+
+    #[test]
+    fn test_macro_user_call_one_arg() {
+        let lexer = macro_lexer("FOO(4) MACRO FOO(@a) ld @a ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(Name, 21, 23, "ld", "ld", 0),
+            mtke!(NumberLiteral, 4, 5, "4", "4", 0),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![
+                vec![
+                    tk!(NumberLiteral, 4, 5, "4", "4")
+                ]
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_macro_user_call_token_group_arg() {
+        let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) ld @a ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(Name, 25, 27, "ld", "ld", 0),
+            mtke!(Name, 5, 6, "a", "a", 0),
+            mtke!(Name, 7, 8, "b", "b", 0),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![
+                vec![IncludeToken::TokenGroup(
+                    itk!(4, 5, "`", "`"),
+                    vec![
+                        tk!(Name, 5, 6, "a", "a"),
+                        tk!(Name, 7, 8, "b", "b")
+                    ]
+                )]
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_macro_user_call_multiple_args() {
+        let lexer = macro_lexer("FOO(4, 8) MACRO FOO(@a, @b) ld @b @a ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(Name, 28, 30, "ld", "ld", 0),
+            mtke!(NumberLiteral, 7, 8, "8", "8", 0),
+            mtke!(NumberLiteral, 4, 5, "4", "4", 0),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![
+                vec![
+                    tk!(NumberLiteral, 4, 5, "4", "4")
+                ],
+                vec![
+                    tk!(NumberLiteral, 7, 8, "8", "8")
+                ]
+            ])
+        ]);
+    }
+
+    // TODO test recursive call errors
+    #[test]
+    fn test_macro_user_recursive() {
+        let lexer = macro_lexer("FOO() MACRO FOO() 4 BAR() ENDMACRO MACRO BAR() 8 ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(NumberLiteral, 18, 19, "4", "4", 0),
+            mtke!(NumberLiteral, 47, 48, "8", "8", 1),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![]),
+            mcall!(itke!(20, 23, "BAR", "BAR", 0), vec![])
+        ]);
+    }
+
+    #[test]
+    fn test_macro_user_recursive_token_group() {
+        let lexer = macro_lexer("FOO(`BAR()`) MACRO FOO(@a) 4 @a ENDMACRO MACRO BAR() 8 ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(NumberLiteral, 27, 28, "4", "4", 0),
+            mtke!(NumberLiteral, 53, 54, "8", "8", 1),
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+            mcall!(itk!(0, 3, "FOO", "FOO"), vec![
+                vec![IncludeToken::TokenGroup(
+                    itk!(4, 5, "`", "`"),
+                    vec![
+                        tk!(Name, 5, 8, "BAR", "BAR"),
+                        tk!(OpenParen, 8, 9, "(", "("),
+                        tk!(CloseParen, 9, 10, ")", ")")
+                    ]
+                )]
+            ]),
+            mcall!(itke!(5, 8, "BAR", "BAR", 0), vec![])
+        ]);
+    }
+
+    #[test]
+    fn test_macro_user_recursive_token_group_parameters() {
+        let lexer = macro_lexer("FOO(`@b`, `@c`, 4) MACRO FOO(@a, @b, @c) @a ENDMACRO");
+        assert_eq!(lexer.tokens, vec![
+            mtke!(NumberLiteral, 16, 17, "4", "4", 0),
+        ]);
+    }
+
+    #[test]
+    fn test_macro_user_recursion_limit() {
+        assert_eq!(
+            macro_lexer_error("FOO() MACRO FOO() FOO() ENDMACRO"),
+            "LexerError: In file \"main.gb.s\" on line 1, column 19: Maximum recursion limit of 32 reached during expansion of macro \"FOO\"\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here"
+        );
     }
 
 }

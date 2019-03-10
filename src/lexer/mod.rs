@@ -24,13 +24,16 @@ pub trait LexerToken {
 
     fn inner(&self) -> &InnerToken;
 
+    fn inner_mut(&mut self) -> &mut InnerToken;
+
+    fn into_inner(self) -> InnerToken;
+
+    // fn is_expanded(&self) -> bool {
+    //     self.inner().is_expanded
+    // }
+
     fn error(&self, message: String) -> LexerError {
-        let (file_index, index) = self.index();
-        LexerError {
-            file_index,
-            index,
-            message
-        }
+        self.inner().error(message)
     }
 
     fn index(&self) -> (usize, usize) {
@@ -49,8 +52,6 @@ pub trait LexerToken {
     fn value(&self) -> &str {
         &self.inner().value
     }
-
-    fn into_inner(self) -> InnerToken;
 
 }
 
@@ -86,7 +87,7 @@ pub struct InnerToken {
     end_index: usize,
     raw_value: String,
     value: String,
-    is_expanded: bool
+    expansion_id: Option<usize>
 }
 
 impl InnerToken {
@@ -97,10 +98,22 @@ impl InnerToken {
             end_index,
             raw_value,
             value,
-            // TODO set in MacroLexer
-            is_expanded: false
+            expansion_id: None
         }
     }
+
+    fn set_expansion_id(&mut self, id: usize) {
+        self.expansion_id = Some(id);
+    }
+
+    fn error(&self, message: String) -> LexerError {
+        LexerError {
+            file_index: self.file_index,
+            index: self.start_index,
+            message
+        }
+    }
+
 }
 
 

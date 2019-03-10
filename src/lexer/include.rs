@@ -69,6 +69,17 @@ impl LexerToken for IncludeToken {
         }
     }
 
+    fn inner_mut(&mut self) -> &mut InnerToken {
+        match self {
+            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
+            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
+            | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
+            | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
+                inner
+            }
+        }
+    }
+
     fn into_inner(self) -> InnerToken {
         match self {
             IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
