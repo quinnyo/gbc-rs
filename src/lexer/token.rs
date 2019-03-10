@@ -65,22 +65,22 @@ impl<T: LexerToken> TokenIterator<T> {
                     Err(token.error(format!("Unexpected token \"{:?}\" {}, expected a \"{:?}\" token instead.", token.typ(), message.into(), typ)))
                 }
             },
-            None => Err(LexerError {
-                file_index: self.file_index,
-                index: self.index,
-                message: format!("Unexpected end of input {}, expected a \"{:?}\" token instead.", message.into(), typ)
-            })
+            None => Err(LexerError::new(
+                self.file_index,
+                self.index,
+                format!("Unexpected end of input {}, expected a \"{:?}\" token instead.", message.into(), typ)
+            ))
         }
     }
 
     pub fn get<S: Into<String>>(&mut self, message: S) -> Result<T, LexerError> {
         match self.next() {
             Some(token) => Ok(token),
-            None => Err(LexerError {
-                file_index: self.file_index,
-                index: self.index,
-                message: format!("Unexpected end of input {}.", message.into())
-            })
+            None => Err(LexerError::new(
+                self.file_index,
+                self.index,
+                format!("Unexpected end of input {}.", message.into())
+            ))
         }
     }
 
@@ -123,11 +123,11 @@ impl TokenGenerator {
     }
 
     pub fn error(&self) -> LexerError {
-        LexerError {
-            file_index: self.file_index,
-            index: self.index - 1,
-            message: format!("Unexpected character \"{}\".", self.current)
-        }
+        LexerError::new(
+            self.file_index,
+            self.index - 1,
+            format!("Unexpected character \"{}\".", self.current)
+        )
     }
 
     pub fn index(&self) -> usize {
@@ -136,11 +136,11 @@ impl TokenGenerator {
 
     pub fn assert_char(&self, c: char, message: String) -> Result<(), LexerError> {
         if self.current != c || self.input_exhausted {
-            Err(LexerError {
-                file_index: self.file_index,
-                index: self.index,
+            Err(LexerError::new(
+                self.file_index,
+                self.index,
                 message
-            })
+            ))
 
         } else {
             Ok(())
@@ -149,11 +149,11 @@ impl TokenGenerator {
 
     pub fn assert_index_changed(&self, previous: usize, message: String) -> Result<(), LexerError> {
         if self.index == previous {
-            Err(LexerError {
-                file_index: self.file_index,
-                index: self.index,
+            Err(LexerError::new(
+                self.file_index,
+                self.index,
                 message
-            })
+            ))
 
         } else {
             Ok(())

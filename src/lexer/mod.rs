@@ -1,20 +1,22 @@
 // STD Dependencies -----------------------------------------------------------
-use std::fmt;
-use std::error::Error;
 use std::path::PathBuf;
 
 
 // Modules --------------------------------------------------------------------
+mod error;
 mod include;
 mod macros;
 mod token;
+mod value;
 #[cfg(test)] mod mocks;
 
 
 // Exports --------------------------------------------------------------------
 pub use self::include::IncludeLexer;
 pub use self::macros::MacroLexer;
+pub use self::value::ValueLexer;
 pub use self::token::TokenIterator;
+pub use self::error::LexerError;
 
 
 // Lexer Tokens ---------------------------------------------------------------
@@ -81,14 +83,14 @@ pub enum TokenType {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct InnerToken {
-    file_index: usize,
+    pub file_index: usize,
     // Only used for error locations so we can trace back to the source code in macro expansions
-    start_index: usize,
+    pub start_index: usize,
     // Only used for error locations so we can trace back to the source code in macro expansions
     end_index: usize,
     raw_value: String,
     value: String,
-    expansion_id: Option<usize>
+    pub macro_call_id: Option<usize>
 }
 
 impl InnerToken {
@@ -99,20 +101,21 @@ impl InnerToken {
             end_index,
             raw_value,
             value,
-            expansion_id: None
+            macro_call_id: None
         }
     }
 
-    fn set_expansion_id(&mut self, id: usize) {
-        self.expansion_id = Some(id);
+    fn set_macro_call_id(&mut self, id: usize) {
+        self.macro_call_id = Some(id);
     }
 
     fn error(&self, message: String) -> LexerError {
-        LexerError {
-            file_index: self.file_index,
-            index: self.start_index,
-            message
-        }
+        LexerError::with_macro_call_id(
+            self.file_index,
+            self.start_index,
+            message,
+            self.macro_call_id
+        )
     }
 
 }
@@ -154,62 +157,5 @@ impl LexerFile {
         (line, col)
     }
 
-    fn error(err: LexerError, files: &[LexerFile]) -> LexerError {
-
-        let file = &files[err.file_index];
-        let (line, col) = file.get_line_and_col(err.index);
-        let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
-        let col_pointer = str::repeat(" ", col);
-
-        // Build include stacktrace
-        let stack = if file.include_stack.len() > 0 {
-            format!("\n\n{}", file.include_stack.iter().rev().map(|token| {
-                let file = &files[token.file_index];
-                let (line, col) = file.get_line_and_col(token.start_index);
-                format!("included from file \"{}\" on line {}, column {}", file.path.display(), line + 1, col + 1)
-
-            }).collect::<Vec<String>>().join("\n"))
-
-        } else {
-            "".to_string()
-        };
-
-        // TODO show context lines?
-        let message = format!(
-            "In file \"{}\" on line {}, column {}: {}\n\n{}\n{}^--- Here{}",
-            file.path.display(),
-            line + 1,
-            col + 1,
-            err.message,
-            line_source,
-            col_pointer,
-            stack
-        );
-
-        LexerError {
-            file_index: err.file_index,
-            index: err.index,
-            message
-        }
-
-    }
-
 }
-
-
-// Lexer Error Abstraction -----------------------------------------------------
-#[derive(Debug)]
-pub struct LexerError {
-    file_index: usize,
-    index: usize,
-    message: String
-}
-
-impl fmt::Display for LexerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl Error for LexerError {}
 

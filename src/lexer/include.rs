@@ -131,7 +131,7 @@ impl IncludeLexer {
             parent_path: None,
             child_path
 
-        }, Vec::new(), 0, 0).map_err(|err| LexerFile::error(err, &files))?;
+        }, Vec::new(), 0, 0).map_err(|err| err.extend_with_location(&files))?;
 
         Ok(Self {
             files,
@@ -153,11 +153,7 @@ impl IncludeLexer {
 
         // Read in child file contents
         let (child_path, contents) = state.file_reader.read_file(state.parent_path, state.child_path).map_err(|err| {
-            LexerError {
-                file_index,
-                index,
-                message: format!("File \"{}\" not found", err.path.display())
-            }
+            LexerError::new(file_index, index, format!("File \"{}\" not found", err.path.display()))
         })?;
 
         // Create new file abstraction
@@ -263,11 +259,7 @@ impl IncludeLexer {
 
     ) -> Result<IncludeToken, LexerError> {
         let (_, bytes) = state.file_reader.read_binary_file(state.parent_path, state.child_path).map_err(|err| {
-            LexerError {
-                file_index: token.file_index,
-                index: token.start_index,
-                message: format!("File \"{}\" not found", err.path.display())
-            }
+            LexerError::new(token.file_index, token.start_index, format!("File \"{}\" not found", err.path.display()))
         })?;
         Ok(IncludeToken::BinaryFile(token, bytes))
     }
@@ -678,6 +670,7 @@ mod test {
 
     #[test]
     fn test_number_literal() {
+        // TODO parse floats
         assert_eq!(tfs("20_48"), vec![
             tk!(NumberLiteral, 0, 5, "20_48", "2048")
         ]);
