@@ -149,9 +149,19 @@ impl LexerToken for ValueToken {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Operator {
-    Less,
-    Greater,
-    Not,
+    ShiftRight,
+    ShiftLeft,
+    LogicalAnd,
+    LogicalOr,
+    Equals,
+    Unequals,
+    GreaterThanEqual,
+    LessThanEqual,
+    Pow,
+    DivInt,
+    LessThan,
+    GreaterThan,
+    LogicalNot,
     Plus,
     Minus,
     Mul,
@@ -190,6 +200,7 @@ impl ValueLexer {
     fn from_tokens(tokens: Vec<MacroToken>) -> Result<Vec<ValueToken>, LexerError> {
 
         let mut global_labels: HashSet<String> = HashSet::new();
+        let mut global_labels_names: Vec<String> = Vec::new();
         let mut local_labels: HashSet<String> = HashSet::new();
 
         let mut value_tokens = Vec::new();
@@ -218,22 +229,102 @@ impl ValueLexer {
                     }
                     ValueToken::BuiltinCall(inner, value_args)
                 },
-                MacroToken::Name(inner) => {
+                MacroToken::Name(mut inner) => {
                     if tokens.peek(TokenType::Colon, None) {
-                        tokens.expect(TokenType::Colon, None, "when parsing global label definition")?;
-                        if global_labels.contains(&inner.value) {
-                            // TODO error duplicate
-                            unimplemented!();
+                        let colon = tokens.expect(TokenType::Colon, None, "when parsing global label definition")?.into_inner();
+
+                        // Postfix labels created by macros calls so they are unique
+                        let name = if let Some(call_id) = inner.macro_call_id() {
+                            // TODO the old implementation did not correct global label jump targets
+                            // created by macros, can the new one somehow achieve this?
+                            format!("{}_from_macro_call_{}", inner.value, call_id)
 
                         } else {
-                            global_labels.insert(inner.value.clone());
+                            inner.value.to_string()
+                        };
+
+                        if global_labels.contains(&name) {
+                            // TODO add information about previous label definition / location
+                            return Err(inner.error(format!(
+                                "Duplicate definition of global label \"{}\".",
+                                name
+                            )));
+
+                        } else {
+                            global_labels.insert(name.clone());
+                            global_labels_names.push(name.clone());
                             local_labels.clear();
-                            // TODO GlobalLabelDef
-                            unimplemented!();
+
+                            inner.end_index = colon.end_index;
+                            ValueToken::GlobalLabelDef {
+                                inner,
+                                name
+                            }
                         }
 
                     } else {
                         ValueToken::Name(inner)
+                    }
+                },
+                MacroToken::Point(mut inner) => {
+
+                    // For local labels all kinds of names are allowed
+                    let name_token = if tokens.peek(TokenType::Instruction, None) {
+                        tokens.expect(TokenType::Instruction, None, "when parsing local label")?.into_inner()
+
+                    } else if tokens.peek(TokenType::Reserved, None) {
+                        tokens.expect(TokenType::Reserved, None, "when parsing local label")?.into_inner()
+
+                    } else {
+                        tokens.expect(TokenType::Name, None, "when parsing local label")?.into_inner()
+                    };
+
+                    // Postfix labels created by macros calls so they are unique
+                    let name = if let Some(call_id) = name_token.macro_call_id() {
+                        format!("{}_from_macro_call_{}", name_token.value, call_id)
+
+                    } else {
+                        name_token.value.to_string()
+                    };
+
+                    if tokens.peek(TokenType::Colon, None) {
+                        let colon = tokens.expect(TokenType::Colon, None, "when parsing local label definition")?.into_inner();
+                        if global_labels.is_empty() {
+                            return Err(inner.error(format!(
+                                "Unexpected definition of local label \"{}\" before any global label was defined.",
+                                name_token.value
+                            )));
+
+                        } else if local_labels.contains(&name) {
+                            // TODO add information about previous label definition / location
+                            return Err(inner.error(format!(
+                                "Duplicate definition of local label \"{}\", label was already defined under the current global label \"{}\".",
+                                name,
+                                global_labels_names.last().unwrap()
+                            )));
+
+                        } else {
+                            local_labels.insert(name.clone());
+
+                            inner.end_index = colon.end_index;
+                            ValueToken::LocalLabelDef {
+                                inner,
+                                name
+                            }
+                        }
+
+                    } else if global_labels.is_empty() {
+                        return Err(inner.error(format!(
+                            "Unexpected reference to local label \"{}\" before any global label was defined.",
+                            name_token.value
+                        )));
+
+                    } else {
+                        inner.end_index = name_token.end_index;
+                        ValueToken::LocalLabelRef {
+                            inner,
+                            name
+                        }
                     }
                 },
                 MacroToken::Offset(inner) => ValueToken::Offset {
@@ -268,43 +359,34 @@ impl ValueLexer {
                     value: inner.value.clone(),
                     inner
                 },
-                MacroToken::Point(_) => {
-                    let name_token = tokens.expect(TokenType::Name, None, "when parsing local label")?.into_inner();
-                    if tokens.peek(TokenType::Colon, None) {
-                        tokens.expect(TokenType::Colon, None, "when parsing local label definition")?;
-                        if local_labels.contains(&name_token.value) {
-                            // TODO error duplicate
-                            unimplemented!();
-
-                        } else {
-                            local_labels.insert(name_token.value.clone());
-                            // TODO LocalLabelDef
-                            unimplemented!();
-                        }
-
-                    } else if global_labels.is_empty() {
-                        // TODO error outside of any global label
-                        unimplemented!();
-
-                    } else {
-                        // TODO LocalLabelRef
-                        unimplemented!();
-                    }
-                },
                 MacroToken::Colon(inner) => {
                     return Err(inner.error(format!("Unexpected standalone \"{}\", expected a \"Name\" token to preceed it.", inner.value)))
                 },
-                MacroToken::Operator(inner) => {
-                    if tokens.peek(TokenType::Operator, None) {
+                MacroToken::Operator(mut inner) => {
+                    let typ = if tokens.peek(TokenType::Operator, None) {
                         let second = tokens.expect(TokenType::Operator, None, "when parsing operator")?.into_inner();
-                        // TODO Combine and match Operators Tokens into actual Operators
-                        unimplemented!();
+                        inner.end_index = second.end_index;
+                        match (inner.value.chars().next().unwrap(), second.value.chars().next().unwrap()) {
+                            ('>', '>') => Operator::ShiftRight,
+                            ('<', '<') => Operator::ShiftLeft,
+                            ('&', '&') => Operator::LogicalAnd,
+                            ('|', '|') => Operator::LogicalOr,
+                            ('=', '=') => Operator::Equals,
+                            ('!', '=') => Operator::Unequals,
+                            ('>', '=') => Operator::GreaterThanEqual,
+                            ('<', '=') => Operator::LessThanEqual,
+                            ('*', '*') => Operator::Pow,
+                            ('/', '/') => Operator::DivInt,
+                            _ => {
+                                return Err(inner.error(format!("Unknown operator \"{}{}\".", inner.value, second.value)));
+                            }
+                        }
 
                     } else {
-                        let typ = match inner.value.chars().next().unwrap() {
-                            '<' => Operator::Less,
-                            '>' => Operator::Greater,
-                            '!' => Operator::Not,
+                        match inner.value.chars().next().unwrap() {
+                            '<' => Operator::LessThan,
+                            '>' => Operator::GreaterThan,
+                            '!' => Operator::LogicalNot,
                             '+' => Operator::Plus,
                             '-' => Operator::Minus,
                             '*' => Operator::Mul,
@@ -315,11 +397,11 @@ impl ValueLexer {
                             '~' => Operator::BitNegate,
                             '^' => Operator::BitXor,
                             _ => unreachable!()
-                        };
-                        ValueToken::Operator {
-                            inner,
-                            typ
                         }
+                    };
+                    ValueToken::Operator {
+                        inner,
+                        typ
                     }
                 }
             };
@@ -348,7 +430,7 @@ impl ValueLexer {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
-    use super::{ValueLexer, ValueToken, InnerToken};
+    use super::{ValueLexer, ValueToken, InnerToken, Operator};
     use crate::lexer::mocks::macro_lex;
 
     fn value_lexer<S: Into<String>>(s: S) -> ValueLexer {
@@ -369,9 +451,28 @@ mod test {
         }
     }
 
+    macro_rules! itkm {
+        ($start:expr, $end:expr, $raw:expr, $parsed:expr, $id:expr) => {
+            {
+                let mut t = itk!($start, $end, $raw, $parsed);
+                t.set_macro_call_id($id);
+                t
+            }
+        }
+    }
+
     macro_rules! vtk {
         ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
             ValueToken::$tok(itk!($start, $end, $raw, $parsed))
+        }
+    }
+
+    macro_rules! vtko {
+        ($typ:path, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
+            ValueToken::Operator {
+                inner: itk!($start, $end, $raw, $parsed),
+                typ: $typ
+            }
         }
     }
 
@@ -476,78 +577,151 @@ mod test {
     #[test]
     fn test_global_label_def() {
         assert_eq!(tfv("global_label:"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 9, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label", "global_label"),
             name: "global_label".to_string()
         }]);
     }
 
     #[test]
     fn test_global_label_def_duplicate() {
-        assert_eq!(value_lexer_error("global_label:\nglobal_label:"), "");
+        assert_eq!(value_lexer_error("global_label:\nglobal_label:"), "In file \"main.gb.s\" on line 2, column 1: Duplicate definition of global label \"global_label\".\n\nglobal_label:\n^--- Here");
     }
 
     #[test]
     fn test_local_label_def() {
         assert_eq!(tfv("global_label:\n.local_label:\n.local_other_label:"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 9, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label", "global_label"),
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(0, 9, "local_label", "local_label"),
+            inner: itk!(14, 27, ".", "."),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(0, 9, "local_other_label", "local_other_label"),
+            inner: itk!(28, 47, ".", "."),
             name: "local_other_label".to_string()
+        }]);
+    }
+
+    #[test]
+    fn test_local_label_def_instruction() {
+        assert_eq!(tfv("global_label:\n.stop:"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label", "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::LocalLabelDef {
+            inner: itk!(14, 20, ".", "."),
+            name: "stop".to_string()
+        }]);
+    }
+
+    #[test]
+    fn test_local_label_def_reserved() {
+        assert_eq!(tfv("global_label:\n.DS:"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label", "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::LocalLabelDef {
+            inner: itk!(14, 18, ".", "."),
+            name: "DS".to_string()
         }]);
     }
 
     #[test]
     fn test_local_label_ref() {
-        assert_eq!(tfv(".local_label\n.local_other_label"), vec![ValueToken::LocalLabelRef {
-            inner: itk!(0, 9, "local_label", "local_label"),
+        assert_eq!(tfv("global_label:\n.local_label\n.local_other_label"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label", "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::LocalLabelRef {
+            inner: itk!(14, 26, ".", "."),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelRef {
-            inner: itk!(0, 9, "local_other_label", "local_other_label"),
+            inner: itk!(27, 45, ".", "."),
             name: "local_other_label".to_string()
         }]);
     }
 
     #[test]
+    fn test_label_macro_postfix() {
+        assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.local_macro_label_def:\n.local_macro_label_ref\nENDMACRO"), vec![
+            ValueToken::GlobalLabelDef {
+                inner: itkm!(24, 40, "macro_label_def", "macro_label_def", 0),
+                name: "macro_label_def_from_macro_call_0".to_string()
+            },
+            ValueToken::LocalLabelDef {
+                inner: itkm!(41, 64, ".", ".", 0),
+                name: "local_macro_label_def_from_macro_call_0".to_string()
+            },
+            ValueToken::LocalLabelRef {
+                inner: itkm!(65, 87, ".", ".", 0),
+                name: "local_macro_label_ref_from_macro_call_0".to_string()
+            },
+            ValueToken::GlobalLabelDef {
+                inner: itkm!(24, 40, "macro_label_def", "macro_label_def", 1),
+                name: "macro_label_def_from_macro_call_1".to_string()
+            },
+            ValueToken::LocalLabelDef {
+                inner: itkm!(41, 64, ".", ".", 1),
+                name: "local_macro_label_def_from_macro_call_1".to_string()
+            },
+            ValueToken::LocalLabelRef {
+                inner: itkm!(65, 87, ".", ".", 1),
+                name: "local_macro_label_ref_from_macro_call_1".to_string()
+            }
+        ]);
+    }
+
+    #[test]
     fn test_error_local_label_def_outside_global() {
-        assert_eq!(value_lexer_error(".local:"), "");
+        assert_eq!(value_lexer_error(".local_label:"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of local label \"local_label\" before any global label was defined.\n\n.local_label:\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_local_label_ref_outside_global() {
+        assert_eq!(value_lexer_error(".local_label"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reference to local label \"local_label\" before any global label was defined.\n\n.local_label\n^--- Here");
     }
 
     #[test]
     fn test_error_local_label_def_duplicate() {
-        assert_eq!(value_lexer_error("global_label:\n.local_label:\n.local_label:"), "");
+        assert_eq!(value_lexer_error("global_label:\n.local_label:\n.local_label:"), "In file \"main.gb.s\" on line 3, column 1: Duplicate definition of local label \"local_label\", label was already defined under the current global label \"global_label\".\n\n.local_label:\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_local_label_def() {
+        assert_eq!(value_lexer_error(".4"), "In file \"main.gb.s\" on line 1, column 2: Unexpected token \"NumberLiteral\" when parsing local label, expected a \"Name\" token instead.\n\n.4\n ^--- Here");
     }
 
     #[test]
     fn test_operators() {
-        assert_eq!(tfv(">>"), vec![]);
-        assert_eq!(tfv("<<"), vec![]);
-        assert_eq!(tfv("&&"), vec![]);
-        assert_eq!(tfv("||"), vec![]);
-        assert_eq!(tfv("=="), vec![]);
-        assert_eq!(tfv("!="), vec![]);
-        assert_eq!(tfv(">="), vec![]);
-        assert_eq!(tfv("<="), vec![]);
-        assert_eq!(tfv("**"), vec![]);
-        assert_eq!(tfv("//"), vec![]);
-        assert_eq!(tfv("<"), vec![]);
-        assert_eq!(tfv(">"), vec![]);
-        assert_eq!(tfv("!"), vec![]);
-        assert_eq!(tfv("+"), vec![]);
-        assert_eq!(tfv("-"), vec![]);
-        assert_eq!(tfv("*"), vec![]);
-        assert_eq!(tfv("/"), vec![]);
-        assert_eq!(tfv("%"), vec![]);
-        assert_eq!(tfv("&"), vec![]);
-        assert_eq!(tfv("|"), vec![]);
-        assert_eq!(tfv("~"), vec![]);
-        assert_eq!(tfv("^"), vec![]);
+        assert_eq!(tfv(">>"), vec![vtko!(Operator::ShiftRight, 0, 2, ">", ">")]);
+        assert_eq!(tfv("<<"), vec![vtko!(Operator::ShiftLeft, 0, 2, "<", "<")]);
+        assert_eq!(tfv("&&"), vec![vtko!(Operator::LogicalAnd, 0, 2, "&", "&")]);
+        assert_eq!(tfv("||"), vec![vtko!(Operator::LogicalOr, 0, 2, "|", "|")]);
+        assert_eq!(tfv("=="), vec![vtko!(Operator::Equals, 0, 2, "=", "=")]);
+        assert_eq!(tfv("!="), vec![vtko!(Operator::Unequals, 0, 2, "!", "!")]);
+        assert_eq!(tfv(">="), vec![vtko!(Operator::GreaterThanEqual, 0, 2, ">", ">")]);
+        assert_eq!(tfv("<="), vec![vtko!(Operator::LessThanEqual, 0, 2, "<", "<")]);
+        assert_eq!(tfv("**"), vec![vtko!(Operator::Pow, 0, 2, "*", "*")]);
+        assert_eq!(tfv("//"), vec![vtko!(Operator::DivInt, 0, 2, "/", "/")]);
+        assert_eq!(tfv("<"), vec![vtko!(Operator::LessThan, 0, 1, "<", "<")]);
+        assert_eq!(tfv(">"), vec![vtko!(Operator::GreaterThan, 0, 1, ">", ">")]);
+        assert_eq!(tfv("!"), vec![vtko!(Operator::LogicalNot, 0, 1, "!", "!")]);
+        assert_eq!(tfv("+"), vec![vtko!(Operator::Plus, 0, 1, "+", "+")]);
+        assert_eq!(tfv("-"), vec![vtko!(Operator::Minus, 0, 1, "-", "-")]);
+        assert_eq!(tfv("*"), vec![vtko!(Operator::Mul, 0, 1, "*", "*")]);
+        assert_eq!(tfv("/"), vec![vtko!(Operator::Div, 0, 1, "/", "/")]);
+        assert_eq!(tfv("%"), vec![vtko!(Operator::Modulo, 0, 1, "%", "%")]);
+        assert_eq!(tfv("&"), vec![vtko!(Operator::BitAnd, 0, 1, "&", "&")]);
+        assert_eq!(tfv("|"), vec![vtko!(Operator::BitOr, 0, 1, "|", "|")]);
+        assert_eq!(tfv("~"), vec![vtko!(Operator::BitNegate, 0, 1, "~", "~")]);
+        assert_eq!(tfv("^"), vec![vtko!(Operator::BitXor, 0, 1, "^", "^")]);
+    }
+
+    #[test]
+    fn test_error_unknown_operator() {
+        assert_eq!(value_lexer_error("&="), "In file \"main.gb.s\" on line 1, column 1: Unknown operator \"&=\".\n\n&=\n^--- Here");
     }
 
     // Value Errors -----------------------------------------------------------

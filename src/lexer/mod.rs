@@ -111,6 +111,10 @@ impl InnerToken {
         }
     }
 
+    fn macro_call_id(&self) -> Option<usize> {
+        self.macro_call_id
+    }
+
     fn set_macro_call_id(&mut self, id: usize) {
         self.macro_call_id = Some(id);
     }
