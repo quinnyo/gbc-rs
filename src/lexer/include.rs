@@ -383,7 +383,7 @@ impl IncludeLexer {
                     Some(IncludeToken::TokenGroup(index_token, tokens))
                 },
                 // Operator
-                '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' => {
+                '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
                     Some(IncludeToken::Operator(iter.collect_single()))
                 },
                 // Punctation
@@ -776,7 +776,7 @@ mod test {
             tk!(OpenBracket, 0, 1, "[", "["),
             tk!(CloseBracket, 1, 2, "]", "]")
         ]);
-        assert_eq!(tfs("=%&|!-+<>~*/"), vec![
+        assert_eq!(tfs("=%&|!-+<>~*/^"), vec![
             tk!(Operator, 0, 1, "=", "="),
             tk!(Operator, 1, 2, "%", "%"),
             tk!(Operator, 2, 3, "&", "&"),
@@ -789,6 +789,7 @@ mod test {
             tk!(Operator, 9, 10, "~", "~"),
             tk!(Operator, 10, 11, "*", "*"),
             tk!(Operator, 11, 12, "/", "/"),
+            tk!(Operator, 12, 13, "^", "^"),
         ]);
     }
 
