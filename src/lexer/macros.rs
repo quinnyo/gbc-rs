@@ -136,25 +136,38 @@ enum MacroArgumenType {
     Any,
     Tokens,
     String,
-    Number
+    Number,
+    Integer,
+    Float
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum MacroReturnType {
+    None,
+    String,
+    Number,
+    Float,
+    Integer,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 struct MacroDefinition {
     name: InnerToken,
     parameters: Vec<(MacroArgumenType, InnerToken)>,
+    return_type: MacroReturnType,
     body: Vec<IncludeToken>,
     builtin: bool
 }
 
 impl MacroDefinition {
-    fn builtin(name: &str, parameters: Vec<(MacroArgumenType, &str)>) -> Self {
+    fn builtin(name: &str, parameters: Vec<(MacroArgumenType, &str)>, return_type: MacroReturnType) -> Self {
         Self {
             name: InnerToken::new(0, 0, 0, name.into(), name.into()),
             parameters: parameters.into_iter().map(|(typ, name)| {
                 (typ, InnerToken::new(0, 0, 0, format!("@{}", name), name.into()))
 
             }).collect(),
+            return_type,
             body: Vec::new(),
             builtin: true
         }
@@ -169,11 +182,9 @@ pub struct MacroCall {
 }
 
 impl MacroCall {
-
     pub fn error(&self, message: String) -> LexerError {
         self.name.error(message)
     }
-
 }
 
 
@@ -280,6 +291,7 @@ impl MacroLexer {
                     name: name_token.into_inner(),
                     parameters,
                     body: body_tokens,
+                    return_type: MacroReturnType::None,
                     builtin: false
                 });
 
@@ -540,40 +552,40 @@ impl MacroLexer {
     fn builtin_macro_defs() -> Vec<MacroDefinition> {
         vec![
             // Noop
-            MacroDefinition::builtin("DBG", vec![]),
+            MacroDefinition::builtin("DBG", vec![], MacroReturnType::None),
 
             // String Operations
-            MacroDefinition::builtin("STRUPR", vec![(MacroArgumenType::String, "text")]),
-            MacroDefinition::builtin("STRLWR", vec![(MacroArgumenType::String, "text")]),
-            MacroDefinition::builtin("STRSUB", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::Number, "index"), (MacroArgumenType::Number, "length")]),
-            MacroDefinition::builtin("STRIN", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "search")]),
-            MacroDefinition::builtin("STRPADR", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Number, "length")]),
-            MacroDefinition::builtin("STRPADL", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Number, "length")]),
+            MacroDefinition::builtin("STRUPR", vec![(MacroArgumenType::String, "text")], MacroReturnType::String),
+            MacroDefinition::builtin("STRLWR", vec![(MacroArgumenType::String, "text")], MacroReturnType::String),
+            MacroDefinition::builtin("STRSUB", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::Integer, "index"), (MacroArgumenType::Integer, "length")], MacroReturnType::String),
+            MacroDefinition::builtin("STRIN", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "search")], MacroReturnType::String),
+            MacroDefinition::builtin("STRPADR", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Integer, "length")], MacroReturnType::String),
+            MacroDefinition::builtin("STRPADL", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Integer, "length")], MacroReturnType::String),
 
             // Geometry
-            MacroDefinition::builtin("SIN", vec![(MacroArgumenType::Number, "radians")]),
-            MacroDefinition::builtin("COS", vec![(MacroArgumenType::Number, "radians")]),
-            MacroDefinition::builtin("TAN", vec![(MacroArgumenType::Number, "radians")]),
-            MacroDefinition::builtin("ASIN", vec![(MacroArgumenType::Number, "radians")]),
-            MacroDefinition::builtin("ACOS", vec![(MacroArgumenType::Number, "radians")]),
-            MacroDefinition::builtin("ATAN", vec![(MacroArgumenType::Number, "radians")]),
-            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "y"), (MacroArgumenType::Number, "x")]),
+            MacroDefinition::builtin("SIN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
+            MacroDefinition::builtin("COS", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
+            MacroDefinition::builtin("TAN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
+            MacroDefinition::builtin("ASIN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
+            MacroDefinition::builtin("ACOS", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
+            MacroDefinition::builtin("ATAN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
+            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "y"), (MacroArgumenType::Number, "x")], MacroReturnType::Float),
 
             // Math
-            MacroDefinition::builtin("LOG", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("EXP", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("FLOOR", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("CEIL", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("ROUND", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("SQRT", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("ABS", vec![(MacroArgumenType::Number, "value")]),
-            MacroDefinition::builtin("MAX", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")]),
-            MacroDefinition::builtin("MIN", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")]),
-            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "from"), (MacroArgumenType::Number, "to")]),
+            MacroDefinition::builtin("LOG", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Float),
+            MacroDefinition::builtin("EXP", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Float),
+            MacroDefinition::builtin("FLOOR", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Integer),
+            MacroDefinition::builtin("CEIL", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Integer),
+            MacroDefinition::builtin("ROUND", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Integer),
+            MacroDefinition::builtin("SQRT", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Float),
+            MacroDefinition::builtin("ABS", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Number),
+            MacroDefinition::builtin("MAX", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")], MacroReturnType::Number),
+            MacroDefinition::builtin("MIN", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")], MacroReturnType::Number),
+            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "from"), (MacroArgumenType::Number, "to")], MacroReturnType::Float),
 
             // Code
-            MacroDefinition::builtin("BYTESIZE", vec![(MacroArgumenType::Tokens, "tokens")]),
-            MacroDefinition::builtin("CYCLES", vec![(MacroArgumenType::Tokens, "tokens")]),
+            MacroDefinition::builtin("BYTESIZE", vec![(MacroArgumenType::Tokens, "tokens")], MacroReturnType::Integer),
+            MacroDefinition::builtin("CYCLES", vec![(MacroArgumenType::Tokens, "tokens")], MacroReturnType::Integer),
         ]
     }
 
@@ -583,7 +595,7 @@ impl MacroLexer {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use super::{MacroLexer, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType};
+    use super::{MacroLexer, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType, MacroReturnType};
     use crate::lexer::mocks::include_lex;
 
     fn macro_lexer<S: Into<String>>(s: S) -> MacroLexer {
@@ -604,6 +616,7 @@ mod test {
                 name: $name,
                 parameters: $args,
                 body: $body,
+                return_type: MacroReturnType::None,
                 builtin: false
             }
         }

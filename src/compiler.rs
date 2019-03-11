@@ -25,10 +25,29 @@ impl Compiler {
         let value_lexer = ValueLexer::try_from(macro_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
         println!("{} token(s) after value construction.", value_lexer.len());
 
-        // TODO ExpressionLexer
+        // TODO ExpressionLexer, removes: OpenParen, CloseParen, Offset, Float, Integer, String, GlobalLabelDef, LocalLabelDef, LocalLabelRef, Operator -> Generates: Expressions
+        //
+        // TODO EntryLexer, removes: Comma, OpenBracket, CloseBracket -> Generates: Sections, Data, Variables, Instructions)
+            // TODO Everything at this stage takes expansion arguments of either Type=Number or Type=String
+            // TODO When does Integer Conversion happen? Are Expressions also float as soon as one
+            // is introduced and Conversion only happens when required or is there an error thown
+            // and Conversion must be explicit when trying to store a Float Expression into a byte?
+
         // TODO Parser
         // TODO Optimizer
         // TODO Generator
+        // Parser
+        // TODO 1. Go through all sections ordered by base adress ascending
+            // TODO 1.1. Calculate offsets for all the section's entries
+            // TODO 1.2. Check for section overlaps / out of bounds
+
+        // TODO 2. Peform jump target resolution
+        // TODO 3. Perform instruction optimizations
+        // TODO 4. go back to 1 and repeat until no more optimizations can be applied
+
+        // TODO 1. Go through all sections ordered by base adress ascending
+        // TODO 2. Serialize all section entries into the corresponding ROM part
+
         Ok(())
     }
 }
