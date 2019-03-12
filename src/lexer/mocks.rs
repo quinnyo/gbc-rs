@@ -67,6 +67,15 @@ pub fn macro_lex<S: Into<String>>(s: S) -> MacroLexer {
     MacroLexer::try_from(lexer).expect("MacroLexer failed")
 }
 
+pub fn macro_lex_child<S: Into<String>>(s: S, c: S) -> MacroLexer {
+    let mut reader = MockFileReader::default();
+    reader.add_file("main.gb.s", s.into().as_str());
+    reader.add_file("child.gb.s", c.into().as_str());
+    let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+    assert_eq!(lexer.files.len(), 2);
+    MacroLexer::try_from(lexer).expect("MacroLexer failed")
+}
+
 pub fn tfs<S: Into<String>>(s: S) -> Vec<IncludeToken> {
     include_lex(s).tokens
 }

@@ -137,8 +137,7 @@ enum MacroArgumenType {
     Tokens,
     String,
     Number,
-    Integer,
-    Float
+    Integer
 }
 
 #[derive(Debug, Eq, PartialEq)]

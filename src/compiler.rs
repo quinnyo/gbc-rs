@@ -25,7 +25,8 @@ impl Compiler {
         let value_lexer = ValueLexer::try_from(macro_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
         println!("{} token(s) after value construction.", value_lexer.len());
 
-        // TODO ExpressionLexer, removes: OpenParen, CloseParen, Offset, Float, Integer, String, GlobalLabelDef, LocalLabelDef, LocalLabelRef, Operator -> Generates: Expressions
+        // TODO ExpressionLexer, removes: OpenParen, CloseParen, Offset, Float, Integer, String, LocalLabelRef, Operator -> Generates: Expressions
+            // Expressions: Number, String, ValueOf(Name)
         //
         // TODO EntryLexer, removes: Comma, OpenBracket, CloseBracket -> Generates: Sections, Data, Variables, Instructions)
             // TODO Everything at this stage takes expansion arguments of either Type=Number or Type=String
@@ -34,6 +35,7 @@ impl Compiler {
             // and Conversion must be explicit when trying to store a Float Expression into a byte?
 
         // TODO Parser
+            // TODO handle file local global labels which start with a "_"
         // TODO Optimizer
         // TODO Generator
         // Parser

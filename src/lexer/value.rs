@@ -199,7 +199,7 @@ impl ValueLexer {
 
     fn from_tokens(tokens: Vec<MacroToken>) -> Result<Vec<ValueToken>, LexerError> {
 
-        let mut global_labels: HashSet<String> = HashSet::new();
+        let mut global_labels: HashSet<(String, Option<usize>)> = HashSet::new();
         let mut global_labels_names: Vec<String> = Vec::new();
         let mut local_labels: HashSet<String> = HashSet::new();
 
@@ -243,7 +243,15 @@ impl ValueLexer {
                             inner.value.to_string()
                         };
 
-                        if global_labels.contains(&name) {
+                        // Handle file local global labels that are prefixed with _
+                        let label_id = if name.starts_with("_") {
+                            (format!("{}_file_local_{}", name, inner.file_index), Some(inner.file_index))
+
+                        } else {
+                            (name.clone(), None)
+                        };
+
+                        if global_labels.contains(&label_id) {
                             // TODO add information about previous label definition / location
                             return Err(inner.error(format!(
                                 "Duplicate definition of global label \"{}\".",
@@ -251,14 +259,14 @@ impl ValueLexer {
                             )));
 
                         } else {
-                            global_labels.insert(name.clone());
-                            global_labels_names.push(name.clone());
+                            global_labels.insert(label_id.clone());
+                            global_labels_names.push(label_id.0.clone());
                             local_labels.clear();
 
                             inner.end_index = colon.end_index;
                             ValueToken::GlobalLabelDef {
                                 inner,
-                                name
+                                name: label_id.0
                             }
                         }
 
@@ -408,6 +416,9 @@ impl ValueLexer {
             value_tokens.push(value_token);
         }
 
+        // TODO convert Names that match a global label def into GlobalLabelRef
+            // TODO if prefixed with _ match by file_index
+
         Ok(value_tokens)
     }
 
@@ -431,18 +442,32 @@ impl ValueLexer {
 mod test {
     use ordered_float::OrderedFloat;
     use super::{ValueLexer, ValueToken, InnerToken, Operator};
-    use crate::lexer::mocks::macro_lex;
+    use crate::lexer::mocks::{macro_lex, macro_lex_child};
 
     fn value_lexer<S: Into<String>>(s: S) -> ValueLexer {
         ValueLexer::try_from(macro_lex(s)).expect("ValueLexer failed")
+    }
+
+    fn value_lexer_child<S: Into<String>>(s: S, c: S) -> ValueLexer {
+        ValueLexer::try_from(macro_lex_child(s, c)).expect("ValueLexer failed")
     }
 
     fn value_lexer_error<S: Into<String>>(s: S) -> String {
         ValueLexer::try_from(macro_lex(s)).err().unwrap().to_string()
     }
 
+    fn value_lexer_child_error<S: Into<String>>(s: S, c: S) -> String {
+        ValueLexer::try_from(macro_lex_child(s, c)).err().unwrap().to_string()
+    }
+
     fn tfv<S: Into<String>>(s: S) -> Vec<ValueToken> {
         value_lexer(s).tokens
+    }
+
+    macro_rules! itf {
+        ($start:expr, $end:expr, $raw:expr, $parsed:expr, $file:expr) => {
+            InnerToken::new($file, $start, $end, $raw.into(), $parsed.into())
+        }
     }
 
     macro_rules! itk {
@@ -583,8 +608,39 @@ mod test {
     }
 
     #[test]
+    fn test_global_file_local_label_def() {
+        let tokens = value_lexer_child(
+            "_global_file_local_label:\nINCLUDE 'child.gb.s'",
+            "_global_file_local_label:"
+
+        ).tokens;
+        assert_eq!(tokens, vec![ValueToken::GlobalLabelDef {
+            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 0),
+            name: "_global_file_local_label_file_local_0".to_string()
+
+        }, ValueToken::GlobalLabelDef {
+            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 1),
+            name: "_global_file_local_label_file_local_1".to_string()
+        }]);
+    }
+
+    #[test]
     fn test_global_label_def_duplicate() {
         assert_eq!(value_lexer_error("global_label:\nglobal_label:"), "In file \"main.gb.s\" on line 2, column 1: Duplicate definition of global label \"global_label\".\n\nglobal_label:\n^--- Here");
+    }
+
+    #[test]
+    fn test_global_file_local_label_def_duplicate() {
+        assert_eq!(value_lexer_error("_global_file_local_label:\n_global_file_local_label:"), "In file \"main.gb.s\" on line 2, column 1: Duplicate definition of global label \"_global_file_local_label\".\n\n_global_file_local_label:\n^--- Here");
+    }
+
+    #[test]
+    fn test_global_label_def_duplicate_child() {
+        assert_eq!(value_lexer_child_error(
+            "global_label:\nINCLUDE 'child.gb.s'",
+            "global_label:"
+
+        ), "In file \"child.gb.s\" on line 1, column 1: Duplicate definition of global label \"global_label\".\n\nglobal_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9");
     }
 
     #[test]
