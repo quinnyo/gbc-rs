@@ -4,7 +4,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{IncludeLexer, MacroLexer, ValueLexer};
+use crate::lexer::{IncludeLexer, MacroLexer, ValueLexer, ExpressionLexer};
 use crate::traits::FileReader;
 
 
@@ -22,8 +22,11 @@ impl Compiler {
         println!("Found {} macro call(s).", macro_lexer.macro_calls_count());
         println!("{} token(s) after macro expansions.", macro_lexer.len());
 
-        let value_lexer = ValueLexer::try_from(macro_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
+        let value_lexer = ValueLexer::try_from(macro_lexer).map_err(|e| CompilerError::new("VALUE CONVERSION", e))?;
         println!("{} token(s) after value construction.", value_lexer.len());
+
+        let expr_lexer = ExpressionLexer::try_from(value_lexer).map_err(|e| CompilerError::new("EXPRESSION CONSTRUCTION", e))?;
+        println!("{} token(s) after expression construction.", expr_lexer.len());
 
         // TODO ExpressionLexer, removes: OpenParen, CloseParen, Offset, Float, Integer, String, LocalLabelRef, Operator -> Generates: Expressions
             // Expressions: Number, String, ValueOf(Name)

@@ -62,8 +62,7 @@ impl From<IncludeToken> for MacroToken {
             IncludeToken::OpenBracket(inner) => MacroToken::OpenBracket(inner),
             IncludeToken::CloseBracket(inner) => MacroToken::CloseBracket(inner),
             token => {
-                println!("Token {:?} should not be passed through MacroLexer", token);
-                unreachable!()
+                unreachable!("Token {:?} should not be passed through MacroLexer", token)
             }
         }
     }

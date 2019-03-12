@@ -5,6 +5,7 @@ use std::path::PathBuf;
 // Modules --------------------------------------------------------------------
 mod error;
 mod include;
+mod expression;
 mod macros;
 mod token;
 mod value;
@@ -13,6 +14,7 @@ mod value;
 
 // Exports --------------------------------------------------------------------
 pub use self::include::IncludeLexer;
+pub use self::expression::ExpressionLexer;
 pub use self::macros::MacroLexer;
 pub use self::value::ValueLexer;
 pub use self::token::TokenIterator;

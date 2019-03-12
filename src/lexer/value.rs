@@ -9,11 +9,10 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use super::{MacroLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
-use super::macros::MacroToken;
+use super::macros::{MacroCall, MacroToken};
 
 
 // Value Specific Tokens ------------------------------------------------------
-#[allow(unused)]
 #[derive(Debug, Eq, PartialEq)]
 pub enum ValueToken {
     Name(InnerToken),
@@ -184,7 +183,8 @@ pub enum Operator {
 // Value Level Lexer Implementation -------------------------------------------
 pub struct ValueLexer {
     pub files: Vec<LexerFile>,
-    pub tokens: Vec<ValueToken>
+    pub tokens: Vec<ValueToken>,
+    pub macro_calls: Vec<MacroCall>
 }
 
 impl ValueLexer {
@@ -197,7 +197,8 @@ impl ValueLexer {
         })?;
         Ok(Self {
             files,
-            tokens
+            tokens,
+            macro_calls
         })
     }
 
@@ -429,18 +430,18 @@ impl ValueLexer {
     }
 
     fn global_label_id(inner: &InnerToken) -> (String, Option<usize>) {
-        // Postfix labels created by macros calls so they are unique
+        // TODO the old implementation did not correct global label jump targets
+        // created by macros, can the new one somehow achieve this?
         let name = if let Some(call_id) = inner.macro_call_id() {
-            // TODO the old implementation did not correct global label jump targets
-            // created by macros, can the new one somehow achieve this?
+            // Postfix labels created by macros calls so they are unique
             format!("{}_from_macro_call_{}", inner.value, call_id)
 
         } else {
             inner.value.to_string()
         };
 
-        // Handle file local global labels that are prefixed with _
         if name.starts_with("_") {
+            // Handle file local global labels that are prefixed with _
             (format!("{}_file_local_{}", name, inner.file_index), Some(inner.file_index))
 
         } else {

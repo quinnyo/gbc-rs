@@ -8,6 +8,7 @@ use std::io::{Error as IOError, ErrorKind};
 use crate::traits::{FileReader, FileError};
 use super::include::{IncludeLexer, IncludeToken};
 use super::macros::MacroLexer;
+use super::value::ValueLexer;
 
 #[derive(Default)]
 pub struct MockFileReader {
@@ -74,6 +75,15 @@ pub fn macro_lex_child<S: Into<String>>(s: S, c: S) -> MacroLexer {
     let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
     assert_eq!(lexer.files.len(), 2);
     MacroLexer::try_from(lexer).expect("MacroLexer failed")
+}
+
+pub fn value_lex<S: Into<String>>(s: S) -> ValueLexer {
+    let mut reader = MockFileReader::default();
+    reader.add_file("main.gb.s", s.into().as_str());
+    let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+    assert_eq!(lexer.files.len(), 1);
+    let lexer = MacroLexer::try_from(lexer).expect("MacroLexer failed");
+    ValueLexer::try_from(lexer).expect("ValueLexer failed")
 }
 
 pub fn tfs<S: Into<String>>(s: S) -> Vec<IncludeToken> {
