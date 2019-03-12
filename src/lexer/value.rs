@@ -46,6 +46,10 @@ pub enum ValueToken {
         inner: InnerToken,
         name: String,
     },
+    GlobalLabelRef {
+        inner: InnerToken,
+        name: String
+    },
     LocalLabelDef {
         inner: InnerToken,
         name: String
@@ -79,6 +83,7 @@ impl LexerToken for ValueToken {
             ValueToken::Integer { .. } => TokenType::Integer,
             ValueToken::String { .. } => TokenType::String,
             ValueToken::GlobalLabelDef { .. } => TokenType::GlobalLabelDef,
+            ValueToken::GlobalLabelRef { .. } => TokenType::GlobalLabelDef,
             ValueToken::LocalLabelDef { .. } => TokenType::LocalLabelDef,
             ValueToken::LocalLabelRef { .. } => TokenType::LocalLabelRef,
             ValueToken::Operator { .. } => TokenType::Operator,
@@ -97,6 +102,7 @@ impl LexerToken for ValueToken {
             ValueToken::Integer { inner, .. } |
             ValueToken::String { inner, .. } |
             ValueToken::GlobalLabelDef { inner, .. } |
+            ValueToken::GlobalLabelRef { inner, .. } |
             ValueToken::LocalLabelDef { inner, .. } |
             ValueToken::LocalLabelRef { inner, .. } |
             ValueToken::Operator { inner, .. } => {
@@ -117,6 +123,7 @@ impl LexerToken for ValueToken {
             ValueToken::Float { inner, .. } |
             ValueToken::String { inner, .. } |
             ValueToken::GlobalLabelDef { inner, .. } |
+            ValueToken::GlobalLabelRef { inner, .. } |
             ValueToken::LocalLabelDef { inner, .. } |
             ValueToken::LocalLabelRef { inner, .. } |
             ValueToken::Operator { inner, .. } => {
@@ -137,6 +144,7 @@ impl LexerToken for ValueToken {
             ValueToken::Float { inner, .. } |
             ValueToken::String { inner, .. } |
             ValueToken::GlobalLabelDef { inner, .. } |
+            ValueToken::GlobalLabelRef { inner, .. } |
             ValueToken::LocalLabelDef { inner, .. } |
             ValueToken::LocalLabelRef { inner, .. } |
             ValueToken::Operator { inner, .. } => {
@@ -232,29 +240,11 @@ impl ValueLexer {
                 MacroToken::Name(mut inner) => {
                     if tokens.peek(TokenType::Colon, None) {
                         let colon = tokens.expect(TokenType::Colon, None, "when parsing global label definition")?.into_inner();
-
-                        // Postfix labels created by macros calls so they are unique
-                        let name = if let Some(call_id) = inner.macro_call_id() {
-                            // TODO the old implementation did not correct global label jump targets
-                            // created by macros, can the new one somehow achieve this?
-                            format!("{}_from_macro_call_{}", inner.value, call_id)
-
-                        } else {
-                            inner.value.to_string()
-                        };
-
-                        // Handle file local global labels that are prefixed with _
-                        let label_id = if name.starts_with("_") {
-                            (format!("{}_file_local_{}", name, inner.file_index), Some(inner.file_index))
-
-                        } else {
-                            (name.clone(), None)
-                        };
-
+                        let label_id = Self::global_label_id(&inner);
                         if let Some(previous) = global_labels.get(&label_id) {
                             return Err(inner.error(format!(
                                 "Global label \"{}\" was already defined.",
-                                name
+                                inner.value
 
                             )).with_reference(previous, "Original definition of global label was"));
 
@@ -416,10 +406,46 @@ impl ValueLexer {
             value_tokens.push(value_token);
         }
 
-        // TODO convert Names that match a global label def into GlobalLabelRef
-            // TODO if prefixed with _ match by file_index
+        Ok(value_tokens.into_iter().map(|token| {
+            if let ValueToken::Name(inner) = token {
 
-        Ok(value_tokens)
+                // Generate references to global labels
+                let label_id = Self::global_label_id(&inner);
+                if global_labels.contains_key(&label_id) {
+                    ValueToken::GlobalLabelRef {
+                        inner,
+                        name: label_id.0
+                    }
+
+                } else {
+                    ValueToken::Name(inner)
+                }
+
+            } else {
+                token
+            }
+
+        }).collect())
+    }
+
+    fn global_label_id(inner: &InnerToken) -> (String, Option<usize>) {
+        // Postfix labels created by macros calls so they are unique
+        let name = if let Some(call_id) = inner.macro_call_id() {
+            // TODO the old implementation did not correct global label jump targets
+            // created by macros, can the new one somehow achieve this?
+            format!("{}_from_macro_call_{}", inner.value, call_id)
+
+        } else {
+            inner.value.to_string()
+        };
+
+        // Handle file local global labels that are prefixed with _
+        if name.starts_with("_") {
+            (format!("{}_file_local_{}", name, inner.file_index), Some(inner.file_index))
+
+        } else {
+            (name, None)
+        }
     }
 
     fn parse_integer(inner: &InnerToken, from: usize, radix: u32) -> Result<i32, LexerError> {
@@ -608,6 +634,25 @@ mod test {
     }
 
     #[test]
+    fn test_global_label_ref() {
+        assert_eq!(tfv("global_label:\nglobal_label"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label", "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::GlobalLabelRef {
+            inner: itf!(14, 26, "global_label", "global_label", 0),
+            name: "global_label".to_string()
+        }]);
+    }
+
+    #[test]
+    fn test_global_label_no_ref() {
+        assert_eq!(tfv("global_label"), vec![ValueToken::Name(
+            itf!(0, 12, "global_label", "global_label", 0)
+        )]);
+    }
+
+    #[test]
     fn test_global_file_local_label_def() {
         let tokens = value_lexer_child(
             "_global_file_local_label:\nINCLUDE 'child.gb.s'",
@@ -622,6 +667,46 @@ mod test {
             inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 1),
             name: "_global_file_local_label_file_local_1".to_string()
         }]);
+    }
+
+    #[test]
+    fn test_global_file_local_label_ref() {
+        let tokens = value_lexer_child(
+            "_global_file_local_label:\n_global_file_local_label\nINCLUDE 'child.gb.s'",
+            "_global_file_local_label:\n_global_file_local_label"
+
+        ).tokens;
+        assert_eq!(tokens, vec![ValueToken::GlobalLabelDef {
+            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 0),
+            name: "_global_file_local_label_file_local_0".to_string()
+
+        }, ValueToken::GlobalLabelRef {
+            inner: itf!(26, 50, "_global_file_local_label", "_global_file_local_label", 0),
+            name: "_global_file_local_label_file_local_0".to_string()
+
+        }, ValueToken::GlobalLabelDef {
+            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 1),
+            name: "_global_file_local_label_file_local_1".to_string()
+
+        }, ValueToken::GlobalLabelRef {
+            inner: itf!(26, 50, "_global_file_local_label", "_global_file_local_label", 1),
+            name: "_global_file_local_label_file_local_1".to_string()
+        }]);
+    }
+
+    #[test]
+    fn test_global_file_local_label_no_ref() {
+        let tokens = value_lexer_child(
+            "_global_file_local_label\nINCLUDE 'child.gb.s'",
+            "_global_file_local_label"
+
+        ).tokens;
+        assert_eq!(tokens, vec![ValueToken::Name(
+            itf!(0, 24, "_global_file_local_label", "_global_file_local_label", 0)
+
+        ), ValueToken::Name(
+            itf!(0, 24, "_global_file_local_label", "_global_file_local_label", 1)
+        )]);
     }
 
     #[test]
