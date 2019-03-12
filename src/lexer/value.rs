@@ -1,6 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::error::Error;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
@@ -199,9 +199,9 @@ impl ValueLexer {
 
     fn from_tokens(tokens: Vec<MacroToken>) -> Result<Vec<ValueToken>, LexerError> {
 
-        let mut global_labels: HashSet<(String, Option<usize>)> = HashSet::new();
+        let mut global_labels: HashMap<(String, Option<usize>), InnerToken> = HashMap::new();
         let mut global_labels_names: Vec<String> = Vec::new();
-        let mut local_labels: HashSet<String> = HashSet::new();
+        let mut local_labels: HashMap<String, InnerToken> = HashMap::new();
 
         let mut value_tokens = Vec::new();
         let mut tokens = TokenIterator::new(tokens);
@@ -251,19 +251,19 @@ impl ValueLexer {
                             (name.clone(), None)
                         };
 
-                        if global_labels.contains(&label_id) {
-                            // TODO add information about previous label definition / location
+                        if let Some(previous) = global_labels.get(&label_id) {
                             return Err(inner.error(format!(
-                                "Duplicate definition of global label \"{}\".",
+                                "Global label \"{}\" was already defined.",
                                 name
-                            )));
+
+                            )).with_reference(previous, "Original definition of global label was"));
 
                         } else {
-                            global_labels.insert(label_id.clone());
+                            inner.end_index = colon.end_index;
+                            global_labels.insert(label_id.clone(), inner.clone());
                             global_labels_names.push(label_id.0.clone());
                             local_labels.clear();
 
-                            inner.end_index = colon.end_index;
                             ValueToken::GlobalLabelDef {
                                 inner,
                                 name: label_id.0
@@ -303,18 +303,18 @@ impl ValueLexer {
                                 name_token.value
                             )));
 
-                        } else if local_labels.contains(&name) {
-                            // TODO add information about previous label definition / location
+                        } else if let Some(previous) = local_labels.get(&name) {
                             return Err(inner.error(format!(
-                                "Duplicate definition of local label \"{}\", label was already defined under the current global label \"{}\".",
+                                "Local label \"{}\" was already defined under the current global label \"{}\".",
                                 name,
                                 global_labels_names.last().unwrap()
-                            )));
+
+                            )).with_reference(previous, "Original definition of local label was"));
 
                         } else {
-                            local_labels.insert(name.clone());
-
                             inner.end_index = colon.end_index;
+                            local_labels.insert(name.clone(), inner.clone());
+
                             ValueToken::LocalLabelDef {
                                 inner,
                                 name
@@ -626,12 +626,18 @@ mod test {
 
     #[test]
     fn test_global_label_def_duplicate() {
-        assert_eq!(value_lexer_error("global_label:\nglobal_label:"), "In file \"main.gb.s\" on line 2, column 1: Duplicate definition of global label \"global_label\".\n\nglobal_label:\n^--- Here");
+        assert_eq!(value_lexer_error(
+            "global_label:\nglobal_label:"
+
+        ), "In file \"main.gb.s\" on line 2, column 1: Global label \"global_label\" was already defined.\n\nglobal_label:\n^--- Here\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
     }
 
     #[test]
     fn test_global_file_local_label_def_duplicate() {
-        assert_eq!(value_lexer_error("_global_file_local_label:\n_global_file_local_label:"), "In file \"main.gb.s\" on line 2, column 1: Duplicate definition of global label \"_global_file_local_label\".\n\n_global_file_local_label:\n^--- Here");
+        assert_eq!(
+            value_lexer_error("_global_file_local_label:\n_global_file_local_label:"),
+            "In file \"main.gb.s\" on line 2, column 1: Global label \"_global_file_local_label\" was already defined.\n\n_global_file_local_label:\n^--- Here\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\n_global_file_local_label:\n^--- Here"
+        );
     }
 
     #[test]
@@ -640,7 +646,7 @@ mod test {
             "global_label:\nINCLUDE 'child.gb.s'",
             "global_label:"
 
-        ), "In file \"child.gb.s\" on line 1, column 1: Duplicate definition of global label \"global_label\".\n\nglobal_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9");
+        ), "In file \"child.gb.s\" on line 1, column 1: Global label \"global_label\" was already defined.\n\nglobal_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
     }
 
     #[test]
@@ -741,7 +747,10 @@ mod test {
 
     #[test]
     fn test_error_local_label_def_duplicate() {
-        assert_eq!(value_lexer_error("global_label:\n.local_label:\n.local_label:"), "In file \"main.gb.s\" on line 3, column 1: Duplicate definition of local label \"local_label\", label was already defined under the current global label \"global_label\".\n\n.local_label:\n^--- Here");
+        assert_eq!(
+            value_lexer_error("global_label:\n.local_label:\n.local_label:"),
+            "In file \"main.gb.s\" on line 3, column 1: Local label \"local_label\" was already defined under the current global label \"global_label\".\n\n.local_label:\n^--- Here\n\nOriginal definition of local label was in file \"main.gb.s\" on line 2, column 1:\n\n.local_label:\n^--- Here"
+        );
     }
 
     #[test]

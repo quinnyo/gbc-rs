@@ -249,12 +249,13 @@ impl MacroLexer {
                 // Verify Macro Name
                 let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
                 if let Some(_) = Self::get_macro_by_name(&builtin_macro_defs, name_token.value()) {
-                    // TODO Include pointer to original definition in error
                     return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.value())));
 
-                } else if let Some(_) = Self::get_macro_by_name(&user_macro_defs, name_token.value()) {
-                    // TODO Include pointer to original definition in error
-                    return Err(name_token.error(format!("Re-definition of user macro \"{}\".", name_token.value())));
+                } else if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.value()) {
+                    return Err(name_token.error(
+                        format!("Re-definition of user macro \"{}\".", name_token.value())
+
+                    ).with_reference(&user_def.name, "Original definition was"));
                 }
 
                 // Parse Macro Parameter list
@@ -694,7 +695,6 @@ mod test {
 
     // Macro Definition -------------------------------------------------------
 
-    // TODO handle macro definition errors
     #[test]
     fn test_macro_def_no_args_no_body() {
         let lexer = macro_lexer("MACRO FOO() ENDMACRO");
@@ -763,7 +763,7 @@ mod test {
     fn test_macro_def_re_user() {
         assert_eq!(
             macro_lexer_error("MACRO FOO() ENDMACRO MACRO FOO() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 28: Re-definition of user macro \"FOO\".\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n                           ^--- Here"
+            "In file \"main.gb.s\" on line 1, column 28: Re-definition of user macro \"FOO\".\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n                           ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n      ^--- Here"
         );
     }
 
@@ -797,7 +797,6 @@ mod test {
 
     // Builtin Macro Calls ----------------------------------------------------
 
-    // TODO handle builtin macro call errors
     #[test]
     fn test_macro_call_no_args() {
         let lexer = macro_lexer("DBG()");
@@ -1014,7 +1013,6 @@ mod test {
         ]);
     }
 
-    // TODO test recursive call errors
     #[test]
     fn test_macro_user_recursive() {
         let lexer = macro_lexer("FOO() MACRO FOO() 4 BAR() ENDMACRO MACRO BAR() 8 ENDMACRO");
