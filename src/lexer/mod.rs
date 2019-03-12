@@ -2,12 +2,169 @@
 use std::path::PathBuf;
 
 
+// Token Abstraction ----------------------------------------------------------
+mod token;
+pub use self::token::{LexerToken, InnerToken, TokenType, TokenIterator};
+
+
+// Macros ---------------------------------------------------------------------
+macro_rules! underscore {
+    ($bind:ty) => {
+        _
+    }
+}
+
+#[macro_export]
+macro_rules! lexer_token {
+    ($name:ident, ($($de:ident),*), {
+        $(
+            $variant:ident(
+                ($($bind:ty),*)
+            )
+        ),*
+    }) => {
+        #[derive($($de),*)]
+        pub enum $name {
+            $(
+                $variant(InnerToken, $($bind),*)
+            ),*
+        }
+
+        impl LexerToken for $name {
+            fn typ(&self) -> TokenType {
+                match self {
+                    $(
+                        $name::$variant(_, $(underscore!($bind)),*) => TokenType::$variant
+                    ),*
+                }
+            }
+
+            fn inner(&self) -> &InnerToken {
+                match self {
+                    $(
+                        $name::$variant(inner, $(underscore!($bind)),*)
+                    )|* => {
+                        inner
+                    }
+                }
+            }
+
+            fn inner_mut(&mut self) -> &mut InnerToken {
+                match self {
+                    $(
+                        $name::$variant(inner, $(underscore!($bind)),*)
+                    )|* => {
+                        inner
+                    }
+                }
+            }
+
+            fn into_inner(self) -> InnerToken {
+                match self {
+                    $(
+                        $name::$variant(inner, $(underscore!($bind)),*)
+                    )|* => {
+                        inner
+                    }
+                }
+            }
+        }
+    };
+    ($name:ident, ($($de:ident),*), {
+        $(
+            $variant:ident(
+                ($($bind:ty),*)
+            )
+        ),*
+    }, {
+        $(
+            $struct_variant:ident {
+                $($struct_name:ident => $struct_type:ty),*
+            }
+        ),*
+
+    }) => {
+        // TODO remove once all lexers are done
+        #[allow(unused)]
+        #[derive($($de),*)]
+        pub enum $name {
+            $(
+                $variant(InnerToken, $($bind),*)
+            ),*,
+            $(
+                $struct_variant {
+                    inner: InnerToken,
+                    $($struct_name: $struct_type),*
+                }
+            ),*
+        }
+
+        impl LexerToken for $name {
+            fn typ(&self) -> TokenType {
+                match self {
+                    $(
+                        $name::$variant(_, $(underscore!($bind)),*) => TokenType::$variant
+                    ),*,
+                    $(
+                        $name::$struct_variant { .. } => TokenType::$struct_variant
+                    ),*
+                }
+            }
+
+            fn inner(&self) -> &InnerToken {
+                match self {
+                    $(
+                        $name::$variant(inner, $(underscore!($bind)),*)
+                    )|*
+                    |
+                    $(
+                        $name::$struct_variant {inner, ..}
+                    )|*
+                    => {
+                        inner
+                    }
+                }
+            }
+
+            fn inner_mut(&mut self) -> &mut InnerToken {
+                match self {
+                    $(
+                        $name::$variant(inner, $(underscore!($bind)),*)
+                    )|*
+                    |
+                    $(
+                        $name::$struct_variant {inner, ..}
+                    )|*
+                    => {
+                        inner
+                    }
+                }
+            }
+
+            fn into_inner(self) -> InnerToken {
+                match self {
+                    $(
+                        $name::$variant(inner, $(underscore!($bind)),*)
+                    )|*
+                    |
+                    $(
+                        $name::$struct_variant {inner, ..}
+                    )|*
+                    => {
+                        inner
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 // Modules --------------------------------------------------------------------
 mod error;
 mod include;
 mod expression;
 mod macros;
-mod token;
 mod value;
 #[cfg(test)] mod mocks;
 
@@ -17,120 +174,7 @@ pub use self::include::IncludeLexer;
 pub use self::expression::ExpressionLexer;
 pub use self::macros::MacroLexer;
 pub use self::value::ValueLexer;
-pub use self::token::TokenIterator;
 pub use self::error::LexerError;
-
-
-// Lexer Tokens ---------------------------------------------------------------
-pub trait LexerToken {
-
-    fn typ(&self) -> TokenType;
-
-    fn inner(&self) -> &InnerToken;
-
-    fn inner_mut(&mut self) -> &mut InnerToken;
-
-    fn into_inner(self) -> InnerToken;
-
-    // fn is_expanded(&self) -> bool {
-    //     self.inner().is_expanded
-    // }
-
-    fn error(&self, message: String) -> LexerError {
-        self.inner().error(message)
-    }
-
-    fn index(&self) -> (usize, usize) {
-        let inner = self.inner();
-        (inner.file_index, inner.start_index)
-    }
-
-    fn is(&self, typ: TokenType) -> bool {
-        self.typ() == typ
-    }
-
-    fn has_value(&self, value: &str) -> bool {
-        self.inner().value == value
-    }
-
-    fn value(&self) -> &str {
-        &self.inner().value
-    }
-
-}
-
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum TokenType {
-    Newline,
-    Name,
-    Reserved,
-    Instruction,
-    Parameter,
-    Offset,
-    NumberLiteral,
-    Integer,
-    Float,
-    StringLiteral,
-    String,
-    TokenGroup,
-    BinaryFile,
-    BuiltinCall,
-    Comma,
-    Point,
-    Colon,
-    Operator,
-    GlobalLabelDef,
-    LocalLabelDef,
-    LocalLabelRef,
-    Comment,
-    OpenParen,
-    CloseParen,
-    OpenBracket,
-    CloseBracket
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct InnerToken {
-    pub file_index: usize,
-    // Only used for error locations so we can trace back to the source code in macro expansions
-    pub start_index: usize,
-    // Only used for error locations so we can trace back to the source code in macro expansions
-    end_index: usize,
-    raw_value: String,
-    value: String,
-    pub macro_call_id: Option<usize>
-}
-
-impl InnerToken {
-    fn new(file_index: usize, start_index: usize, end_index: usize, raw_value: String, value: String) -> Self {
-        Self {
-            file_index,
-            start_index,
-            end_index,
-            raw_value,
-            value,
-            macro_call_id: None
-        }
-    }
-
-    fn macro_call_id(&self) -> Option<usize> {
-        self.macro_call_id
-    }
-
-    fn set_macro_call_id(&mut self, id: usize) {
-        self.macro_call_id = Some(id);
-    }
-
-    fn error(&self, message: String) -> LexerError {
-        LexerError::with_macro_call_id(
-            self.file_index,
-            self.start_index,
-            message,
-            self.macro_call_id
-        )
-    }
-
-}
 
 
 // Lexer File Abstraction -----------------------------------------------------

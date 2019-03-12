@@ -14,26 +14,25 @@ const MAX_EXPANSION_DEPTH: usize = 8;
 
 
 // Macro Specific Tokens ------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
-pub enum MacroToken {
-    Name(InnerToken),
-    Reserved(InnerToken),
-    Instruction(InnerToken),
-    Offset(InnerToken),
-    NumberLiteral(InnerToken),
-    StringLiteral(InnerToken),
-    BinaryFile(InnerToken, Vec<u8>),
-    BuiltinCall(InnerToken, Vec<Vec<MacroToken>>),
-    Comma(InnerToken),
-    Point(InnerToken),
-    Colon(InnerToken),
-    Operator(InnerToken),
-    Comment(InnerToken),
-    OpenParen(InnerToken),
-    CloseParen(InnerToken),
-    OpenBracket(InnerToken),
-    CloseBracket(InnerToken),
-}
+lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
+    Name(()),
+    Reserved(()),
+    Instruction(()),
+    Offset(()),
+    NumberLiteral(()),
+    StringLiteral(()),
+    BinaryFile((Vec<u8>)),
+    BuiltinCall((Vec<Vec<MacroToken>>)),
+    Comma(()),
+    Point(()),
+    Colon(()),
+    Operator(()),
+    Comment(()),
+    OpenParen(()),
+    CloseParen(()),
+    OpenBracket(()),
+    CloseBracket(())
+});
 
 impl From<IncludeToken> for MacroToken {
     fn from(token: IncludeToken) -> Self {
@@ -66,66 +65,6 @@ impl From<IncludeToken> for MacroToken {
             }
         }
     }
-}
-
-impl LexerToken for MacroToken {
-
-    fn typ(&self) -> TokenType {
-        match self {
-            MacroToken::Name(_) => TokenType::Name,
-            MacroToken::Reserved(_) => TokenType::Reserved,
-            MacroToken::Instruction(_) => TokenType::Instruction,
-            MacroToken::Offset(_) => TokenType::Offset,
-            MacroToken::NumberLiteral(_) => TokenType::NumberLiteral,
-            MacroToken::StringLiteral(_) => TokenType::StringLiteral,
-            MacroToken::BinaryFile(_, _) => TokenType::BinaryFile,
-            MacroToken::BuiltinCall(_, _) => TokenType::BuiltinCall,
-            MacroToken::Comma(_) => TokenType::Comma,
-            MacroToken::Point(_) => TokenType::Point,
-            MacroToken::Colon(_) => TokenType::Colon,
-            MacroToken::Operator(_) => TokenType::Operator,
-            MacroToken::Comment(_) => TokenType::Comment,
-            MacroToken::OpenParen(_) => TokenType::OpenParen,
-            MacroToken::CloseParen(_) => TokenType::CloseParen,
-            MacroToken::OpenBracket(_) => TokenType::OpenBracket,
-            MacroToken::CloseBracket(_) => TokenType::CloseBracket
-        }
-
-    }
-
-    fn inner(&self) -> &InnerToken {
-        match self {
-            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Instruction(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
-            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
-            | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
-            | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
-                &inner
-            }
-        }
-    }
-
-    fn inner_mut(&mut self) -> &mut InnerToken {
-        match self {
-            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Instruction(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
-            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
-            | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
-            | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
-                inner
-            }
-        }
-    }
-
-    fn into_inner(self) -> InnerToken {
-        match self {
-            MacroToken::Name(inner) | MacroToken::Reserved(inner) | MacroToken::Instruction(inner) | MacroToken::Offset(inner) | MacroToken::NumberLiteral(inner)
-            | MacroToken::StringLiteral(inner) | MacroToken::BinaryFile(inner, _) | MacroToken::BuiltinCall(inner, _)
-            | MacroToken::Comma(inner) | MacroToken::Point(inner) | MacroToken::Colon(inner) | MacroToken::Operator(inner) | MacroToken::Comment(inner)
-            | MacroToken::OpenParen(inner) | MacroToken::CloseParen(inner) | MacroToken::OpenBracket(inner) | MacroToken::CloseBracket(inner) => {
-                inner
-            }
-        }
-    }
-
 }
 
 

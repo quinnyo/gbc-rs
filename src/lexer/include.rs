@@ -10,90 +10,28 @@ use super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum IncludeToken {
-    Newline(InnerToken),
-    Name(InnerToken),
-    Reserved(InnerToken),
-    Instruction(InnerToken),
-    Parameter(InnerToken),
-    Offset(InnerToken),
-    NumberLiteral(InnerToken),
-    StringLiteral(InnerToken),
-    TokenGroup(InnerToken, Vec<IncludeToken>),
-    BinaryFile(InnerToken, Vec<u8>),
-    BuiltinCall(InnerToken, Vec<Vec<IncludeToken>>),
-    Comma(InnerToken),
-    Point(InnerToken),
-    Colon(InnerToken),
-    Operator(InnerToken),
-    Comment(InnerToken),
-    OpenParen(InnerToken),
-    CloseParen(InnerToken),
-    OpenBracket(InnerToken),
-    CloseBracket(InnerToken),
-}
-
-impl LexerToken for IncludeToken {
-    fn typ(&self) -> TokenType {
-        match self {
-            IncludeToken::Newline(_) => TokenType::Newline,
-            IncludeToken::Name(_) => TokenType::Name,
-            IncludeToken::Reserved(_) => TokenType::Reserved,
-            IncludeToken::Instruction(_) => TokenType::Instruction,
-            IncludeToken::Parameter(_) => TokenType::Parameter,
-            IncludeToken::Offset(_) => TokenType::Offset,
-            IncludeToken::NumberLiteral(_) => TokenType::NumberLiteral,
-            IncludeToken::StringLiteral(_) => TokenType::StringLiteral,
-            IncludeToken::TokenGroup(_, _) => TokenType::TokenGroup,
-            IncludeToken::BinaryFile(_, _) => TokenType::BinaryFile,
-            IncludeToken::BuiltinCall(_, _) => TokenType::BuiltinCall,
-            IncludeToken::Comma(_) => TokenType::Comma,
-            IncludeToken::Point(_) => TokenType::Point,
-            IncludeToken::Colon(_) => TokenType::Colon,
-            IncludeToken::Operator(_) => TokenType::Operator,
-            IncludeToken::Comment(_) => TokenType::Comment,
-            IncludeToken::OpenParen(_) => TokenType::OpenParen,
-            IncludeToken::CloseParen(_) => TokenType::CloseParen,
-            IncludeToken::OpenBracket(_) => TokenType::OpenBracket,
-            IncludeToken::CloseBracket(_) => TokenType::CloseBracket
-        }
-    }
-
-    fn inner(&self) -> &InnerToken {
-        match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Instruction(inner) |IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
-            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
-            | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
-            | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
-                inner
-            }
-        }
-    }
-
-    fn inner_mut(&mut self) -> &mut InnerToken {
-        match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Instruction(inner) | IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
-            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
-            | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
-            | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
-                inner
-            }
-        }
-    }
-
-    fn into_inner(self) -> InnerToken {
-        match self {
-            IncludeToken::Newline(inner) | IncludeToken::Name(inner) | IncludeToken::Reserved(inner) | IncludeToken::Instruction(inner)| IncludeToken::Parameter(inner) | IncludeToken::Offset(inner) | IncludeToken::NumberLiteral(inner)
-            | IncludeToken::StringLiteral(inner) | IncludeToken::TokenGroup(inner, _) | IncludeToken::BinaryFile(inner, _) | IncludeToken::BuiltinCall(inner, _)
-            | IncludeToken::Comma(inner) | IncludeToken::Point(inner) | IncludeToken::Colon(inner) | IncludeToken::Operator(inner) | IncludeToken::Comment(inner)
-            | IncludeToken::OpenParen(inner) | IncludeToken::CloseParen(inner) | IncludeToken::OpenBracket(inner) | IncludeToken::CloseBracket(inner) => {
-                inner
-            }
-        }
-    }
-
-}
+lexer_token!(IncludeToken, (Debug, Eq, PartialEq, Clone), {
+    Newline(()),
+    Name(()),
+    Reserved(()),
+    Instruction(()),
+    Parameter(()),
+    Offset(()),
+    NumberLiteral(()),
+    StringLiteral(()),
+    TokenGroup((Vec<IncludeToken>)),
+    BinaryFile((Vec<u8>)),
+    BuiltinCall((Vec<Vec<IncludeToken>>)),
+    Comma(()),
+    Point(()),
+    Colon(()),
+    Operator(()),
+    Comment(()),
+    OpenParen(()),
+    CloseParen(()),
+    OpenBracket(()),
+    CloseBracket(())
+});
 
 
 // Types ----------------------------------------------------------------------
@@ -105,12 +43,10 @@ struct IncludeLexerState<'a, T: FileReader> {
 }
 
 impl<'a, T: FileReader> IncludeLexerState<'a, T> {
-
     fn split_off_child(mut self, parent_path: &'a PathBuf) -> Self {
         self.parent_path = Some(parent_path);
         self
     }
-
 }
 
 

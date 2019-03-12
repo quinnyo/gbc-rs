@@ -26,26 +26,23 @@ pub struct Expression {
 
 
 // Expression Specific Tokens -------------------------------------------------
-#[allow(unused)]
-#[derive(Debug, Eq, PartialEq)]
-pub enum ExpressionToken {
-    Name(InnerToken),
-    Reserved(InnerToken),
-    Instruction(InnerToken),
-    BinaryFile(InnerToken, Vec<u8>),
-    Comma(InnerToken),
-    OpenBracket(InnerToken),
-    CloseBracket(InnerToken),
-    Expression(),
+lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
+    Name(()),
+    Reserved(()),
+    Instruction(()),
+    BinaryFile((Vec<u8>)),
+    Comma(()),
+    OpenBracket(()),
+    CloseBracket(()),
+    Expression(())
+}, {
     GlobalLabelDef {
-        inner: InnerToken,
-        name: String,
+        name => String
     },
     LocalLabelDef {
-        inner: InnerToken,
-        name: String
+        name => String
     }
-}
+});
 
 
 // Expression Level Lexer Implementation --------------------------------------

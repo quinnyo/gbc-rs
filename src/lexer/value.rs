@@ -13,146 +13,46 @@ use super::macros::{MacroCall, MacroToken};
 
 
 // Value Specific Tokens ------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
-pub enum ValueToken {
-    Name(InnerToken),
-    Reserved(InnerToken),
-    Instruction(InnerToken),
-    BinaryFile(InnerToken, Vec<u8>),
-    Comma(InnerToken),
-    OpenParen(InnerToken),
-    CloseParen(InnerToken),
-    OpenBracket(InnerToken),
-    CloseBracket(InnerToken),
-    BuiltinCall(InnerToken, Vec<Vec<ValueToken>>),
+lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
+    Name(()),
+    Reserved(()),
+    Instruction(()),
+    BinaryFile((Vec<u8>)),
+    Comma(()),
+    OpenParen(()),
+    CloseParen(()),
+    OpenBracket(()),
+    CloseBracket(()),
+    BuiltinCall((Vec<Vec<ValueToken>>))
+}, {
     Offset {
-        inner: InnerToken,
-        value: i32
+        value => i32
     },
     Float {
-        inner: InnerToken,
-        value: OrderedFloat<f32>
+        value => OrderedFloat<f32>
     },
     Integer {
-        inner: InnerToken,
-        value: i32
+        value => i32
     },
     String {
-        inner: InnerToken,
-        value: String
+        value => String
     },
     GlobalLabelDef {
-        inner: InnerToken,
-        name: String,
+        name => String
     },
     GlobalLabelRef {
-        inner: InnerToken,
-        name: String
+        name => String
     },
     LocalLabelDef {
-        inner: InnerToken,
-        name: String
+        name => String
     },
     LocalLabelRef {
-        inner: InnerToken,
-        name: String
+        name => String
     },
     Operator {
-        inner: InnerToken,
-        typ: Operator
+        typ => Operator
     }
-}
-
-impl LexerToken for ValueToken {
-
-    fn typ(&self) -> TokenType {
-        match self {
-            ValueToken::Name(_) => TokenType::Name,
-            ValueToken::Reserved(_) => TokenType::Reserved,
-            ValueToken::Instruction(_) => TokenType::Instruction,
-            ValueToken::BinaryFile(_, _) => TokenType::BinaryFile,
-            ValueToken::BuiltinCall(_, _) => TokenType::BuiltinCall,
-            ValueToken::Comma(_) => TokenType::Comma,
-            ValueToken::OpenParen(_) => TokenType::OpenParen,
-            ValueToken::CloseParen(_) => TokenType::CloseParen,
-            ValueToken::OpenBracket(_) => TokenType::OpenBracket,
-            ValueToken::CloseBracket(_) => TokenType::CloseBracket,
-            ValueToken::Offset { .. } => TokenType::Offset,
-            ValueToken::Float { .. } => TokenType::Float,
-            ValueToken::Integer { .. } => TokenType::Integer,
-            ValueToken::String { .. } => TokenType::String,
-            ValueToken::GlobalLabelDef { .. } => TokenType::GlobalLabelDef,
-            ValueToken::GlobalLabelRef { .. } => TokenType::GlobalLabelDef,
-            ValueToken::LocalLabelDef { .. } => TokenType::LocalLabelDef,
-            ValueToken::LocalLabelRef { .. } => TokenType::LocalLabelRef,
-            ValueToken::Operator { .. } => TokenType::Operator,
-        }
-    }
-
-    fn inner(&self) -> &InnerToken {
-        match self {
-            ValueToken::Name(inner) | ValueToken::Reserved(inner) | ValueToken::Instruction(inner)
-            | ValueToken::BinaryFile(inner, _) | ValueToken::BuiltinCall(inner, _) | ValueToken::Comma(inner)
-            | ValueToken::OpenParen(inner) | ValueToken::CloseParen(inner) | ValueToken::OpenBracket(inner) | ValueToken::CloseBracket(inner) => {
-                &inner
-            },
-            ValueToken::Offset { inner, .. } |
-            ValueToken::Float { inner, .. } |
-            ValueToken::Integer { inner, .. } |
-            ValueToken::String { inner, .. } |
-            ValueToken::GlobalLabelDef { inner, .. } |
-            ValueToken::GlobalLabelRef { inner, .. } |
-            ValueToken::LocalLabelDef { inner, .. } |
-            ValueToken::LocalLabelRef { inner, .. } |
-            ValueToken::Operator { inner, .. } => {
-                &inner
-            }
-        }
-    }
-
-    fn inner_mut(&mut self) -> &mut InnerToken {
-        match self {
-            ValueToken::Name(inner) | ValueToken::Reserved(inner) | ValueToken::Instruction(inner)
-            | ValueToken::BinaryFile(inner, _) | ValueToken::BuiltinCall(inner, _) | ValueToken::Comma(inner)
-            | ValueToken::OpenParen(inner) | ValueToken::CloseParen(inner) | ValueToken::OpenBracket(inner) | ValueToken::CloseBracket(inner) => {
-                inner
-            },
-            ValueToken::Offset { inner, .. } |
-            ValueToken::Integer { inner, .. } |
-            ValueToken::Float { inner, .. } |
-            ValueToken::String { inner, .. } |
-            ValueToken::GlobalLabelDef { inner, .. } |
-            ValueToken::GlobalLabelRef { inner, .. } |
-            ValueToken::LocalLabelDef { inner, .. } |
-            ValueToken::LocalLabelRef { inner, .. } |
-            ValueToken::Operator { inner, .. } => {
-                inner
-            }
-        }
-    }
-
-    fn into_inner(self) -> InnerToken {
-        match self {
-            ValueToken::Name(inner) | ValueToken::Reserved(inner) | ValueToken::Instruction(inner)
-            | ValueToken::BinaryFile(inner, _) | ValueToken::BuiltinCall(inner, _) | ValueToken::Comma(inner)
-            | ValueToken::OpenParen(inner) | ValueToken::CloseParen(inner) | ValueToken::OpenBracket(inner) | ValueToken::CloseBracket(inner) => {
-                inner
-            },
-            ValueToken::Offset { inner, .. } |
-            ValueToken::Integer { inner, .. } |
-            ValueToken::Float { inner, .. } |
-            ValueToken::String { inner, .. } |
-            ValueToken::GlobalLabelDef { inner, .. } |
-            ValueToken::GlobalLabelRef { inner, .. } |
-            ValueToken::LocalLabelDef { inner, .. } |
-            ValueToken::LocalLabelRef { inner, .. } |
-            ValueToken::Operator { inner, .. } => {
-                inner
-            }
-        }
-    }
-
-}
+});
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Operator {
