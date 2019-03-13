@@ -74,7 +74,20 @@ impl ExpressionLexer {
     fn from_tokens(tokens: Vec<ValueToken>) -> Result<Vec<ExpressionToken>, LexerError> {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            // TODO check for expression start
+            let expression_start = match token {
+                ValueToken::Name(_) => true,
+                ValueToken::OpenParen(_) => true,
+                ValueToken::BuiltinCall(_, _) => true,
+                ValueToken::Float { .. } => true,
+                ValueToken::Integer { .. } => true,
+                ValueToken::GlobalLabelRef { .. } => true,
+                ValueToken::LocalLabelRef { .. } => true,
+                ValueToken::Operator { ..  } => {
+                    // TODO check unary
+                    true
+                },
+                _ => false
+            };
         }
         Ok(Vec::new())
     }
