@@ -192,7 +192,7 @@ impl<T: LexerToken> TokenIterator<T> {
             None => Err(LexerError::new(
                 self.file_index,
                 self.index,
-                format!("Unexpected end of input {}.", message.into())
+                message.into()
             ))
         }
     }

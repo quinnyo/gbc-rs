@@ -80,6 +80,47 @@ pub enum Operator {
     BitXor,
 }
 
+impl Operator {
+
+    pub fn associativity(&self) -> usize {
+        match self {
+            Operator::Pow | Operator::BitXor => 0,
+            _ => 1
+        }
+    }
+
+    pub fn precedence(&self) -> usize {
+        match self {
+            Operator::LogicalOr => 1,
+            Operator::LogicalAnd => 2,
+            Operator::BitOr => 3,
+            Operator::BitXor => 4,
+            Operator::BitAnd => 5,
+            Operator::Equals | Operator::Unequals => 6,
+            Operator::GreaterThanEqual | Operator::LessThanEqual | Operator::LessThan | Operator::GreaterThan => 7,
+            Operator::ShiftRight | Operator::ShiftLeft => 8,
+            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => 9,
+            Operator::Mul | Operator::Div | Operator::Modulo | Operator::DivInt => 11,
+            Operator::Pow => 12,
+        }
+    }
+
+    pub fn is_unary(&self) -> bool {
+        match self {
+            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => true,
+            _ => false
+        }
+    }
+
+    pub fn is_unary_exclusive(&self) -> bool {
+        match self {
+            Operator::LogicalNot | Operator::BitNegate => true,
+            _ => false
+        }
+    }
+
+}
+
 // Value Level Lexer Implementation -------------------------------------------
 pub struct ValueLexer {
     pub files: Vec<LexerFile>,

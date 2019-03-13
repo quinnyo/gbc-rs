@@ -215,7 +215,7 @@ impl MacroLexer {
                 // Collect Body Tokens
                 let mut body_tokens = Vec::new();
                 while !tokens.peek(TokenType::Reserved, Some("ENDMACRO")) {
-                    let token = tokens.get("while parsing macro body")?;
+                    let token = tokens.get("Unexpected end of input while parsing macro body.")?;
                     if token.is(TokenType::Reserved) && token.has_value("MACRO") {
                         return Err(token.error(format!("Invalid nested macro definition.")));
 
@@ -529,7 +529,7 @@ impl MacroLexer {
         let mut arg_tokens = Vec::new();
         while !tokens.peek(TokenType::CloseParen, None) || paren_depth > 1 {
 
-            let next = tokens.get("while parsing macro arguments list")?;
+            let next = tokens.get("Unexpected end of input while parsing macro arguments list.")?;
             if next.is(TokenType::OpenParen) {
                 paren_depth += 1 ;
 

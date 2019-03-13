@@ -1,47 +1,16 @@
 // STD Dependencies -----------------------------------------------------------
+use std::mem;
 use std::error::Error;
+
+
+// External Dependencies ------------------------------------------------------
+use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
 use super::{ValueLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
-use super::value::ValueToken;
+use super::value::{Operator, ValueToken};
 use super::macros::MacroCall;
-
-
-// Expression Abstraction -----------------------------------------------------
-#[allow(unused)]
-pub enum ExpressionType {
-    Binary,
-    Unary,
-    Value
-}
-
-#[allow(unused)]
-pub struct Expression {
-    value: ValueToken,
-    typ: ExpressionType,
-    left: Option<Box<Expression>>,
-    right: Option<Box<Expression>>
-}
-
-trait ExpressionMember {
-    fn is_start(&self) -> bool;
-    fn is_follow_up(&self, prev: &Self) -> bool;
-}
-
-impl ExpressionMember for TokenType {
-
-    fn is_start(&self) -> bool {
-        // TODO
-        false
-    }
-
-    fn is_follow_up(&self, prev: &TokenType) -> bool {
-        // TODO
-        false
-    }
-
-}
 
 
 // Expression Specific Tokens -------------------------------------------------
@@ -53,7 +22,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     Comma(()),
     OpenBracket(()),
     CloseBracket(()),
-    Expression(())
+    Expression((Expression))
 }, {
     GlobalLabelDef {
         name => String
@@ -115,19 +84,26 @@ impl ExpressionLexer {
     }
 
     fn from_tokens(tokens: Vec<ValueToken>) -> Result<Vec<ExpressionToken>, LexerError> {
+        let parsed_tokens = Self::parse_expression(tokens, false)?;
+        Ok(parsed_tokens)
+    }
+
+    fn parse_expression(tokens: Vec<ValueToken>, force_expression: bool) -> Result<Vec<ExpressionToken>, LexerError> {
+        let mut expression_tokens = Vec::new();
         let mut tokens = TokenIterator::new(tokens);
-        let mut tokens_without_expression = Vec::new();
         while let Some(token) = tokens.next() {
 
-            // Check for start of expression
             let mut current_typ = token.typ();
-            if current_typ.is_start() {
+
+            // Check for start of expression
+            let expr_token = if ExpressionParser::is_start_token(current_typ) {
 
                 // Collect all compatible tokens
-                let mut expression_tokens = Vec::new();
+                let inner = token.inner().clone();
+                let mut value_tokens = vec![token];
                 while let Some(next_typ) = tokens.peek_typ() {
-                    if next_typ.is_follow_up(&current_typ) {
-                        expression_tokens.push(tokens.next().unwrap());
+                    if ExpressionParser::is_follow_up_token(next_typ, current_typ) {
+                        value_tokens.push(tokens.next().unwrap());
                         current_typ = next_typ;
 
                     } else {
@@ -135,39 +111,226 @@ impl ExpressionLexer {
                     }
                 }
 
-                // TODO parse collected tokens into expression tree
-                println!("{:?}", expression_tokens);
+                // Try to build an expression tree from the tokens
+                ExpressionToken::Expression(
+                    inner,
+                    Expression::from_tokens(value_tokens)?
+                )
 
-            // Forward all non-expression tokens
+            } else if force_expression == false {
+                // Forward all non-expression tokens
+                ExpressionToken::from(token)
+
             } else {
-                tokens_without_expression.push(ExpressionToken::from(token));
-            }
+                return Err(token.error(format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())));
+            };
+
+            expression_tokens.push(expr_token);
 
         }
-        Ok(tokens_without_expression)
+        Ok(expression_tokens)
     }
 
-    /*
-    fn is_expression(previous: Option<TokenType>, current: TokenType) -> bool {
-        match previous {
-            Some(prev) => match prev {
-                TokenType::Name =>
-                TokenType::OpenParen =>
-                TokenType::BuiltinCall =>
-                TokenType::Float =>
-            },
-            // Expression Start
-            None => match current {
-                TokenType::Name => true,
-                TokenType::OpenParen => true,
-                TokenType::BuiltinCall => true,
-                TokenType::Float | TokenType::Integer | TokenType::String => true,
-                TokenType::GlobalLabelRef | TokenType::GlobalLabelDef => true,
-                TokenType::Operator => true,
-                _ => false
+}
+
+
+// Expression Abstraction -----------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub enum ExpressionType {
+    Binary(Operator),
+    Unary(Operator),
+    Value,
+    Call
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum ExpressionValue {
+    Integer(i32),
+    Float(OrderedFloat<f32>),
+    String(String)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Expression {
+    typ: ExpressionType,
+    value: Option<ExpressionValue>,
+    args: Option<Vec<Expression>>,
+    left: Option<Box<Expression>>,
+    right: Option<Box<Expression>>
+}
+
+impl Expression {
+
+    fn from_tokens(tokens: Vec<ValueToken>) -> Result<Expression, LexerError> {
+        ExpressionParser::new(tokens)?.parse_binary(0)
+    }
+
+    // TODO implement both type / type operator interaction as well as type / type value interaction
+    // TODO macro return type based on weak type interactions in expression walk
+    // TODO type check can only happen after name / value resolution
+    // pub fn evaluate_typ()
+
+}
+
+pub struct ExpressionParser {
+    token: Option<ValueToken>,
+    tokens: TokenIterator<ValueToken>
+}
+
+impl ExpressionParser {
+
+    fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, LexerError> {
+        let mut tokens = TokenIterator::new(tokens);
+        Ok(Self {
+            token: tokens.next(),
+            tokens
+        })
+    }
+
+    fn parse_binary(&mut self, prec: usize) -> Result<Expression, LexerError> {
+
+        // Every potential binary expression starts with one unary
+        let mut left = self.parse_unary()?;
+
+        // Now we collect additional binary operators on the right as long as their
+        // precedence is higher then the initial one
+        while self.is_binary() && self.precedence() > prec {
+            let op = self.expect_typ(TokenType::Operator, "Unexpected end of expression after binary operator, expected a right-hand side value.")?;
+            if let ValueToken::Operator { typ, .. } = op {
+
+                let right = self.parse_binary(typ.precedence() + typ.associativity())?;
+
+                // Comine to a new lefthand expression
+                left = Expression {
+                    typ: ExpressionType::Binary(typ),
+                    args: None,
+                    value: None,
+                    left: Some(Box::new(left)),
+                    right: Some(Box::new(right))
+                }
+
+            } else {
+                unreachable!();
             }
         }
-    }*/
+
+        Ok(left)
+
+    }
+
+    fn next(&mut self) -> ValueToken {
+        mem::replace(&mut self.token, self.tokens.next()).expect("ExpressionParser::consume failed")
+    }
+
+    fn expect<S: Into<String>>(&mut self, msg: S) -> Result<ValueToken, LexerError> {
+        Ok(mem::replace(&mut self.token, Some(self.tokens.get(msg.into())?)).expect("ExpressionParser::expect failed"))
+    }
+
+    fn expect_typ<S: Into<String>>(&mut self, typ: TokenType, msg: S) -> Result<ValueToken, LexerError> {
+        Ok(mem::replace(&mut self.token, Some(self.tokens.expect(typ, None, msg.into())?)).expect("ExpressionParser::expect_typ failed"))
+    }
+
+    fn parse_unary(&mut self) -> Result<Expression, LexerError> {
+
+        // Parse unary operator and combine with it's right hand side value
+        if self.is_unary() {
+            let op = self.expect("Unexpected end of expression after unary operator, expected a right-hand side value.")?;
+            if let ValueToken::Operator { typ, .. } = op {
+                self.next();
+                let right = self.parse_binary(typ.precedence())?;
+                Ok(Expression {
+                    typ: ExpressionType::Unary(typ),
+                    args: None,
+                    value: None,
+                    left: None,
+                    right: Some(Box::new(right))
+                })
+
+            } else {
+                unreachable!();
+            }
+
+        // Handle parenthesis
+        } else if self.is_paren() {
+            self.expect("Unexpected end of expression after opening parenthesis, expected an inner expression.")?;
+            let left = self.parse_binary(0)?;
+            self.expect_typ(TokenType::CloseParen, "Expected a closing parenthesis after end of inner expression.")?;
+            Ok(left)
+
+        // Parse Values and Calls
+        } else {
+            let _value = self.next();
+
+            /*
+            // TODO parse parameter
+            ValueToken::BuiltinCall(_, arguments) => {
+                let mut expression_args = Vec::new();
+                for tokens in arguments {
+                    expression_args.push(Self::parse_expression(
+                        tokens,
+                        true
+                    )?);
+                }
+            },
+            }*/
+
+            Ok(Expression {
+                // TODO calls
+                typ: ExpressionType::Value,
+                // TODO call args
+                args: None,
+                // TODO value typ from above
+                value: None,
+                left: None,
+                right: None
+            })
+        }
+    }
+
+    fn is_paren(&self) -> bool {
+        match &self.token {
+            Some(ValueToken::OpenParen(_)) => true,
+            _ => false
+        }
+    }
+
+    fn is_unary(&self) -> bool {
+        match &self.token {
+            Some(ValueToken::Operator { typ, .. }) => !typ.is_unary(),
+            _ => false
+        }
+    }
+
+    fn is_binary(&self) -> bool {
+        match &self.token {
+            Some(ValueToken::Operator { typ, .. })=> !typ.is_unary_exclusive(),
+            _ => false
+        }
+    }
+
+    fn precedence(&self) -> usize {
+        match &self.token {
+            Some(ValueToken::Operator { typ, .. })=> typ.precedence(),
+            _ => 0
+        }
+    }
+
+    fn is_start_token(current: TokenType) -> bool {
+        match current {
+            TokenType::Name => true,
+            TokenType::BuiltinCall => true,
+            TokenType::Operator => true,
+            TokenType::Float | TokenType::Integer | TokenType::String => true,
+            TokenType::GlobalLabelRef | TokenType::LocalLabelRef => true,
+            TokenType::OpenParen => true,
+            _ => false
+        }
+    }
+
+    fn is_follow_up_token(next: TokenType, prev: TokenType) -> bool {
+        // TODO build up for unary / binary operator support and parenthesis
+        false
+    }
 
 }
 
@@ -190,13 +353,65 @@ mod test {
         expr_lexer(s).tokens
     }
 
+    macro_rules! itk {
+        ($start:expr, $end:expr, $raw:expr, $parsed:expr) => {
+            InnerToken::new(0, $start, $end, $raw.into(), $parsed.into())
+        }
+    }
+
+    macro_rules! etk {
+        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
+            ExpressionToken::$tok(itk!($start, $end, $raw, $parsed))
+        }
+    }
+
+
     // Expression Parsing -----------------------------------------------------
     #[test]
     fn test_empty() {
         assert_eq!(tfe(""), vec![]);
     }
 
-    // TODO test single types
+    #[test]
+    fn test_standalone() {
+        assert_eq!(tfe("foo"), vec![]);
+        assert_eq!(tfe("4"), vec![]);
+        assert_eq!(tfe("4.2"), vec![]);
+        assert_eq!(tfe("'Foo'"), vec![]);
+    }
+
+    #[test]
+    fn test_builtin_call() {
+        assert_eq!(tfe("DBG()"), vec![
+            //ExpressionToken::Expression(itk!(0, 3, "DBG", "DBG"))
+
+        ]);
+        assert_eq!(tfe("MAX(4, MIN(1, 2))"), vec![]);
+    }
+
+    #[test]
+    fn test_label_global_ref() {
+        assert_eq!(tfe("global_label:\nglobal_label"), vec![
+            ExpressionToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label", "global_label"),
+                name: "global_label".to_string()
+            }
+        ]);
+    }
+
+    #[test]
+    fn test_label_local_ref() {
+        assert_eq!(tfe("global_label:\n.local_label:\n.local_label"), vec![
+            ExpressionToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label", "global_label"),
+                name: "global_label".to_string()
+            },
+            ExpressionToken::LocalLabelDef {
+                inner: itk!(14, 27, ".", "."),
+                name: "local_label".to_string()
+            }
+        ]);
+    }
 
     // TODO test unary operators
 
