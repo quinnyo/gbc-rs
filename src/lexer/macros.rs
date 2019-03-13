@@ -240,11 +240,10 @@ impl MacroLexer {
 
         // Recursively expand all Macro Calls
         let mut macro_call_id = 0;
-        let mut expansion_depth = 0;
         let tokens_without_macro_calls = Self::expand_macro_calls(
             tokens_without_macro_defs,
             &mut macro_call_id,
-            &mut expansion_depth,
+            0,
             macro_calls,
             &builtin_macro_defs,
             &user_macro_defs
@@ -275,7 +274,7 @@ impl MacroLexer {
     fn expand_macro_calls(
         tokens: Vec<IncludeToken>,
         macro_call_id: &mut usize,
-        expansion_depth: &mut usize,
+        expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
         user_macro_defs: &[MacroDefinition],
@@ -346,8 +345,8 @@ impl MacroLexer {
                         )?);
                     }
 
-                    *expansion_depth += 1;
-                    if *expansion_depth > MAX_EXPANSION_DEPTH {
+                    // Prevent stack overflow with deep recursive macros
+                    if expansion_depth >= MAX_EXPANSION_DEPTH {
                         let last_macro_call = macro_calls.last().unwrap();
                         return Err(last_macro_call.name.error(format!(
                             "Maximum recursion limit of {} reached during expansion of macro \"{}\".",
@@ -362,7 +361,7 @@ impl MacroLexer {
                     tokens_without_macro_calls.append(&mut Self::expand_macro_calls(
                         expanded_macro_tokens.into_iter().filter(|t| !t.is(TokenType::Newline)).collect(),
                         macro_call_id,
-                        expansion_depth,
+                        expansion_depth + 1,
                         macro_calls,
                         builtin_macro_defs,
                         user_macro_defs
@@ -380,7 +379,7 @@ impl MacroLexer {
         inner: InnerToken,
         arg_tokens: Vec<Vec<IncludeToken>>,
         macro_call_id: &mut usize,
-        expansion_depth: &mut usize,
+        expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
         user_macro_defs: &[MacroDefinition],
@@ -1128,6 +1127,14 @@ mod test {
         assert_eq!(
             macro_lexer_error("FOO() MACRO FOO() @b ENDMACRO"),
             "In file \"main.gb.s\" on line 1, column 19: Unknown parameter in expansion of macro \"FOO\", parameter \"b\" is not defined in list of macro parameters.\n\nFOO() MACRO FOO() @b ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 1: Triggered by previous macro invocation\n\nFOO() MACRO FOO() @b ENDMACRO\n^--- Here"
+        );
+    }
+
+    #[test]
+    fn test_macro_user_expansion_parallel() {
+        assert_eq!(
+            macro_lexer("FOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\n MACRO FOO() ENDMACRO").tokens.len(),
+            0
         );
     }
 
