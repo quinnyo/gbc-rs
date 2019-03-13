@@ -815,6 +815,7 @@ mod test {
         assert_eq!(lexer.macro_calls, vec![
             mcall!(0, itk!(0, 3, "DBG", "DBG"), vec![])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -833,6 +834,7 @@ mod test {
                 vec![tk!(NumberLiteral, 4, 5, "4", "4")]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -857,6 +859,7 @@ mod test {
                 )]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -877,6 +880,7 @@ mod test {
                 vec![tk!(NumberLiteral, 7, 8, "2", "2")]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -921,6 +925,7 @@ mod test {
                 vec![tk!(NumberLiteral, 22, 23, "2", "2")]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -943,6 +948,7 @@ mod test {
                 vec![mtk!(NumberLiteral, 32, 33, "2", "2")]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 4);
     }
 
     #[test]
@@ -953,6 +959,7 @@ mod test {
                 vec![mtke!(NumberLiteral, 24, 25, "4", "4", 0)],
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 2);
     }
 
     #[test]
@@ -963,6 +970,7 @@ mod test {
                 vec![mtke!(NumberLiteral, 32, 33, "4", "4", 0)],
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 2);
     }
 
     #[test]
@@ -973,6 +981,7 @@ mod test {
                 vec![mtke!(NumberLiteral, 13, 14, "4", "4", 1)],
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 3);
     }
 
     // User Macro Calls -------------------------------------------------------
@@ -989,6 +998,7 @@ mod test {
         assert_eq!(lexer.macro_calls, vec![
             mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -1005,6 +1015,7 @@ mod test {
                 ]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -1049,6 +1060,7 @@ mod test {
                 )]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -1069,6 +1081,7 @@ mod test {
                 ]
             ])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -1082,6 +1095,7 @@ mod test {
             mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![]),
             mcall!(1, itke!(20, 23, "BAR", "BAR", 0), vec![])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 2);
     }
 
     #[test]
@@ -1104,6 +1118,7 @@ mod test {
             ]),
             mcall!(1, itke!(5, 8, "BAR", "BAR", 0), vec![])
         ]);
+        assert_eq!(lexer.macro_calls_count(), 2);
     }
 
     #[test]
@@ -1112,6 +1127,7 @@ mod test {
         assert_eq!(lexer.tokens, vec![
             mtke!(NumberLiteral, 16, 17, "4", "4", 0),
         ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
     }
 
     #[test]
@@ -1133,8 +1149,8 @@ mod test {
     #[test]
     fn test_macro_user_expansion_parallel() {
         assert_eq!(
-            macro_lexer("FOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\n MACRO FOO() ENDMACRO").tokens.len(),
-            0
+            macro_lexer("FOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\n MACRO FOO() ENDMACRO").macro_calls_count(),
+            9
         );
     }
 
@@ -1144,6 +1160,7 @@ mod test {
         assert_eq!(lexer.tokens, vec![
             mtke!(NumberLiteral, 12, 13, "4", "4", 2),
         ]);
+        assert_eq!(lexer.macro_calls_count(), 3);
     }
 
 }
