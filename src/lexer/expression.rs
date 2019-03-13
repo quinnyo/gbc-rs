@@ -131,45 +131,62 @@ impl ExpressionLexer {
         Ok(expression_tokens)
     }
 
+    fn parse_expression_argument(tokens: Vec<ValueToken>) -> Result<Expression, LexerError> {
+        let mut expression_tokens = ExpressionLexer::parse_expression(tokens, true)?;
+        if expression_tokens.len() > 1 {
+            // TODO can this even happen?
+            return Err(expression_tokens[1].error("Expected only one expression.".to_string()));
+        }
+        if let ExpressionToken::Expression(_, expr) = expression_tokens.remove(0) {
+            Ok(expr)
+
+        } else {
+            unreachable!();
+        }
+    }
+
 }
 
 
 // Expression Abstraction -----------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
-pub enum ExpressionType {
-    Binary(Operator),
-    Unary(Operator),
-    Value,
-    Call
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum ExpressionValue {
-    Integer(i32),
-    Float(OrderedFloat<f32>),
-    String(String)
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct Expression {
-    typ: ExpressionType,
-    value: Option<ExpressionValue>,
-    args: Option<Vec<Expression>>,
-    left: Option<Box<Expression>>,
-    right: Option<Box<Expression>>
+pub enum Expression {
+    Binary {
+        op: Operator,
+        left: Box<Expression>,
+        right: Box<Expression>
+    },
+    Unary {
+        op: Operator,
+        right: Box<Expression>
+    },
+    Value(ExpressionValue),
+    BuiltinCall {
+        inner: InnerToken,
+        name: String,
+        args: Vec<Expression>
+    }
 }
 
 impl Expression {
-
     fn from_tokens(tokens: Vec<ValueToken>) -> Result<Expression, LexerError> {
         ExpressionParser::new(tokens)?.parse_binary(0)
     }
-
     // TODO implement both type / type operator interaction as well as type / type value interaction
     // TODO macro return type based on weak type interactions in expression walk
     // TODO type check can only happen after name / value resolution
     // pub fn evaluate_typ()
+}
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum ExpressionValue {
+    VariableValue(InnerToken, String),
+    Integer(i32),
+    Float(OrderedFloat<f32>),
+    String(String),
+    OffsetAddress(InnerToken, i32),
+    GlobalLabelAddress(InnerToken, String),
+    LocalLabelAddress(InnerToken, String)
 }
 
 pub struct ExpressionParser {
@@ -200,13 +217,11 @@ impl ExpressionParser {
 
                 let right = self.parse_binary(typ.precedence() + typ.associativity())?;
 
-                // Comine to a new lefthand expression
-                left = Expression {
-                    typ: ExpressionType::Binary(typ),
-                    args: None,
-                    value: None,
-                    left: Some(Box::new(left)),
-                    right: Some(Box::new(right))
+                // Comine to a new left-hand side expression
+                left = Expression::Binary {
+                    op: typ,
+                    left: Box::new(left),
+                    right: Box::new(right)
                 }
 
             } else {
@@ -238,12 +253,9 @@ impl ExpressionParser {
             if let ValueToken::Operator { typ, .. } = op {
                 self.next();
                 let right = self.parse_binary(typ.precedence())?;
-                Ok(Expression {
-                    typ: ExpressionType::Unary(typ),
-                    args: None,
-                    value: None,
-                    left: None,
-                    right: Some(Box::new(right))
+                Ok(Expression::Unary {
+                    op: typ,
+                    right: Box::new(right)
                 })
 
             } else {
@@ -259,31 +271,44 @@ impl ExpressionParser {
 
         // Parse Values and Calls
         } else {
-            let _value = self.next();
-
-            /*
-            // TODO parse parameter
-            ValueToken::BuiltinCall(_, arguments) => {
-                let mut expression_args = Vec::new();
-                for tokens in arguments {
-                    expression_args.push(Self::parse_expression(
-                        tokens,
-                        true
-                    )?);
+            match self.next() {
+                ValueToken::Name(inner) => {
+                    let name = inner.value.clone();
+                    Ok(Expression::Value(ExpressionValue::VariableValue(inner, name)))
+                },
+                ValueToken::Offset { inner, value } => Ok(
+                    Expression::Value(ExpressionValue::OffsetAddress(inner, value)),
+                ),
+                ValueToken::Float { value, .. } => Ok(
+                    Expression::Value(ExpressionValue::Float(value)),
+                ),
+                ValueToken::Integer { value, .. } => Ok(
+                    Expression::Value(ExpressionValue::Integer(value)),
+                ),
+                ValueToken::String { value, .. } => Ok(
+                    Expression::Value(ExpressionValue::String(value)),
+                ),
+                ValueToken::GlobalLabelRef { inner, name } => Ok(
+                    Expression::Value(ExpressionValue::GlobalLabelAddress(inner, name)),
+                ),
+                ValueToken::LocalLabelRef { inner, name } => Ok(
+                    Expression::Value(ExpressionValue::LocalLabelAddress(inner, name)),
+                ),
+                ValueToken::BuiltinCall(inner, arguments) => {
+                    let mut args = Vec::new();
+                    for tokens in arguments {
+                        args.push(ExpressionLexer::parse_expression_argument(tokens)?);
+                    }
+                    let name = inner.value.clone();
+                    Ok(Expression::BuiltinCall {
+                        inner,
+                        name,
+                        args
+                    })
                 }
-            },
-            }*/
+                token => unreachable!("Unexpected value token: {:?}", token)
+            }
 
-            Ok(Expression {
-                // TODO calls
-                typ: ExpressionType::Value,
-                // TODO call args
-                args: None,
-                // TODO value typ from above
-                value: None,
-                left: None,
-                right: None
-            })
         }
     }
 
@@ -386,6 +411,13 @@ mod test {
             //ExpressionToken::Expression(itk!(0, 3, "DBG", "DBG"))
 
         ]);
+    }
+
+    // TODO test FLOOR((4) (4)) expressions and stuff to see if this can happen or is catched in a
+    // previous lexer already
+
+    #[test]
+    fn test_builtin_call_with_args() {
         assert_eq!(tfe("MAX(4, MIN(1, 2))"), vec![]);
     }
 
@@ -418,8 +450,6 @@ mod test {
     // TODO test binary operators
 
     // TODO test parenthesis
-
-    // TODO test builtin calls
 
 }
 
