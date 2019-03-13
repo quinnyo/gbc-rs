@@ -137,6 +137,10 @@ impl<T: LexerToken> TokenIterator<T> {
         }
     }
 
+    pub fn peek_typ(&mut self) -> Option<TokenType> {
+        self.tokens.peek().map(|t| t.typ())
+    }
+
     pub fn peek(&mut self, typ: TokenType, value: Option<&str>) -> bool {
         match self.tokens.peek() {
             Some(token) => if token.is(typ) {

@@ -24,6 +24,25 @@ pub struct Expression {
     right: Option<Box<Expression>>
 }
 
+trait ExpressionMember {
+    fn is_start(&self) -> bool;
+    fn is_follow_up(&self, prev: &Self) -> bool;
+}
+
+impl ExpressionMember for TokenType {
+
+    fn is_start(&self) -> bool {
+        // TODO
+        false
+    }
+
+    fn is_follow_up(&self, prev: &TokenType) -> bool {
+        // TODO
+        false
+    }
+
+}
+
 
 // Expression Specific Tokens -------------------------------------------------
 lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
@@ -43,6 +62,30 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
         name => String
     }
 });
+
+impl From<ValueToken> for ExpressionToken {
+    fn from(token: ValueToken) -> Self {
+        match token {
+            ValueToken::Reserved(inner) => ExpressionToken::Reserved(inner),
+            ValueToken::Instruction(inner) => ExpressionToken::Instruction(inner),
+            ValueToken::BinaryFile(inner, bytes) => ExpressionToken::BinaryFile(inner, bytes),
+            ValueToken::Comma(inner) => ExpressionToken::Comma(inner),
+            ValueToken::OpenBracket(inner) => ExpressionToken::OpenBracket(inner),
+            ValueToken::CloseBracket(inner) => ExpressionToken::CloseBracket(inner),
+            ValueToken::GlobalLabelDef { inner, name } => ExpressionToken::GlobalLabelDef {
+                inner,
+                name
+            },
+            ValueToken::LocalLabelDef { inner, name } => ExpressionToken::LocalLabelDef {
+                inner,
+                name
+            },
+            token => {
+                unreachable!("Token {:?} may not be passed through ExpressionLexer", token)
+            }
+        }
+    }
+}
 
 
 // Expression Level Lexer Implementation --------------------------------------
@@ -73,24 +116,58 @@ impl ExpressionLexer {
 
     fn from_tokens(tokens: Vec<ValueToken>) -> Result<Vec<ExpressionToken>, LexerError> {
         let mut tokens = TokenIterator::new(tokens);
+        let mut tokens_without_expression = Vec::new();
         while let Some(token) = tokens.next() {
-            let expression_start = match token {
-                ValueToken::Name(_) => true,
-                ValueToken::OpenParen(_) => true,
-                ValueToken::BuiltinCall(_, _) => true,
-                ValueToken::Float { .. } => true,
-                ValueToken::Integer { .. } => true,
-                ValueToken::GlobalLabelRef { .. } => true,
-                ValueToken::LocalLabelRef { .. } => true,
-                ValueToken::Operator { ..  } => {
-                    // TODO check unary
-                    true
-                },
-                _ => false
-            };
+
+            // Check for start of expression
+            let mut current_typ = token.typ();
+            if current_typ.is_start() {
+
+                // Collect all compatible tokens
+                let mut expression_tokens = Vec::new();
+                while let Some(next_typ) = tokens.peek_typ() {
+                    if next_typ.is_follow_up(&current_typ) {
+                        expression_tokens.push(tokens.next().unwrap());
+                        current_typ = next_typ;
+
+                    } else {
+                        break;
+                    }
+                }
+
+                // TODO parse collected tokens into expression tree
+                println!("{:?}", expression_tokens);
+
+            // Forward all non-expression tokens
+            } else {
+                tokens_without_expression.push(ExpressionToken::from(token));
+            }
+
         }
-        Ok(Vec::new())
+        Ok(tokens_without_expression)
     }
+
+    /*
+    fn is_expression(previous: Option<TokenType>, current: TokenType) -> bool {
+        match previous {
+            Some(prev) => match prev {
+                TokenType::Name =>
+                TokenType::OpenParen =>
+                TokenType::BuiltinCall =>
+                TokenType::Float =>
+            },
+            // Expression Start
+            None => match current {
+                TokenType::Name => true,
+                TokenType::OpenParen => true,
+                TokenType::BuiltinCall => true,
+                TokenType::Float | TokenType::Integer | TokenType::String => true,
+                TokenType::GlobalLabelRef | TokenType::GlobalLabelDef => true,
+                TokenType::Operator => true,
+                _ => false
+            }
+        }
+    }*/
 
 }
 
@@ -118,6 +195,16 @@ mod test {
     fn test_empty() {
         assert_eq!(tfe(""), vec![]);
     }
+
+    // TODO test single types
+
+    // TODO test unary operators
+
+    // TODO test binary operators
+
+    // TODO test parenthesis
+
+    // TODO test builtin calls
 
 }
 

@@ -61,7 +61,7 @@ impl From<IncludeToken> for MacroToken {
             IncludeToken::OpenBracket(inner) => MacroToken::OpenBracket(inner),
             IncludeToken::CloseBracket(inner) => MacroToken::CloseBracket(inner),
             token => {
-                unreachable!("Token {:?} should not be passed through MacroLexer", token)
+                unreachable!("Token {:?} may not be passed through MacroLexer", token)
             }
         }
     }
@@ -135,6 +135,7 @@ pub struct MacroLexer {
 
 impl MacroLexer {
 
+    // TODO use a trait for the boiler plate stuff
     pub fn try_from(lexer: IncludeLexer) -> Result<MacroLexer, Box<dyn Error>> {
 
         let files = lexer.files;
@@ -386,7 +387,7 @@ impl MacroLexer {
 
     ) -> Result<IncludeToken, LexerError> {
 
-        let mut arguments = Vec::new();
+        let mut arguments = Vec::with_capacity(arg_tokens.len());
         for tokens in arg_tokens {
 
             let mut expanded = Vec::new();
