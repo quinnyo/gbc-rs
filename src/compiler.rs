@@ -15,9 +15,9 @@ impl Compiler {
     pub fn compile<T: FileReader>(reader: T, entry: PathBuf) -> Result<(), Box<dyn Error>> {
         let include_lexer = IncludeLexer::from_file(&reader, &entry).map_err(|e| CompilerError::new("INCLUDE", e))?;
         let included_token_count = include_lexer.len();
-        let macro_lexer = MacroLexer::try_from(include_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
-
         println!("Included {} token(s).", included_token_count);
+
+        let macro_lexer = MacroLexer::try_from(include_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
         println!("Found {} defined macro(s).", macro_lexer.macro_defs_count());
         println!("Found {} macro call(s).", macro_lexer.macro_calls_count());
         println!("{} token(s) after macro expansions.", macro_lexer.len());
@@ -28,9 +28,6 @@ impl Compiler {
         let expr_lexer = ExpressionLexer::try_from(value_lexer).map_err(|e| CompilerError::new("EXPRESSION CONSTRUCTION", e))?;
         println!("{} token(s) after expression construction.", expr_lexer.len());
 
-        // TODO ExpressionLexer, removes: OpenParen, CloseParen, Offset, Float, Integer, String, LocalLabelRef, Operator -> Generates: Expressions
-            // Expressions: Number, String, ValueOf(Name)
-        //
         // TODO EntryLexer, removes: Comma, OpenBracket, CloseBracket -> Generates: Sections, Data, Variables, Instructions)
             // TODO Everything at this stage takes expansion arguments of either Type=Number or Type=String
             // TODO When does Integer Conversion happen? Are Expressions also float as soon as one

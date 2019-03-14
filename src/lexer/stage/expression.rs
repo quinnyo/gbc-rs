@@ -8,7 +8,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::{ValueLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
+use super::super::{ValueLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
 use super::value::{Operator, ValueToken};
 use super::macros::MacroCall;
 
@@ -87,56 +87,70 @@ impl ExpressionLexer {
         Ok(parsed_tokens)
     }
 
-    fn parse_expression(tokens: Vec<ValueToken>, expression_id: &mut usize, force_expression: bool) -> Result<Vec<ExpressionToken>, LexerError> {
+    fn parse_expression(tokens: Vec<ValueToken>, expression_id: &mut usize, is_argument: bool) -> Result<Vec<ExpressionToken>, LexerError> {
         let mut expression_tokens = Vec::new();
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
+            if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQU")) {
+                expression_tokens.push(ExpressionToken::Name(token.into_inner()));
 
-            let mut current_typ = token.typ();
-
-            // Check for start of expression
-            let expr_token = if ExpressionParser::is_start_token(current_typ) {
-
-                // Collect all compatible tokens
-                let inner = token.inner().clone();
-                let mut value_tokens = vec![token];
-                while let Some(next_typ) = tokens.peek_typ() {
-                    if ExpressionParser::is_follow_up_token(current_typ, next_typ) {
-                        value_tokens.push(tokens.next().unwrap());
-                        current_typ = next_typ;
-
-                    } else {
-                        break;
-                    }
-                }
-
-                // Try to build an expression tree from the tokens
-                let expr = Expression::from_tokens(value_tokens, expression_id)?;
-                let id = *expression_id;
-                *expression_id += 1;
-                ExpressionToken::Expression(inner, id, expr)
-
-            } else if force_expression == false {
-                // Forward all non-expression tokens
-                match ExpressionToken::try_from(token) {
-                    Ok(token) => token,
-                    Err(token) => {
-                        return Err(token.error(
-                            format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
-                        ));
-                    }
-                }
+            } else if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
+                expression_tokens.push(ExpressionToken::Name(token.into_inner()));
 
             } else {
-                return Err(token.error(
-                    format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
-                ));
-            };
-
-            expression_tokens.push(expr_token);
-
+                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument, expression_id)?);
+            }
         }
         Ok(expression_tokens)
+    }
+
+    fn parse_expression_tokens(
+        tokens: &mut TokenIterator<ValueToken>,
+        token: ValueToken,
+        is_argument: bool,
+        expression_id: &mut usize
+
+    ) -> Result<ExpressionToken, LexerError> {
+        // Check for start of expression
+        let mut current_typ = token.typ();
+        if ExpressionParser::is_start_token(current_typ) {
+
+            // Collect all compatible tokens
+            let inner = token.inner().clone();
+            let mut value_tokens = vec![token];
+            while let Some(next_typ) = tokens.peek_typ() {
+                if ExpressionParser::is_follow_up_token(current_typ, next_typ) {
+                    value_tokens.push(tokens.next().unwrap());
+                    current_typ = next_typ;
+
+                } else {
+                    break;
+                }
+            }
+
+            // Try to build an expression tree from the tokens
+            let expr = Expression::from_tokens(value_tokens, expression_id)?;
+            let id = *expression_id;
+            *expression_id += 1;
+            Ok(ExpressionToken::Expression(inner, id, expr))
+
+        } else if is_argument == false {
+
+            // Forward all non-expression tokens
+            match ExpressionToken::try_from(token) {
+                Ok(token) => Ok(token),
+                Err(token) => {
+                    Err(token.error(
+                        format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
+                    ))
+                }
+            }
+
+        } else {
+            Err(token.error(
+                format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
+            ))
+        }
     }
 
     fn parse_expression_argument(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
@@ -419,7 +433,7 @@ impl ExpressionParser {
 mod test {
     use ordered_float::OrderedFloat;
     use super::{ExpressionLexer, ExpressionToken, InnerToken, Expression, ExpressionValue, Operator};
-    use crate::lexer::mocks::value_lex;
+    use super::super::mocks::value_lex;
 
     fn expr_lexer<S: Into<String>>(s: S) -> ExpressionLexer {
         ExpressionLexer::try_from(value_lex(s)).expect("ExpressionLexer failed")
@@ -444,6 +458,18 @@ mod test {
     #[test]
     fn test_empty() {
         assert_eq!(tfe(""), vec![]);
+    }
+
+    #[test]
+    fn test_keep_equ_names() {
+        assert_eq!(tfe("foo EQU"), vec![
+            ExpressionToken::Name(itk!(0, 3, "foo")),
+            ExpressionToken::Reserved(itk!(4, 7, "EQU"))
+        ]);
+        assert_eq!(tfe("foo EQUS"), vec![
+            ExpressionToken::Name(itk!(0, 3, "foo")),
+            ExpressionToken::Reserved(itk!(4, 8, "EQUS"))
+        ]);
     }
 
     #[test]
@@ -494,16 +520,16 @@ mod test {
 
     #[test]
     fn test_expression_id() {
-        assert_eq!(tfe("foo bar"), vec![
+        assert_eq!(tfe("4 2"), vec![
             ExpressionToken::Expression(
-                itk!(0, 3, "foo"),
+                itk!(0, 1, "4"),
                 0,
-                Expression::Value(ExpressionValue::VariableValue(itk!(0, 3, "foo"), "foo".to_string()))
+                Expression::Value(ExpressionValue::Integer(4))
             ),
             ExpressionToken::Expression(
-                itk!(4, 7, "bar"),
+                itk!(2, 3, "2"),
                 1,
-                Expression::Value(ExpressionValue::VariableValue(itk!(4, 7, "bar"), "bar".to_string()))
+                Expression::Value(ExpressionValue::Integer(2))
             )
         ]);
     }

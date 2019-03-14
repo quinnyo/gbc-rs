@@ -5,7 +5,7 @@ use std::error::Error;
 
 // Internal Dependencies ------------------------------------------------------
 use super::{LexerFile, InnerToken};
-use super::macros::MacroCall;
+use super::stage::macros::MacroCall;
 
 
 // Lexer Error Abstraction -----------------------------------------------------

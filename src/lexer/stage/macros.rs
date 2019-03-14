@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::{IncludeLexer, InnerToken, TokenIterator, LexerFile, LexerToken, LexerError, TokenType};
+use super::super::{IncludeLexer, InnerToken, TokenIterator, LexerFile, LexerToken, LexerError, TokenType};
 use super::include::IncludeToken;
 
 
@@ -603,7 +603,7 @@ impl MacroLexer {
 #[cfg(test)]
 mod test {
     use super::{MacroLexer, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType, MacroReturnType};
-    use crate::lexer::mocks::include_lex;
+    use super::super::mocks::include_lex;
 
     fn macro_lexer<S: Into<String>>(s: S) -> MacroLexer {
         MacroLexer::try_from(include_lex(s)).expect("MacroLexer failed")

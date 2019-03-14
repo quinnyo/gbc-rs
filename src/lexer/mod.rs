@@ -1,7 +1,3 @@
-// STD Dependencies -----------------------------------------------------------
-use std::path::PathBuf;
-
-
 // Token Abstraction ----------------------------------------------------------
 mod token;
 pub use self::token::{LexerToken, InnerToken, TokenType, TokenIterator};
@@ -84,8 +80,6 @@ macro_rules! lexer_token {
         ),*
 
     }) => {
-        // TODO remove once all lexers are done
-        #[allow(unused)]
         #[derive($($de),*)]
         pub enum $name {
             $(
@@ -162,56 +156,15 @@ macro_rules! lexer_token {
 
 // Modules --------------------------------------------------------------------
 mod error;
-mod include;
-mod expression;
-mod macros;
-mod value;
-#[cfg(test)] mod mocks;
+mod file;
+mod stage;
+use self::error::LexerError;
+use self::file::LexerFile;
 
 
-// Exports --------------------------------------------------------------------
-pub use self::include::IncludeLexer;
-pub use self::expression::ExpressionLexer;
-pub use self::macros::MacroLexer;
-pub use self::value::ValueLexer;
-pub use self::error::LexerError;
-
-
-// Lexer File Abstraction -----------------------------------------------------
-pub struct LexerFile {
-    index: usize,
-    path: PathBuf,
-    contents: String,
-    include_stack: Vec<InnerToken>
-}
-
-impl LexerFile {
-
-    fn new(index: usize, contents: String, path: PathBuf, include_stack: Vec<InnerToken>) -> Self {
-        Self {
-            index,
-            path,
-            contents,
-            include_stack
-        }
-    }
-
-    fn get_line_and_col(&self, index: usize) -> (usize, usize) {
-        let (mut line, mut col) = (0, 0);
-        for (i, c) in self.contents.chars().enumerate() {
-            if i == index {
-                break;
-
-            } else if c == '\n' || c == '\r' {
-                line += 1;
-                col = 0;
-
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
-    }
-
-}
+// Re-Exports --------------------------------------------------------------------
+pub use self::stage::include::IncludeLexer;
+pub use self::stage::expression::ExpressionLexer;
+pub use self::stage::macros::MacroLexer;
+pub use self::stage::value::ValueLexer;
 

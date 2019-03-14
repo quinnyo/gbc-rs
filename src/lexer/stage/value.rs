@@ -8,7 +8,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::{MacroLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
+use super::super::{MacroLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
 use super::macros::{MacroCall, MacroToken};
 
 
@@ -433,7 +433,7 @@ impl ValueLexer {
 mod test {
     use ordered_float::OrderedFloat;
     use super::{ValueLexer, ValueToken, InnerToken, Operator};
-    use crate::lexer::mocks::{macro_lex, macro_lex_child};
+    use super::super::mocks::{macro_lex, macro_lex_child};
 
     fn value_lexer<S: Into<String>>(s: S) -> ValueLexer {
         ValueLexer::try_from(macro_lex(s)).expect("ValueLexer failed")

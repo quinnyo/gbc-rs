@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
-use super::token::{TokenGenerator, TokenChar};
-use super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
+use super::super::token::{TokenGenerator, TokenChar};
+use super::super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------
@@ -421,7 +421,7 @@ impl IncludeLexer {
 mod test {
     use std::path::PathBuf;
     use super::{IncludeLexer, IncludeToken, InnerToken};
-    use crate::lexer::mocks::{MockFileReader, tfs, tfe};
+    use super::super::mocks::{MockFileReader, tfs, tfe};
 
     macro_rules! tk {
         ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
