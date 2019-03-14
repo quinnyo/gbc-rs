@@ -139,7 +139,7 @@ impl<T: LexerToken> TokenIterator<T> {
         self.tokens.peek().map(|t| t.typ())
     }
 
-    pub fn peek(&mut self, typ: TokenType, value: Option<&str>) -> bool {
+    pub fn peek_is(&mut self, typ: TokenType, value: Option<&str>) -> bool {
         match self.tokens.peek() {
             Some(token) => if token.is(typ) {
                 if let Some(value) = value {
@@ -154,6 +154,10 @@ impl<T: LexerToken> TokenIterator<T> {
             },
             None => false
         }
+    }
+
+    pub fn peek(&mut self) -> Option<&T> {
+        self.tokens.peek()
     }
 
     pub fn expect<S: Into<String>>(&mut self, typ: TokenType, value: Option<&str>, message: S) -> Result<T, LexerError> {

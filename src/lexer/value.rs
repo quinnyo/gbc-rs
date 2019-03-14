@@ -82,6 +82,15 @@ pub enum Operator {
 
 impl Operator {
 
+    pub fn len(&self) -> usize {
+        match self {
+            Operator::ShiftRight | Operator::ShiftLeft | Operator::LogicalAnd | Operator::LogicalOr |
+            Operator::Equals | Operator::Unequals | Operator::GreaterThanEqual | Operator::LessThanEqual |
+            Operator::Pow | Operator::DivInt => 2,
+            _ => 1
+        }
+    }
+
     pub fn associativity(&self) -> usize {
         match self {
             Operator::Pow | Operator::BitXor => 0,
@@ -180,7 +189,7 @@ impl ValueLexer {
                     ValueToken::BuiltinCall(inner, value_args)
                 },
                 MacroToken::Name(mut inner) => {
-                    if tokens.peek(TokenType::Colon, None) {
+                    if tokens.peek_is(TokenType::Colon, None) {
                         let colon = tokens.expect(TokenType::Colon, None, "when parsing global label definition")?.into_inner();
                         let label_id = Self::global_label_id(&inner);
                         if let Some(previous) = global_labels.get(&label_id) {
@@ -209,10 +218,10 @@ impl ValueLexer {
                 MacroToken::Point(mut inner) => {
 
                     // For local labels all kinds of names are allowed
-                    let name_token = if tokens.peek(TokenType::Instruction, None) {
+                    let name_token = if tokens.peek_is(TokenType::Instruction, None) {
                         tokens.expect(TokenType::Instruction, None, "when parsing local label")?.into_inner()
 
-                    } else if tokens.peek(TokenType::Reserved, None) {
+                    } else if tokens.peek_is(TokenType::Reserved, None) {
                         tokens.expect(TokenType::Reserved, None, "when parsing local label")?.into_inner()
 
                     } else {
@@ -227,7 +236,7 @@ impl ValueLexer {
                         name_token.value.to_string()
                     };
 
-                    if tokens.peek(TokenType::Colon, None) {
+                    if tokens.peek_is(TokenType::Colon, None) {
                         let colon = tokens.expect(TokenType::Colon, None, "when parsing local label definition")?.into_inner();
                         if global_labels.is_empty() {
                             return Err(inner.error(format!(
@@ -303,42 +312,19 @@ impl ValueLexer {
                     return Err(inner.error(format!("Unexpected standalone \"{}\", expected a \"Name\" token to preceed it.", inner.value)))
                 },
                 MacroToken::Operator(mut inner) => {
-                    let typ = if tokens.peek(TokenType::Operator, None) {
-                        let second = tokens.expect(TokenType::Operator, None, "when parsing operator")?.into_inner();
-                        inner.end_index = second.end_index;
-                        match (inner.value.chars().next().unwrap(), second.value.chars().next().unwrap()) {
-                            ('>', '>') => Operator::ShiftRight,
-                            ('<', '<') => Operator::ShiftLeft,
-                            ('&', '&') => Operator::LogicalAnd,
-                            ('|', '|') => Operator::LogicalOr,
-                            ('=', '=') => Operator::Equals,
-                            ('!', '=') => Operator::Unequals,
-                            ('>', '=') => Operator::GreaterThanEqual,
-                            ('<', '=') => Operator::LessThanEqual,
-                            ('*', '*') => Operator::Pow,
-                            ('/', '/') => Operator::DivInt,
-                            _ => {
-                                return Err(inner.error(format!("Unknown operator \"{}{}\".", inner.value, second.value)));
-                            }
+                    let typ = if tokens.peek_is(TokenType::Operator, None) {
+                        match Self::parse_operator_double(&inner, tokens.peek().unwrap().inner()) {
+                            Some(typ) => {
+                                tokens.expect(TokenType::Operator, None, "when parsing operator")?;
+                                typ
+                            },
+                            None => Self::parse_operator_single(&inner)?
                         }
 
                     } else {
-                        match inner.value.chars().next().unwrap() {
-                            '<' => Operator::LessThan,
-                            '>' => Operator::GreaterThan,
-                            '!' => Operator::LogicalNot,
-                            '+' => Operator::Plus,
-                            '-' => Operator::Minus,
-                            '*' => Operator::Mul,
-                            '/' => Operator::Div,
-                            '%' => Operator::Modulo,
-                            '&' => Operator::BitAnd,
-                            '|' => Operator::BitOr,
-                            '~' => Operator::BitNegate,
-                            '^' => Operator::BitXor,
-                            _ => unreachable!()
-                        }
+                        Self::parse_operator_single(&inner)?
                     };
+                    inner.end_index = inner.start_index + typ.len();
                     ValueToken::Operator {
                         inner,
                         typ
@@ -400,6 +386,43 @@ impl ValueLexer {
         inner.value.parse::<f32>().map_err(|_| {
             inner.error("Failed to parse float value.".to_string())
         })
+    }
+
+    fn parse_operator_single(inner: &InnerToken) -> Result<Operator, LexerError> {
+        match inner.value.chars().next().unwrap() {
+            '<' => Ok(Operator::LessThan),
+            '>' => Ok(Operator::GreaterThan),
+            '!' => Ok(Operator::LogicalNot),
+            '+' => Ok(Operator::Plus),
+            '-' => Ok(Operator::Minus),
+            '*' => Ok(Operator::Mul),
+            '/' => Ok(Operator::Div),
+            '%' => Ok(Operator::Modulo),
+            '&' => Ok(Operator::BitAnd),
+            '|' => Ok(Operator::BitOr),
+            '~' => Ok(Operator::BitNegate),
+            '^' => Ok(Operator::BitXor),
+            _ => Err(inner.error(format!("Unknown operator \"{}\".", inner.value)))
+        }
+    }
+
+    fn parse_operator_double(first: &InnerToken, second: &InnerToken) -> Option<Operator> {
+        match (
+            first.value.chars().next().unwrap(),
+            second.value.chars().next().unwrap()
+        ) {
+            ('>', '>') => Some(Operator::ShiftRight),
+            ('<', '<') => Some(Operator::ShiftLeft),
+            ('&', '&') => Some(Operator::LogicalAnd),
+            ('|', '|') => Some(Operator::LogicalOr),
+            ('=', '=') => Some(Operator::Equals),
+            ('!', '=') => Some(Operator::Unequals),
+            ('>', '=') => Some(Operator::GreaterThanEqual),
+            ('<', '=') => Some(Operator::LessThanEqual),
+            ('*', '*') => Some(Operator::Pow),
+            ('/', '/') => Some(Operator::DivInt),
+            (_, _) => None
+        }
     }
 
 }
@@ -812,8 +835,18 @@ mod test {
     }
 
     #[test]
-    fn test_error_unknown_operator() {
-        assert_eq!(value_lexer_error("&="), "In file \"main.gb.s\" on line 1, column 1: Unknown operator \"&=\".\n\n&=\n^--- Here");
+    fn test_operators_multiple() {
+        assert_eq!(tfv("+-*%"), vec![
+            vtko!(Operator::Plus, 0, 1, "+"),
+            vtko!(Operator::Minus, 1, 2, "-"),
+            vtko!(Operator::Mul, 2, 3, "*"),
+            vtko!(Operator::Modulo, 3, 4, "%")
+        ]);
+    }
+
+    #[test]
+    fn test_error_unknown_double_operator() {
+        assert_eq!(value_lexer_error("="), "In file \"main.gb.s\" on line 1, column 1: Unknown operator \"=\".\n\n=\n^--- Here");
     }
 
     // Value Errors -----------------------------------------------------------

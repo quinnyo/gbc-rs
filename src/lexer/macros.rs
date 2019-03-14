@@ -214,7 +214,7 @@ impl MacroLexer {
 
                 // Collect Body Tokens
                 let mut body_tokens = Vec::new();
-                while !tokens.peek(TokenType::Reserved, Some("ENDMACRO")) {
+                while !tokens.peek_is(TokenType::Reserved, Some("ENDMACRO")) {
                     let token = tokens.get("Unexpected end of input while parsing macro body.")?;
                     if token.is(TokenType::Reserved) && token.has_value("MACRO") {
                         return Err(token.error(format!("Invalid nested macro definition.")));
@@ -286,7 +286,7 @@ impl MacroLexer {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
 
-            if token.is(TokenType::Name) && tokens.peek(TokenType::OpenParen, None) {
+            if token.is(TokenType::Name) && tokens.peek_is(TokenType::OpenParen, None) {
                 let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.value()) {
                     def
 
@@ -507,9 +507,9 @@ impl MacroLexer {
         let mut arguments = Vec::new();
         tokens.expect(TokenType::OpenParen, None, "when parsing arguments list")?;
 
-        while !tokens.peek(TokenType::CloseParen, None) {
+        while !tokens.peek_is(TokenType::CloseParen, None) {
             let next = tokens.expect(TokenType::Parameter, None, "while parsing macro arguments list")?;
-            if tokens.peek(TokenType::Comma, None) {
+            if tokens.peek_is(TokenType::Comma, None) {
                 tokens.expect(TokenType::Comma, None, "")?;
             }
             arguments.push(next);
@@ -527,7 +527,7 @@ impl MacroLexer {
 
         let mut paren_depth = 1;
         let mut arg_tokens = Vec::new();
-        while !tokens.peek(TokenType::CloseParen, None) || paren_depth > 1 {
+        while !tokens.peek_is(TokenType::CloseParen, None) || paren_depth > 1 {
 
             let next = tokens.get("Unexpected end of input while parsing macro arguments list.")?;
             if next.is(TokenType::OpenParen) {
@@ -537,7 +537,7 @@ impl MacroLexer {
                 paren_depth -= 1;
             }
 
-            if tokens.peek(TokenType::Comma, None) && paren_depth == 1 {
+            if tokens.peek_is(TokenType::Comma, None) && paren_depth == 1 {
                 arg_tokens.push(next);
                 tokens.expect(TokenType::Comma, None, "")?;
                 arguments.push(mem::replace(&mut arg_tokens, Vec::new()));
