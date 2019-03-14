@@ -84,19 +84,16 @@ pub struct InnerToken {
     pub start_index: usize,
     // Only used for error locations so we can trace back to the source code in macro expansions
     pub end_index: usize,
-    // TODO remove since it's never used
-    raw_value: String,
     pub value: String,
     pub macro_call_id: Option<usize>
 }
 
 impl InnerToken {
-    pub fn new(file_index: usize, start_index: usize, end_index: usize, raw_value: String, value: String) -> Self {
+    pub fn new(file_index: usize, start_index: usize, end_index: usize, value: String) -> Self {
         Self {
             file_index,
             start_index,
             end_index,
-            raw_value,
             value,
             macro_call_id: None
         }
@@ -292,7 +289,6 @@ impl TokenGenerator {
             self.file_index,
             self.index - 1,
             self.index,
-            self.current.to_string(),
             self.current.to_string()
         )
     }
@@ -300,14 +296,14 @@ impl TokenGenerator {
     pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, LexerError> {
         self.start = self.index - 1;
         if inclusive {
-            self.collect_with(vec![self.current], vec![self.current], cb)
+            self.collect_with(vec![self.current], cb)
 
         } else {
-            self.collect_with(vec![self.current], vec![], cb)
+            self.collect_with(vec![], cb)
         }
     }
 
-    fn collect_with<C: FnMut(char, char) -> TokenChar>(&mut self, mut raw: Vec<char>, mut parsed: Vec<char>, mut cb: C) -> Result<InnerToken, LexerError> {
+    fn collect_with<C: FnMut(char, char) -> TokenChar>(&mut self, mut parsed: Vec<char>, mut cb: C) -> Result<InnerToken, LexerError> {
 
         let mut last = '\0';
         let mut end_index = self.index;
@@ -316,16 +312,13 @@ impl TokenGenerator {
             self.next();
             match cb(self.current, last) {
                 TokenChar::Valid(p) => {
-                    raw.push(self.current);
                     end_index += 1;
                     parsed.push(p);
                 },
                 TokenChar::Ignore => {
-                    raw.push(self.current);
                     end_index += 1;
                 },
                 TokenChar::Delimeter => {
-                    raw.push(self.current);
                     end_index += 1;
                     limited = true;
                     break;
@@ -346,7 +339,6 @@ impl TokenGenerator {
             self.file_index,
             self.start,
             end_index,
-            raw.into_iter().collect(),
             parsed.into_iter().collect()
         ))
     }

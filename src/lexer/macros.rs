@@ -99,9 +99,9 @@ struct MacroDefinition {
 impl MacroDefinition {
     fn builtin(name: &str, parameters: Vec<(MacroArgumenType, &str)>, return_type: MacroReturnType) -> Self {
         Self {
-            name: InnerToken::new(0, 0, 0, name.into(), name.into()),
+            name: InnerToken::new(0, 0, 0, name.into()),
             parameters: parameters.into_iter().map(|(typ, name)| {
-                (typ, InnerToken::new(0, 0, 0, format!("@{}", name), name.into()))
+                (typ, InnerToken::new(0, 0, 0, name.into()))
 
             }).collect(),
             return_type,
@@ -640,15 +640,15 @@ mod test {
     }
 
     macro_rules! itk {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            InnerToken::new(0, $start, $end, $raw.into(), $parsed.into())
+        ($start:expr, $end:expr, $parsed:expr) => {
+            InnerToken::new(0, $start, $end, $parsed.into())
         }
     }
 
     macro_rules! itke {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr, $id:expr) => {
+        ($start:expr, $end:expr, $parsed:expr, $id:expr) => {
             {
-                let mut t = InnerToken::new(0, $start, $end, $raw.into(), $parsed.into());
+                let mut t = InnerToken::new(0, $start, $end, $parsed.into());
                 t.set_macro_call_id($id);
                 t
             }
@@ -656,21 +656,21 @@ mod test {
     }
 
     macro_rules! tk {
-        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            IncludeToken::$tok(itk!($start, $end, $raw, $parsed))
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
+            IncludeToken::$tok(itk!($start, $end, $parsed))
         }
     }
 
     macro_rules! mtk {
-        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            MacroToken::$tok(itk!($start, $end, $raw, $parsed))
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
+            MacroToken::$tok(itk!($start, $end, $parsed))
         }
     }
 
     macro_rules! mtke {
-        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr, $id:expr) => {
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr, $id:expr) => {
             {
-                let mut t = itk!($start, $end, $raw, $parsed);
+                let mut t = itk!($start, $end, $parsed);
                 t.set_macro_call_id($id);
                 MacroToken::$tok(t)
             }
@@ -686,12 +686,12 @@ mod test {
     fn test_passthrough() {
         assert_eq!(tfm("4\n@-2\nhl,.:"), vec![
             // TODO test pass through of all tokens
-            mtk!(NumberLiteral, 0, 1, "4", "4"),
-            mtk!(Offset, 2, 5, "@-2", "-2"),
-            mtk!(Name, 6, 8, "hl", "hl"),
-            mtk!(Comma, 8, 9, ",", ","),
-            mtk!(Point, 9, 10, ".", "."),
-            mtk!(Colon, 10, 11, ":", ":"),
+            mtk!(NumberLiteral, 0, 1, "4"),
+            mtk!(Offset, 2, 5, "-2"),
+            mtk!(Name, 6, 8, "hl"),
+            mtk!(Comma, 8, 9, ","),
+            mtk!(Point, 9, 10, "."),
+            mtk!(Colon, 10, 11, ":"),
         ]);
     }
 
@@ -707,7 +707,7 @@ mod test {
         let lexer = macro_lexer("MACRO FOO() ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
-            mdef!(itk!(6, 9, "FOO", "FOO"), vec![], vec![])
+            mdef!(itk!(6, 9, "FOO"), vec![], vec![])
         ]);
     }
 
@@ -716,8 +716,8 @@ mod test {
         let lexer = macro_lexer("MACRO FOO(@a) ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
-            mdef!(itk!(6, 9, "FOO", "FOO"), vec![
-                (MacroArgumenType::Any, itk!(10, 12, "@a", "a"))
+            mdef!(itk!(6, 9, "FOO"), vec![
+                (MacroArgumenType::Any, itk!(10, 12, "a"))
 
             ], vec![])
         ]);
@@ -728,10 +728,10 @@ mod test {
         let lexer = macro_lexer("MACRO FOO(@a, @b, @c) ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
-            mdef!(itk!(6, 9, "FOO", "FOO"), vec![
-                (MacroArgumenType::Any, itk!(10, 12, "@a", "a")),
-                (MacroArgumenType::Any, itk!(14, 16, "@b", "b")),
-                (MacroArgumenType::Any, itk!(18, 20, "@c", "c"))
+            mdef!(itk!(6, 9, "FOO"), vec![
+                (MacroArgumenType::Any, itk!(10, 12, "a")),
+                (MacroArgumenType::Any, itk!(14, 16, "b")),
+                (MacroArgumenType::Any, itk!(18, 20, "c"))
 
             ], vec![])
         ]);
@@ -742,10 +742,10 @@ mod test {
         let lexer = macro_lexer("MACRO FOO() hl,a ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
-            mdef!(itk!(6, 9, "FOO", "FOO"), vec![], vec![
-                tk!(Name, 12, 14, "hl", "hl"),
-                tk!(Comma, 14, 15, ",", ","),
-                tk!(Name, 15, 16, "a", "a")
+            mdef!(itk!(6, 9, "FOO"), vec![], vec![
+                tk!(Name, 12, 14, "hl"),
+                tk!(Comma, 14, 15, ","),
+                tk!(Name, 15, 16, "a")
             ])
         ]);
     }
@@ -794,11 +794,11 @@ mod test {
     fn test_macro_extract() {
         let lexer = macro_lexer("2 MACRO FOO() ENDMACRO 4");
         assert_eq!(lexer.tokens, vec![
-            mtk!(NumberLiteral, 0, 1, "2", "2"),
-            mtk!(NumberLiteral, 23, 24, "4", "4"),
+            mtk!(NumberLiteral, 0, 1, "2"),
+            mtk!(NumberLiteral, 23, 24, "4"),
         ]);
         assert_eq!(lexer.macro_defs, vec![
-            mdef!(itk!(8, 11, "FOO", "FOO"), vec![], vec![])
+            mdef!(itk!(8, 11, "FOO"), vec![], vec![])
         ]);
     }
 
@@ -809,12 +809,12 @@ mod test {
         let lexer = macro_lexer("DBG()");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
-                itk!(0, 3, "DBG", "DBG"),
+                itk!(0, 3, "DBG"),
                 vec![]
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "DBG", "DBG"), vec![])
+            mcall!(0, itk!(0, 3, "DBG"), vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
     }
@@ -824,15 +824,15 @@ mod test {
         let lexer = macro_lexer("ABS(4)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
-                itk!(0, 3, "ABS", "ABS"),
+                itk!(0, 3, "ABS"),
                 vec![
-                    vec![mtk!(NumberLiteral, 4, 5, "4", "4")]
+                    vec![mtk!(NumberLiteral, 4, 5, "4")]
                 ]
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "ABS", "ABS"), vec![
-                vec![tk!(NumberLiteral, 4, 5, "4", "4")]
+            mcall!(0, itk!(0, 3, "ABS"), vec![
+                vec![tk!(NumberLiteral, 4, 5, "4")]
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
@@ -843,19 +843,19 @@ mod test {
         let lexer = macro_lexer("ABS(`a b`)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
-                itk!(0, 3, "ABS", "ABS"),
+                itk!(0, 3, "ABS"),
                 vec![
-                    vec![mtk!(Name, 5, 6, "a", "a"), mtk!(Name, 7, 8, "b", "b")]
+                    vec![mtk!(Name, 5, 6, "a"), mtk!(Name, 7, 8, "b")]
                 ]
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "ABS", "ABS"), vec![
+            mcall!(0, itk!(0, 3, "ABS"), vec![
                 vec![IncludeToken::TokenGroup(
-                    itk!(4, 5, "`", "`"),
+                    itk!(4, 5, "`"),
                     vec![
-                        tk!(Name, 5, 6, "a", "a"),
-                        tk!(Name, 7, 8, "b", "b")
+                        tk!(Name, 5, 6, "a"),
+                        tk!(Name, 7, 8, "b")
                     ]
                 )]
             ])
@@ -868,17 +868,17 @@ mod test {
         let lexer = macro_lexer("MAX(4, 2)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
-                itk!(0, 3, "MAX", "MAX"),
+                itk!(0, 3, "MAX"),
                 vec![
-                    vec![mtk!(NumberLiteral, 4, 5, "4", "4")],
-                    vec![mtk!(NumberLiteral, 7, 8, "2", "2")]
+                    vec![mtk!(NumberLiteral, 4, 5, "4")],
+                    vec![mtk!(NumberLiteral, 7, 8, "2")]
                 ]
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "MAX", "MAX"), vec![
-                vec![tk!(NumberLiteral, 4, 5, "4", "4")],
-                vec![tk!(NumberLiteral, 7, 8, "2", "2")]
+            mcall!(0, itk!(0, 3, "MAX"), vec![
+                vec![tk!(NumberLiteral, 4, 5, "4")],
+                vec![tk!(NumberLiteral, 7, 8, "2")]
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
@@ -889,41 +889,41 @@ mod test {
         let lexer = macro_lexer("MAX((4, 2) + (2 - 1), 2)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
-                itk!(0, 3, "MAX", "MAX"),
+                itk!(0, 3, "MAX"),
                 vec![
                     vec![
-                        mtk!(OpenParen, 4, 5, "(", "("),
-                        mtk!(NumberLiteral, 5, 6, "4", "4"),
-                        mtk!(Comma, 6, 7, ",", ","),
-                        mtk!(NumberLiteral, 8, 9, "2", "2"),
-                        mtk!(CloseParen, 9, 10, ")", ")"),
-                        mtk!(Operator, 11, 12, "+", "+"),
-                        mtk!(OpenParen, 13, 14, "(", "("),
-                        mtk!(NumberLiteral, 14, 15, "2", "2"),
-                        mtk!(Operator, 16, 17, "-", "-"),
-                        mtk!(NumberLiteral, 18, 19, "1", "1"),
-                        mtk!(CloseParen, 19, 20, ")", ")"),
+                        mtk!(OpenParen, 4, 5, "("),
+                        mtk!(NumberLiteral, 5, 6, "4"),
+                        mtk!(Comma, 6, 7, ","),
+                        mtk!(NumberLiteral, 8, 9, "2"),
+                        mtk!(CloseParen, 9, 10, ")"),
+                        mtk!(Operator, 11, 12, "+"),
+                        mtk!(OpenParen, 13, 14, "("),
+                        mtk!(NumberLiteral, 14, 15, "2"),
+                        mtk!(Operator, 16, 17, "-"),
+                        mtk!(NumberLiteral, 18, 19, "1"),
+                        mtk!(CloseParen, 19, 20, ")"),
                     ],
-                    vec![mtk!(NumberLiteral, 22, 23, "2", "2")]
+                    vec![mtk!(NumberLiteral, 22, 23, "2")]
                 ]
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "MAX", "MAX"), vec![
+            mcall!(0, itk!(0, 3, "MAX"), vec![
                 vec![
-                    tk!(OpenParen, 4, 5, "(", "("),
-                    tk!(NumberLiteral, 5, 6, "4", "4"),
-                    tk!(Comma, 6, 7, ",", ","),
-                    tk!(NumberLiteral, 8, 9, "2", "2"),
-                    tk!(CloseParen, 9, 10, ")", ")"),
-                    tk!(Operator, 11, 12, "+", "+"),
-                    tk!(OpenParen, 13, 14, "(", "("),
-                    tk!(NumberLiteral, 14, 15, "2", "2"),
-                    tk!(Operator, 16, 17, "-", "-"),
-                    tk!(NumberLiteral, 18, 19, "1", "1"),
-                    tk!(CloseParen, 19, 20, ")", ")"),
+                    tk!(OpenParen, 4, 5, "("),
+                    tk!(NumberLiteral, 5, 6, "4"),
+                    tk!(Comma, 6, 7, ","),
+                    tk!(NumberLiteral, 8, 9, "2"),
+                    tk!(CloseParen, 9, 10, ")"),
+                    tk!(Operator, 11, 12, "+"),
+                    tk!(OpenParen, 13, 14, "("),
+                    tk!(NumberLiteral, 14, 15, "2"),
+                    tk!(Operator, 16, 17, "-"),
+                    tk!(NumberLiteral, 18, 19, "1"),
+                    tk!(CloseParen, 19, 20, ")"),
                 ],
-                vec![tk!(NumberLiteral, 22, 23, "2", "2")]
+                vec![tk!(NumberLiteral, 22, 23, "2")]
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
@@ -933,20 +933,20 @@ mod test {
     fn test_macro_call_expression_args_recursive() {
         let lexer = macro_lexer("MAX(MIN(4, FLOOR(2) + CEIL(1)), 2)");
         assert_eq!(lexer.tokens, vec![
-            MacroToken::BuiltinCall(itk!(0, 3, "MAX", "MAX"), vec![
-                vec![MacroToken::BuiltinCall(itk!(4, 7, "MIN", "MIN"), vec![
-                    vec![mtk!(NumberLiteral, 8, 9, "4", "4")],
+            MacroToken::BuiltinCall(itk!(0, 3, "MAX"), vec![
+                vec![MacroToken::BuiltinCall(itk!(4, 7, "MIN"), vec![
+                    vec![mtk!(NumberLiteral, 8, 9, "4")],
                     vec![
-                        MacroToken::BuiltinCall(itk!(11, 16, "FLOOR", "FLOOR"), vec![
-                            vec![mtk!(NumberLiteral, 17, 18, "2", "2")]
+                        MacroToken::BuiltinCall(itk!(11, 16, "FLOOR"), vec![
+                            vec![mtk!(NumberLiteral, 17, 18, "2")]
                         ]),
-                        mtk!(Operator, 20, 21, "+", "+"),
-                        MacroToken::BuiltinCall(itk!(22, 26, "CEIL", "CEIL"), vec![
-                            vec![mtk!(NumberLiteral, 27, 28, "1", "1")]
+                        mtk!(Operator, 20, 21, "+"),
+                        MacroToken::BuiltinCall(itk!(22, 26, "CEIL"), vec![
+                            vec![mtk!(NumberLiteral, 27, 28, "1")]
                         ])
                     ]]
                 )],
-                vec![mtk!(NumberLiteral, 32, 33, "2", "2")]
+                vec![mtk!(NumberLiteral, 32, 33, "2")]
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 4);
@@ -956,8 +956,8 @@ mod test {
     fn test_macro_call_expression_args_recursive_with_user() {
         let lexer = macro_lexer("CEIL(BAR()) MACRO BAR() 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            MacroToken::BuiltinCall(itk!(0, 4, "CEIL", "CEIL"), vec![
-                vec![mtke!(NumberLiteral, 24, 25, "4", "4", 0)],
+            MacroToken::BuiltinCall(itk!(0, 4, "CEIL"), vec![
+                vec![mtke!(NumberLiteral, 24, 25, "4", 0)],
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 2);
@@ -967,8 +967,8 @@ mod test {
     fn test_macro_call_expression_args_recursive_with_user_unused_param() {
         let lexer = macro_lexer("CEIL(BAR(BAR(2))) MACRO BAR(@a) 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            MacroToken::BuiltinCall(itk!(0, 4, "CEIL", "CEIL"), vec![
-                vec![mtke!(NumberLiteral, 32, 33, "4", "4", 0)],
+            MacroToken::BuiltinCall(itk!(0, 4, "CEIL"), vec![
+                vec![mtke!(NumberLiteral, 32, 33, "4", 0)],
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 2);
@@ -978,8 +978,8 @@ mod test {
     fn test_macro_call_expression_args_recursive_with_user_used_param() {
         let lexer = macro_lexer("CEIL(BAR(BAR(4))) MACRO BAR(@a) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            MacroToken::BuiltinCall(itk!(0, 4, "CEIL", "CEIL"), vec![
-                vec![mtke!(NumberLiteral, 13, 14, "4", "4", 1)],
+            MacroToken::BuiltinCall(itk!(0, 4, "CEIL"), vec![
+                vec![mtke!(NumberLiteral, 13, 14, "4", 1)],
             ])
         ]);
         assert_eq!(lexer.macro_calls_count(), 3);
@@ -993,11 +993,11 @@ mod test {
     fn test_macro_user_call_no_args() {
         let lexer = macro_lexer("FOO() MACRO FOO() op 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 18, 20, "op", "op", 0),
-            mtke!(NumberLiteral, 21, 22, "4", "4", 0),
+            mtke!(Name, 18, 20, "op", 0),
+            mtke!(NumberLiteral, 21, 22, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![])
+            mcall!(0, itk!(0, 3, "FOO"), vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
     }
@@ -1006,13 +1006,13 @@ mod test {
     fn test_macro_user_call_one_arg() {
         let lexer = macro_lexer("FOO(4) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 21, 23, "op", "op", 0),
-            mtke!(NumberLiteral, 4, 5, "4", "4", 0),
+            mtke!(Name, 21, 23, "op", 0),
+            mtke!(NumberLiteral, 4, 5, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![
+            mcall!(0, itk!(0, 3, "FOO"), vec![
                 vec![
-                    tk!(NumberLiteral, 4, 5, "4", "4")
+                    tk!(NumberLiteral, 4, 5, "4")
                 ]
             ])
         ]);
@@ -1023,20 +1023,20 @@ mod test {
     fn test_macro_user_call_expression() {
         let lexer = macro_lexer("FOO((4 + 2)) MACRO FOO(@a) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(OpenParen, 4, 5, "(", "(", 0),
-            mtke!(NumberLiteral, 5, 6, "4", "4", 0),
-            mtke!(Operator, 7, 8, "+", "+", 0),
-            mtke!(NumberLiteral, 9, 10, "2", "2", 0),
-            mtke!(CloseParen, 10, 11, ")", ")", 0),
+            mtke!(OpenParen, 4, 5, "(", 0),
+            mtke!(NumberLiteral, 5, 6, "4", 0),
+            mtke!(Operator, 7, 8, "+", 0),
+            mtke!(NumberLiteral, 9, 10, "2", 0),
+            mtke!(CloseParen, 10, 11, ")", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![
+            mcall!(0, itk!(0, 3, "FOO"), vec![
                 vec![
-                    tk!(OpenParen, 4, 5, "(", "("),
-                    tk!(NumberLiteral, 5, 6, "4", "4"),
-                    tk!(Operator, 7, 8, "+", "+"),
-                    tk!(NumberLiteral, 9, 10, "2", "2"),
-                    tk!(CloseParen, 10, 11, ")", ")"),
+                    tk!(OpenParen, 4, 5, "("),
+                    tk!(NumberLiteral, 5, 6, "4"),
+                    tk!(Operator, 7, 8, "+"),
+                    tk!(NumberLiteral, 9, 10, "2"),
+                    tk!(CloseParen, 10, 11, ")"),
                 ]
             ])
         ]);
@@ -1046,17 +1046,17 @@ mod test {
     fn test_macro_user_call_token_group_arg() {
         let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 25, 27, "op", "op", 0),
-            mtke!(Name, 5, 6, "a", "a", 0),
-            mtke!(Name, 7, 8, "b", "b", 0),
+            mtke!(Name, 25, 27, "op", 0),
+            mtke!(Name, 5, 6, "a", 0),
+            mtke!(Name, 7, 8, "b", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![
+            mcall!(0, itk!(0, 3, "FOO"), vec![
                 vec![IncludeToken::TokenGroup(
-                    itk!(4, 5, "`", "`"),
+                    itk!(4, 5, "`"),
                     vec![
-                        tk!(Name, 5, 6, "a", "a"),
-                        tk!(Name, 7, 8, "b", "b")
+                        tk!(Name, 5, 6, "a"),
+                        tk!(Name, 7, 8, "b")
                     ]
                 )]
             ])
@@ -1068,17 +1068,17 @@ mod test {
     fn test_macro_user_call_multiple_args() {
         let lexer = macro_lexer("FOO(4, 8) MACRO FOO(@a, @b) op @b @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(Name, 28, 30, "op", "op", 0),
-            mtke!(NumberLiteral, 7, 8, "8", "8", 0),
-            mtke!(NumberLiteral, 4, 5, "4", "4", 0),
+            mtke!(Name, 28, 30, "op", 0),
+            mtke!(NumberLiteral, 7, 8, "8", 0),
+            mtke!(NumberLiteral, 4, 5, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![
+            mcall!(0, itk!(0, 3, "FOO"), vec![
                 vec![
-                    tk!(NumberLiteral, 4, 5, "4", "4")
+                    tk!(NumberLiteral, 4, 5, "4")
                 ],
                 vec![
-                    tk!(NumberLiteral, 7, 8, "8", "8")
+                    tk!(NumberLiteral, 7, 8, "8")
                 ]
             ])
         ]);
@@ -1089,12 +1089,12 @@ mod test {
     fn test_macro_user_recursive() {
         let lexer = macro_lexer("FOO() MACRO FOO() 4 BAR() ENDMACRO MACRO BAR() 8 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(NumberLiteral, 18, 19, "4", "4", 0),
-            mtke!(NumberLiteral, 47, 48, "8", "8", 1),
+            mtke!(NumberLiteral, 18, 19, "4", 0),
+            mtke!(NumberLiteral, 47, 48, "8", 1),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![]),
-            mcall!(1, itke!(20, 23, "BAR", "BAR", 0), vec![])
+            mcall!(0, itk!(0, 3, "FOO"), vec![]),
+            mcall!(1, itke!(20, 23, "BAR", 0), vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 2);
     }
@@ -1103,21 +1103,21 @@ mod test {
     fn test_macro_user_recursive_token_group() {
         let lexer = macro_lexer("FOO(`BAR()`) MACRO FOO(@a) 4 @a ENDMACRO MACRO BAR() 8 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(NumberLiteral, 27, 28, "4", "4", 0),
-            mtke!(NumberLiteral, 53, 54, "8", "8", 1),
+            mtke!(NumberLiteral, 27, 28, "4", 0),
+            mtke!(NumberLiteral, 53, 54, "8", 1),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO", "FOO"), vec![
+            mcall!(0, itk!(0, 3, "FOO"), vec![
                 vec![IncludeToken::TokenGroup(
-                    itk!(4, 5, "`", "`"),
+                    itk!(4, 5, "`"),
                     vec![
-                        tk!(Name, 5, 8, "BAR", "BAR"),
-                        tk!(OpenParen, 8, 9, "(", "("),
-                        tk!(CloseParen, 9, 10, ")", ")")
+                        tk!(Name, 5, 8, "BAR"),
+                        tk!(OpenParen, 8, 9, "("),
+                        tk!(CloseParen, 9, 10, ")")
                     ]
                 )]
             ]),
-            mcall!(1, itke!(5, 8, "BAR", "BAR", 0), vec![])
+            mcall!(1, itke!(5, 8, "BAR", 0), vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 2);
     }
@@ -1126,7 +1126,7 @@ mod test {
     fn test_macro_user_recursive_token_group_parameters() {
         let lexer = macro_lexer("FOO(`@b`, `@c`, 4) MACRO FOO(@a, @b, @c) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(NumberLiteral, 16, 17, "4", "4", 0),
+            mtke!(NumberLiteral, 16, 17, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
     }
@@ -1159,7 +1159,7 @@ mod test {
     fn test_macro_user_recursive_params() {
         let lexer = macro_lexer("FOO(FOO(FOO(4))) MACRO FOO(@a) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
-            mtke!(NumberLiteral, 12, 13, "4", "4", 2),
+            mtke!(NumberLiteral, 12, 13, "4", 2),
         ]);
         assert_eq!(lexer.macro_calls_count(), 3);
     }

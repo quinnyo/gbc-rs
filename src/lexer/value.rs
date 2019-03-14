@@ -433,21 +433,21 @@ mod test {
     }
 
     macro_rules! itf {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr, $file:expr) => {
-            InnerToken::new($file, $start, $end, $raw.into(), $parsed.into())
+        ($start:expr, $end:expr, $parsed:expr, $file:expr) => {
+            InnerToken::new($file, $start, $end, $parsed.into())
         }
     }
 
     macro_rules! itk {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            InnerToken::new(0, $start, $end, $raw.into(), $parsed.into())
+        ($start:expr, $end:expr, $parsed:expr) => {
+            InnerToken::new(0, $start, $end, $parsed.into())
         }
     }
 
     macro_rules! itkm {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr, $id:expr) => {
+        ($start:expr, $end:expr, $parsed:expr, $id:expr) => {
             {
-                let mut t = itk!($start, $end, $raw, $parsed);
+                let mut t = itk!($start, $end, $parsed);
                 t.set_macro_call_id($id);
                 t
             }
@@ -455,15 +455,15 @@ mod test {
     }
 
     macro_rules! vtk {
-        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            ValueToken::$tok(itk!($start, $end, $raw, $parsed))
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
+            ValueToken::$tok(itk!($start, $end, $parsed))
         }
     }
 
     macro_rules! vtko {
-        ($typ:path, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
+        ($typ:path, $start:expr, $end:expr, $parsed:expr) => {
             ValueToken::Operator {
-                inner: itk!($start, $end, $raw, $parsed),
+                inner: itk!($start, $end, $parsed),
                 typ: $typ
             }
         }
@@ -483,14 +483,14 @@ mod test {
     #[test]
     fn test_passthrough() {
         assert_eq!(tfv("name\nDS\ncp\n,()[]"), vec![
-            vtk!(Name, 0, 4, "name", "name"),
-            vtk!(Reserved, 5, 7, "DS", "DS"),
-            vtk!(Instruction, 8, 10, "cp", "cp"),
-            vtk!(Comma, 11, 12, ",", ","),
-            vtk!(OpenParen, 12, 13, "(", "("),
-            vtk!(CloseParen, 13, 14, ")", ")"),
-            vtk!(OpenBracket, 14, 15, "[", "["),
-            vtk!(CloseBracket, 15, 16, "]", "]"),
+            vtk!(Name, 0, 4, "name"),
+            vtk!(Reserved, 5, 7, "DS"),
+            vtk!(Instruction, 8, 10, "cp"),
+            vtk!(Comma, 11, 12, ","),
+            vtk!(OpenParen, 12, 13, "("),
+            vtk!(CloseParen, 13, 14, ")"),
+            vtk!(OpenBracket, 14, 15, "["),
+            vtk!(CloseBracket, 15, 16, "]"),
         ]);
     }
 
@@ -498,11 +498,11 @@ mod test {
     fn test_offset() {
         assert_eq!(tfv("@+4\n@-4"), vec![
             ValueToken::Offset {
-                inner: itk!(0, 3, "@+4", "+4"),
+                inner: itk!(0, 3, "+4"),
                 value: 4
             },
             ValueToken::Offset {
-                inner: itk!(4, 7, "@-4", "-4"),
+                inner: itk!(4, 7, "-4"),
                 value: -4
             }
         ]);
@@ -512,27 +512,27 @@ mod test {
     fn test_number() {
         assert_eq!(tfv("123\n-123\n%0000_1010\n$80\n1.24\n-2.48"), vec![
             ValueToken::Integer {
-                inner: itk!(0, 3, "123", "123"),
+                inner: itk!(0, 3, "123"),
                 value: 123
             },
             ValueToken::Integer {
-                inner: itk!(4, 8, "-123", "-123"),
+                inner: itk!(4, 8, "-123"),
                 value: -123
             },
             ValueToken::Integer {
-                inner: itk!(9, 19, "%0000_1010", "%00001010"),
+                inner: itk!(9, 19, "%00001010"),
                 value: 10
             },
             ValueToken::Integer {
-                inner: itk!(20, 23, "$80", "$80"),
+                inner: itk!(20, 23, "$80"),
                 value: 128
             },
             ValueToken::Float {
-                inner: itk!(24, 28, "1.24", "1.24"),
+                inner: itk!(24, 28, "1.24"),
                 value: OrderedFloat::from(1.24)
             },
             ValueToken::Float {
-                inner: itk!(29, 34, "-2.48", "-2.48"),
+                inner: itk!(29, 34, "-2.48"),
                 value: OrderedFloat::from(-2.48)
             }
         ]);
@@ -542,11 +542,11 @@ mod test {
     fn test_string() {
         assert_eq!(tfv("'Hello World'\n\"Hello World\""), vec![
             ValueToken::String {
-                inner: itk!(0, 13, "'Hello World'", "Hello World"),
+                inner: itk!(0, 13, "Hello World"),
                 value: "Hello World".to_string()
             },
             ValueToken::String {
-                inner: itk!(14, 27, "\"Hello World\"", "Hello World"),
+                inner: itk!(14, 27, "Hello World"),
                 value: "Hello World".to_string()
             }
         ]);
@@ -556,10 +556,10 @@ mod test {
     fn test_builtin_call() {
         assert_eq!(tfv("FLOOR(4.2)"), vec![
            ValueToken::BuiltinCall(
-                itk!(0, 5, "FLOOR", "FLOOR"),
+                itk!(0, 5, "FLOOR"),
                 vec![vec![
                     ValueToken::Float {
-                        inner: itk!(6, 9, "4.2", "4.2"),
+                        inner: itk!(6, 9, "4.2"),
                         value: OrderedFloat::from(4.2)
                     }
                 ]]
@@ -570,7 +570,7 @@ mod test {
     #[test]
     fn test_global_label_def() {
         assert_eq!(tfv("global_label:"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
         }]);
     }
@@ -578,11 +578,11 @@ mod test {
     #[test]
     fn test_global_label_ref() {
         assert_eq!(tfv("global_label:\nglobal_label"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
         }, ValueToken::GlobalLabelRef {
-            inner: itf!(14, 26, "global_label", "global_label", 0),
+            inner: itf!(14, 26, "global_label", 0),
             name: "global_label".to_string()
         }]);
     }
@@ -590,7 +590,7 @@ mod test {
     #[test]
     fn test_global_label_no_ref() {
         assert_eq!(tfv("global_label"), vec![ValueToken::Name(
-            itf!(0, 12, "global_label", "global_label", 0)
+            itf!(0, 12, "global_label", 0)
         )]);
     }
 
@@ -602,11 +602,11 @@ mod test {
 
         ).tokens;
         assert_eq!(tokens, vec![ValueToken::GlobalLabelDef {
-            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 0),
+            inner: itf!(0, 25, "_global_file_local_label", 0),
             name: "_global_file_local_label_file_local_0".to_string()
 
         }, ValueToken::GlobalLabelDef {
-            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 1),
+            inner: itf!(0, 25, "_global_file_local_label", 1),
             name: "_global_file_local_label_file_local_1".to_string()
         }]);
     }
@@ -619,19 +619,19 @@ mod test {
 
         ).tokens;
         assert_eq!(tokens, vec![ValueToken::GlobalLabelDef {
-            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 0),
+            inner: itf!(0, 25, "_global_file_local_label", 0),
             name: "_global_file_local_label_file_local_0".to_string()
 
         }, ValueToken::GlobalLabelRef {
-            inner: itf!(26, 50, "_global_file_local_label", "_global_file_local_label", 0),
+            inner: itf!(26, 50, "_global_file_local_label", 0),
             name: "_global_file_local_label_file_local_0".to_string()
 
         }, ValueToken::GlobalLabelDef {
-            inner: itf!(0, 25, "_global_file_local_label", "_global_file_local_label", 1),
+            inner: itf!(0, 25, "_global_file_local_label", 1),
             name: "_global_file_local_label_file_local_1".to_string()
 
         }, ValueToken::GlobalLabelRef {
-            inner: itf!(26, 50, "_global_file_local_label", "_global_file_local_label", 1),
+            inner: itf!(26, 50, "_global_file_local_label", 1),
             name: "_global_file_local_label_file_local_1".to_string()
         }]);
     }
@@ -644,10 +644,10 @@ mod test {
 
         ).tokens;
         assert_eq!(tokens, vec![ValueToken::Name(
-            itf!(0, 24, "_global_file_local_label", "_global_file_local_label", 0)
+            itf!(0, 24, "_global_file_local_label", 0)
 
         ), ValueToken::Name(
-            itf!(0, 24, "_global_file_local_label", "_global_file_local_label", 1)
+            itf!(0, 24, "_global_file_local_label", 1)
         )]);
     }
 
@@ -679,15 +679,15 @@ mod test {
     #[test]
     fn test_local_label_def() {
         assert_eq!(tfv("global_label:\n.local_label:\n.local_other_label:"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 27, ".", "."),
+            inner: itk!(14, 27, "."),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(28, 47, ".", "."),
+            inner: itk!(28, 47, "."),
             name: "local_other_label".to_string()
         }]);
     }
@@ -695,11 +695,11 @@ mod test {
     #[test]
     fn test_local_label_def_instruction() {
         assert_eq!(tfv("global_label:\n.stop:"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 20, ".", "."),
+            inner: itk!(14, 20, "."),
             name: "stop".to_string()
         }]);
     }
@@ -707,11 +707,11 @@ mod test {
     #[test]
     fn test_local_label_def_reserved() {
         assert_eq!(tfv("global_label:\n.DS:"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 18, ".", "."),
+            inner: itk!(14, 18, "."),
             name: "DS".to_string()
         }]);
     }
@@ -719,15 +719,15 @@ mod test {
     #[test]
     fn test_local_label_ref() {
         assert_eq!(tfv("global_label:\n.local_label\n.local_other_label"), vec![ValueToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label", "global_label"),
+            inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelRef {
-            inner: itk!(14, 26, ".", "."),
+            inner: itk!(14, 26, "."),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelRef {
-            inner: itk!(27, 45, ".", "."),
+            inner: itk!(27, 45, "."),
             name: "local_other_label".to_string()
         }]);
     }
@@ -736,27 +736,27 @@ mod test {
     fn test_label_macro_postfix() {
         assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.local_macro_label_def:\n.local_macro_label_ref\nENDMACRO"), vec![
             ValueToken::GlobalLabelDef {
-                inner: itkm!(24, 40, "macro_label_def", "macro_label_def", 0),
+                inner: itkm!(24, 40, "macro_label_def", 0),
                 name: "macro_label_def_from_macro_call_0".to_string()
             },
             ValueToken::LocalLabelDef {
-                inner: itkm!(41, 64, ".", ".", 0),
+                inner: itkm!(41, 64, ".", 0),
                 name: "local_macro_label_def_from_macro_call_0".to_string()
             },
             ValueToken::LocalLabelRef {
-                inner: itkm!(65, 87, ".", ".", 0),
+                inner: itkm!(65, 87, ".", 0),
                 name: "local_macro_label_ref_from_macro_call_0".to_string()
             },
             ValueToken::GlobalLabelDef {
-                inner: itkm!(24, 40, "macro_label_def", "macro_label_def", 1),
+                inner: itkm!(24, 40, "macro_label_def", 1),
                 name: "macro_label_def_from_macro_call_1".to_string()
             },
             ValueToken::LocalLabelDef {
-                inner: itkm!(41, 64, ".", ".", 1),
+                inner: itkm!(41, 64, ".", 1),
                 name: "local_macro_label_def_from_macro_call_1".to_string()
             },
             ValueToken::LocalLabelRef {
-                inner: itkm!(65, 87, ".", ".", 1),
+                inner: itkm!(65, 87, ".", 1),
                 name: "local_macro_label_ref_from_macro_call_1".to_string()
             }
         ]);
@@ -787,28 +787,28 @@ mod test {
 
     #[test]
     fn test_operators() {
-        assert_eq!(tfv(">>"), vec![vtko!(Operator::ShiftRight, 0, 2, ">", ">")]);
-        assert_eq!(tfv("<<"), vec![vtko!(Operator::ShiftLeft, 0, 2, "<", "<")]);
-        assert_eq!(tfv("&&"), vec![vtko!(Operator::LogicalAnd, 0, 2, "&", "&")]);
-        assert_eq!(tfv("||"), vec![vtko!(Operator::LogicalOr, 0, 2, "|", "|")]);
-        assert_eq!(tfv("=="), vec![vtko!(Operator::Equals, 0, 2, "=", "=")]);
-        assert_eq!(tfv("!="), vec![vtko!(Operator::Unequals, 0, 2, "!", "!")]);
-        assert_eq!(tfv(">="), vec![vtko!(Operator::GreaterThanEqual, 0, 2, ">", ">")]);
-        assert_eq!(tfv("<="), vec![vtko!(Operator::LessThanEqual, 0, 2, "<", "<")]);
-        assert_eq!(tfv("**"), vec![vtko!(Operator::Pow, 0, 2, "*", "*")]);
-        assert_eq!(tfv("//"), vec![vtko!(Operator::DivInt, 0, 2, "/", "/")]);
-        assert_eq!(tfv("<"), vec![vtko!(Operator::LessThan, 0, 1, "<", "<")]);
-        assert_eq!(tfv(">"), vec![vtko!(Operator::GreaterThan, 0, 1, ">", ">")]);
-        assert_eq!(tfv("!"), vec![vtko!(Operator::LogicalNot, 0, 1, "!", "!")]);
-        assert_eq!(tfv("+"), vec![vtko!(Operator::Plus, 0, 1, "+", "+")]);
-        assert_eq!(tfv("-"), vec![vtko!(Operator::Minus, 0, 1, "-", "-")]);
-        assert_eq!(tfv("*"), vec![vtko!(Operator::Mul, 0, 1, "*", "*")]);
-        assert_eq!(tfv("/"), vec![vtko!(Operator::Div, 0, 1, "/", "/")]);
-        assert_eq!(tfv("%"), vec![vtko!(Operator::Modulo, 0, 1, "%", "%")]);
-        assert_eq!(tfv("&"), vec![vtko!(Operator::BitAnd, 0, 1, "&", "&")]);
-        assert_eq!(tfv("|"), vec![vtko!(Operator::BitOr, 0, 1, "|", "|")]);
-        assert_eq!(tfv("~"), vec![vtko!(Operator::BitNegate, 0, 1, "~", "~")]);
-        assert_eq!(tfv("^"), vec![vtko!(Operator::BitXor, 0, 1, "^", "^")]);
+        assert_eq!(tfv(">>"), vec![vtko!(Operator::ShiftRight, 0, 2, ">")]);
+        assert_eq!(tfv("<<"), vec![vtko!(Operator::ShiftLeft, 0, 2, "<")]);
+        assert_eq!(tfv("&&"), vec![vtko!(Operator::LogicalAnd, 0, 2, "&")]);
+        assert_eq!(tfv("||"), vec![vtko!(Operator::LogicalOr, 0, 2, "|")]);
+        assert_eq!(tfv("=="), vec![vtko!(Operator::Equals, 0, 2, "=")]);
+        assert_eq!(tfv("!="), vec![vtko!(Operator::Unequals, 0, 2, "!")]);
+        assert_eq!(tfv(">="), vec![vtko!(Operator::GreaterThanEqual, 0, 2, ">")]);
+        assert_eq!(tfv("<="), vec![vtko!(Operator::LessThanEqual, 0, 2, "<")]);
+        assert_eq!(tfv("**"), vec![vtko!(Operator::Pow, 0, 2, "*")]);
+        assert_eq!(tfv("//"), vec![vtko!(Operator::DivInt, 0, 2, "/")]);
+        assert_eq!(tfv("<"), vec![vtko!(Operator::LessThan, 0, 1, "<")]);
+        assert_eq!(tfv(">"), vec![vtko!(Operator::GreaterThan, 0, 1, ">")]);
+        assert_eq!(tfv("!"), vec![vtko!(Operator::LogicalNot, 0, 1, "!")]);
+        assert_eq!(tfv("+"), vec![vtko!(Operator::Plus, 0, 1, "+")]);
+        assert_eq!(tfv("-"), vec![vtko!(Operator::Minus, 0, 1, "-")]);
+        assert_eq!(tfv("*"), vec![vtko!(Operator::Mul, 0, 1, "*")]);
+        assert_eq!(tfv("/"), vec![vtko!(Operator::Div, 0, 1, "/")]);
+        assert_eq!(tfv("%"), vec![vtko!(Operator::Modulo, 0, 1, "%")]);
+        assert_eq!(tfv("&"), vec![vtko!(Operator::BitAnd, 0, 1, "&")]);
+        assert_eq!(tfv("|"), vec![vtko!(Operator::BitOr, 0, 1, "|")]);
+        assert_eq!(tfv("~"), vec![vtko!(Operator::BitNegate, 0, 1, "~")]);
+        assert_eq!(tfv("^"), vec![vtko!(Operator::BitXor, 0, 1, "^")]);
     }
 
     #[test]

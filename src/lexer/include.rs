@@ -424,26 +424,26 @@ mod test {
     use crate::lexer::mocks::{MockFileReader, tfs, tfe};
 
     macro_rules! tk {
-        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            IncludeToken::$tok(InnerToken::new(0, $start, $end, $raw.into(), $parsed.into()))
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
+            IncludeToken::$tok(InnerToken::new(0, $start, $end, $parsed.into()))
         }
     }
 
     macro_rules! tkf {
-        ($file:expr, $tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            IncludeToken::$tok(InnerToken::new($file, $start, $end, $raw.into(), $parsed.into()))
+        ($file:expr, $tok:ident, $start:expr, $end:expr, $parsed:expr) => {
+            IncludeToken::$tok(InnerToken::new($file, $start, $end, $parsed.into()))
         }
     }
 
     macro_rules! itk {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            InnerToken::new(0, $start, $end, $raw.into(), $parsed.into())
+        ($start:expr, $end:expr, $parsed:expr) => {
+            InnerToken::new(0, $start, $end, $parsed.into())
         }
     }
 
     macro_rules! token_types {
         ($tok:ident, $id:expr) => {
-            assert_eq!(tfs($id), vec![tk!($tok, 0, $id.len(), $id, $id)]);
+            assert_eq!(tfs($id), vec![tk!($tok, 0, $id.len(), $id)]);
         };
         ($tok:ident, $id:expr, $($rest:expr), +) => {
             token_types!($tok, $id);
@@ -468,11 +468,11 @@ mod test {
 
         let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
-            tkf!(1, NumberLiteral, 0, 2, "42", "42"),
-            tkf!(0, Newline, 18, 19, "\n", "\n"),
-            tkf!(2, Name, 0, 3, "BAR", "BAR"),
-            tkf!(0, Newline, 43, 44, "\n", "\n"),
-            tkf!(3, Name, 0, 3, "ABS", "ABS"),
+            tkf!(1, NumberLiteral, 0, 2, "42"),
+            tkf!(0, Newline, 18, 19, "\n"),
+            tkf!(2, Name, 0, 3, "BAR"),
+            tkf!(0, Newline, 43, 44, "\n"),
+            tkf!(3, Name, 0, 3, "ABS"),
         ]);
 
     }
@@ -489,13 +489,13 @@ mod test {
 
         let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
-            tkf!(0, NumberLiteral, 0, 1, "1", "1"),
-            tkf!(0, Newline, 1, 2, "\n", "\n"),
-            tkf!(1, NumberLiteral, 0, 1, "2", "2"),
-            tkf!(1, Newline, 1, 2, "\n", "\n"),
-            tkf!(3, NumberLiteral, 0, 1, "3", "3"),
-            tkf!(1, Newline, 26, 27, "\n", "\n"),
-            tkf!(1, NumberLiteral, 27, 28, "4", "4"),
+            tkf!(0, NumberLiteral, 0, 1, "1"),
+            tkf!(0, Newline, 1, 2, "\n"),
+            tkf!(1, NumberLiteral, 0, 1, "2"),
+            tkf!(1, Newline, 1, 2, "\n"),
+            tkf!(3, NumberLiteral, 0, 1, "3"),
+            tkf!(1, Newline, 26, 27, "\n"),
+            tkf!(1, NumberLiteral, 27, 28, "4"),
         ]);
 
     }
@@ -557,9 +557,9 @@ mod test {
 
         let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
-            IncludeToken::BinaryFile(itk!(7, 17, "'data.bin'", "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
-            tkf!(0, Newline, 17, 18, "\n", "\n"),
-            IncludeToken::BinaryFile(itk!(25, 37, "'second.bin'", "second.bin"), vec![42])
+            IncludeToken::BinaryFile(itk!(7, 17, "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
+            tkf!(0, Newline, 17, 18, "\n"),
+            IncludeToken::BinaryFile(itk!(25, 37, "second.bin"), vec![42])
         ]);
 
     }
@@ -584,23 +584,23 @@ mod test {
     #[test]
     fn test_newlinews() {
         assert_eq!(tfs("\n\r\n\n\r"), vec![
-            tk!(Newline, 0, 1, "\n", "\n"),
-            tk!(Newline, 1, 2, "\r", "\r"),
-            tk!(Newline, 2, 3, "\n", "\n"),
-            tk!(Newline, 3, 4, "\n", "\n"),
-            tk!(Newline, 4, 5, "\r", "\r"),
+            tk!(Newline, 0, 1, "\n"),
+            tk!(Newline, 1, 2, "\r"),
+            tk!(Newline, 2, 3, "\n"),
+            tk!(Newline, 3, 4, "\n"),
+            tk!(Newline, 4, 5, "\r"),
         ]);
     }
 
     #[test]
     fn test_name() {
-        assert_eq!(tfs("INCLUDEX"), vec![tk!(Name, 0, 8, "INCLUDEX", "INCLUDEX")]);
-        assert_eq!(tfs("hl"), vec![tk!(Name, 0, 2, "hl", "hl")]);
-        assert_eq!(tfs("a"), vec![tk!(Name, 0, 1, "a", "a")]);
-        assert_eq!(tfs("foo_bar"), vec![tk!(Name, 0, 7, "foo_bar", "foo_bar")]);
-        assert_eq!(tfs("_test"), vec![tk!(Name, 0, 5, "_test", "_test")]);
-        assert_eq!(tfs("abcdefghijklmnopqrstuvwxyz"), vec![tk!(Name, 0, 26, "abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz")]);
-        assert_eq!(tfs("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), vec![tk!(Name, 0, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]);
+        assert_eq!(tfs("INCLUDEX"), vec![tk!(Name, 0, 8, "INCLUDEX")]);
+        assert_eq!(tfs("hl"), vec![tk!(Name, 0, 2, "hl")]);
+        assert_eq!(tfs("a"), vec![tk!(Name, 0, 1, "a")]);
+        assert_eq!(tfs("foo_bar"), vec![tk!(Name, 0, 7, "foo_bar")]);
+        assert_eq!(tfs("_test"), vec![tk!(Name, 0, 5, "_test")]);
+        assert_eq!(tfs("abcdefghijklmnopqrstuvwxyz"), vec![tk!(Name, 0, 26, "abcdefghijklmnopqrstuvwxyz")]);
+        assert_eq!(tfs("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), vec![tk!(Name, 0, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]);
     }
 
     #[test]
@@ -619,35 +619,35 @@ mod test {
     #[test]
     fn test_number_literal() {
         assert_eq!(tfs("20_48"), vec![
-            tk!(NumberLiteral, 0, 5, "20_48", "2048")
+            tk!(NumberLiteral, 0, 5, "2048")
         ]);
         assert_eq!(tfs("-512"), vec![
-            tk!(NumberLiteral, 0, 4, "-512", "-512")
+            tk!(NumberLiteral, 0, 4, "-512")
         ]);
         assert_eq!(tfs("$1234"), vec![
-            tk!(NumberLiteral, 0, 5, "$1234", "$1234")
+            tk!(NumberLiteral, 0, 5, "$1234")
         ]);
         assert_eq!(tfs("$1234"), vec![
-            tk!(NumberLiteral, 0, 5, "$1234", "$1234")
+            tk!(NumberLiteral, 0, 5, "$1234")
         ]);
         assert_eq!(tfs("$abcdefABCDEF"), vec![
-            tk!(NumberLiteral, 0, 13, "$abcdefABCDEF", "$abcdefABCDEF")
+            tk!(NumberLiteral, 0, 13, "$abcdefABCDEF")
         ]);
         assert_eq!(tfs("%1001_0020"), vec![
-            tk!(NumberLiteral, 0, 8, "%1001_00", "%100100"),
-            tk!(NumberLiteral, 8, 10, "20", "20")
+            tk!(NumberLiteral, 0, 8, "%100100"),
+            tk!(NumberLiteral, 8, 10, "20")
         ]);
         assert_eq!(tfs("2.4"), vec![
-            tk!(NumberLiteral, 0, 3, "2.4", "2.4")
+            tk!(NumberLiteral, 0, 3, "2.4")
         ]);
         assert_eq!(tfs("2.4."), vec![
-            tk!(NumberLiteral, 0, 3, "2.4", "2.4"),
-            tk!(Point, 3, 4, ".", ".")
+            tk!(NumberLiteral, 0, 3, "2.4"),
+            tk!(Point, 3, 4, ".")
         ]);
         assert_eq!(tfs("2.4.1"), vec![
-            tk!(NumberLiteral, 0, 3, "2.4", "2.4"),
-            tk!(Point, 3, 4, ".", "."),
-            tk!(NumberLiteral, 4, 5, "1", "1"),
+            tk!(NumberLiteral, 0, 3, "2.4"),
+            tk!(Point, 3, 4, "."),
+            tk!(NumberLiteral, 4, 5, "1"),
         ]);
     }
 
@@ -659,16 +659,16 @@ mod test {
     #[test]
     fn test_string_literal() {
         assert_eq!(tfs("'Hello World'"), vec![
-            tk!(StringLiteral, 0, 13, "'Hello World'", "Hello World")
+            tk!(StringLiteral, 0, 13, "Hello World")
         ]);
         assert_eq!(tfs("\"Hello World\""), vec![
-            tk!(StringLiteral, 0, 13, "\"Hello World\"", "Hello World")
+            tk!(StringLiteral, 0, 13, "Hello World")
         ]);
         assert_eq!(tfs("'\"'"), vec![
-            tk!(StringLiteral, 0, 3, "'\"'", "\"")
+            tk!(StringLiteral, 0, 3, "\"")
         ]);
         assert_eq!(tfs("\"'\""), vec![
-            tk!(StringLiteral, 0, 3, "\"'\"", "'")
+            tk!(StringLiteral, 0, 3, "'")
         ]);
     }
 
@@ -683,58 +683,58 @@ mod test {
     #[test]
     fn test_string_literal_escapes() {
         assert_eq!(tfs("'\\n'"), vec![
-            tk!(StringLiteral, 0, 4, "'\\n'", "\n")
+            tk!(StringLiteral, 0, 4, "\n")
         ]);
         assert_eq!(tfs("'\\r'"), vec![
-            tk!(StringLiteral, 0, 4, "'\\r'", "\r")
+            tk!(StringLiteral, 0, 4, "\r")
         ]);
         assert_eq!(tfs("'\\t'"), vec![
-            tk!(StringLiteral, 0, 4, "'\\t'", "\t")
+            tk!(StringLiteral, 0, 4, "\t")
         ]);
         assert_eq!(tfs("'\\''"), vec![
-            tk!(StringLiteral, 0, 4, "'\\\''", "'")
+            tk!(StringLiteral, 0, 4, "'")
         ]);
         assert_eq!(tfs("\"\\\"\""), vec![
-            tk!(StringLiteral, 0, 4, "\"\\\"\"", "\"")
+            tk!(StringLiteral, 0, 4, "\"")
         ]);
     }
 
     #[test]
     fn test_string_punct() {
-        assert_eq!(tfs(","), vec![tk!(Comma, 0, 1, ",", ",")]);
-        assert_eq!(tfs("."), vec![tk!(Point, 0, 1, ".", ".")]);
-        assert_eq!(tfs(":"), vec![tk!(Colon, 0, 1, ":", ":")]);
+        assert_eq!(tfs(","), vec![tk!(Comma, 0, 1, ",")]);
+        assert_eq!(tfs("."), vec![tk!(Point, 0, 1, ".")]);
+        assert_eq!(tfs(":"), vec![tk!(Colon, 0, 1, ":")]);
         assert_eq!(tfs("()"), vec![
-            tk!(OpenParen, 0, 1, "(", "("),
-            tk!(CloseParen, 1, 2, ")", ")")
+            tk!(OpenParen, 0, 1, "("),
+            tk!(CloseParen, 1, 2, ")")
         ]);
         assert_eq!(tfs("[]"), vec![
-            tk!(OpenBracket, 0, 1, "[", "["),
-            tk!(CloseBracket, 1, 2, "]", "]")
+            tk!(OpenBracket, 0, 1, "["),
+            tk!(CloseBracket, 1, 2, "]")
         ]);
         assert_eq!(tfs("=%&|!-+<>~*/^"), vec![
-            tk!(Operator, 0, 1, "=", "="),
-            tk!(Operator, 1, 2, "%", "%"),
-            tk!(Operator, 2, 3, "&", "&"),
-            tk!(Operator, 3, 4, "|", "|"),
-            tk!(Operator, 4, 5, "!", "!"),
-            tk!(Operator, 5, 6, "-", "-"),
-            tk!(Operator, 6, 7, "+", "+"),
-            tk!(Operator, 7, 8, "<", "<"),
-            tk!(Operator, 8, 9, ">", ">"),
-            tk!(Operator, 9, 10, "~", "~"),
-            tk!(Operator, 10, 11, "*", "*"),
-            tk!(Operator, 11, 12, "/", "/"),
-            tk!(Operator, 12, 13, "^", "^"),
+            tk!(Operator, 0, 1, "="),
+            tk!(Operator, 1, 2, "%"),
+            tk!(Operator, 2, 3, "&"),
+            tk!(Operator, 3, 4, "|"),
+            tk!(Operator, 4, 5, "!"),
+            tk!(Operator, 5, 6, "-"),
+            tk!(Operator, 6, 7, "+"),
+            tk!(Operator, 7, 8, "<"),
+            tk!(Operator, 8, 9, ">"),
+            tk!(Operator, 9, 10, "~"),
+            tk!(Operator, 10, 11, "*"),
+            tk!(Operator, 11, 12, "/"),
+            tk!(Operator, 12, 13, "^"),
         ]);
     }
 
     #[test]
     fn test_param_offset() {
-        assert_eq!(tfs("@param"), vec![tk!(Parameter, 0, 6, "@param", "param")]);
-        assert_eq!(tfs("@param_foo"), vec![tk!(Parameter, 0, 10, "@param_foo", "param_foo")]);
-        assert_eq!(tfs("@+4"), vec![tk!(Offset, 0, 3, "@+4", "+4")]);
-        assert_eq!(tfs("@-4"), vec![tk!(Offset, 0, 3, "@-4", "-4")]);
+        assert_eq!(tfs("@param"), vec![tk!(Parameter, 0, 6, "param")]);
+        assert_eq!(tfs("@param_foo"), vec![tk!(Parameter, 0, 10, "param_foo")]);
+        assert_eq!(tfs("@+4"), vec![tk!(Offset, 0, 3, "+4")]);
+        assert_eq!(tfs("@-4"), vec![tk!(Offset, 0, 3, "-4")]);
     }
 
     #[test]
@@ -745,45 +745,45 @@ mod test {
     #[test]
     fn test_comments() {
         assert_eq!(tfs("2 ; A Comment"), vec![
-            tk!(NumberLiteral, 0, 1, "2", "2"),
-            tk!(Comment, 2, 13, "; A Comment", "; A Comment")
+            tk!(NumberLiteral, 0, 1, "2"),
+            tk!(Comment, 2, 13, "; A Comment")
         ]);
     }
 
     #[test]
     fn test_multiline() {
         assert_eq!(tfs("a\n'Text'\n4"), vec![
-            tk!(Name, 0, 1, "a", "a"),
-            tk!(Newline, 1, 2, "\n", "\n"),
-            tk!(StringLiteral, 2, 8, "'Text'", "Text"),
-            tk!(Newline, 8, 9, "\n", "\n"),
-            tk!(NumberLiteral, 9, 10, "4", "4")
+            tk!(Name, 0, 1, "a"),
+            tk!(Newline, 1, 2, "\n"),
+            tk!(StringLiteral, 2, 8, "Text"),
+            tk!(Newline, 8, 9, "\n"),
+            tk!(NumberLiteral, 9, 10, "4")
         ]);
         assert_eq!(tfs("; A Comment\n2"), vec![
-            tk!(Comment, 0, 11, "; A Comment", "; A Comment"),
-            tk!(Newline, 11, 12, "\n", "\n"),
-            tk!(NumberLiteral, 12, 13, "2", "2"),
+            tk!(Comment, 0, 11, "; A Comment"),
+            tk!(Newline, 11, 12, "\n"),
+            tk!(NumberLiteral, 12, 13, "2"),
         ]);
     }
 
     #[test]
     fn test_group() {
         assert_eq!(tfs("``"), vec![
-            IncludeToken::TokenGroup(itk!(0, 1, "`", "`"), Vec::new())
+            IncludeToken::TokenGroup(itk!(0, 1, "`"), Vec::new())
         ]);
         assert_eq!(tfs("`a\n'Text'\n4`"), vec![
-            IncludeToken::TokenGroup(itk!(0, 1, "`", "`"), vec![
-                tk!(Name, 1, 2, "a", "a"),
-                tk!(Newline, 2, 3, "\n", "\n"),
-                tk!(StringLiteral, 3, 9, "'Text'", "Text"),
-                tk!(Newline, 9, 10, "\n", "\n"),
-                tk!(NumberLiteral, 10, 11, "4", "4")
+            IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
+                tk!(Name, 1, 2, "a"),
+                tk!(Newline, 2, 3, "\n"),
+                tk!(StringLiteral, 3, 9, "Text"),
+                tk!(Newline, 9, 10, "\n"),
+                tk!(NumberLiteral, 10, 11, "4")
             ])
         ]);
         assert_eq!(tfs("`\n\n`"), vec![
-            IncludeToken::TokenGroup(itk!(0, 1, "`", "`"), vec![
-                tk!(Newline, 1, 2, "\n", "\n"),
-                tk!(Newline, 2, 3, "\n", "\n"),
+            IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
+                tk!(Newline, 1, 2, "\n"),
+                tk!(Newline, 2, 3, "\n"),
             ])
         ]);
     }

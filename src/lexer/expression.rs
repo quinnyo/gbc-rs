@@ -382,14 +382,14 @@ mod test {
     }
 
     macro_rules! itk {
-        ($start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            InnerToken::new(0, $start, $end, $raw.into(), $parsed.into())
+        ($start:expr, $end:expr, $parsed:expr) => {
+            InnerToken::new(0, $start, $end, $parsed.into())
         }
     }
 
     macro_rules! etk {
-        ($tok:ident, $start:expr, $end:expr, $raw:expr, $parsed:expr) => {
-            ExpressionToken::$tok(itk!($start, $end, $raw, $parsed))
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
+            ExpressionToken::$tok(itk!($start, $end, $parsed))
         }
     }
 
@@ -404,25 +404,25 @@ mod test {
     fn test_standalone() {
         assert_eq!(tfe("foo"), vec![
             ExpressionToken::Expression(
-                itk!(0, 3, "foo", "foo"),
-                Expression::Value(ExpressionValue::VariableValue(itk!(0, 3, "foo", "foo"), "foo".to_string()))
+                itk!(0, 3, "foo"),
+                Expression::Value(ExpressionValue::VariableValue(itk!(0, 3, "foo"), "foo".to_string()))
             )
         ]);
         assert_eq!(tfe("4"), vec![
             ExpressionToken::Expression(
-                itk!(0, 1, "4", "4"),
+                itk!(0, 1, "4"),
                 Expression::Value(ExpressionValue::Integer(4))
             )
         ]);
         assert_eq!(tfe("4.2"), vec![
             ExpressionToken::Expression(
-                itk!(0, 3, "4.2", "4.2"),
+                itk!(0, 3, "4.2"),
                 Expression::Value(ExpressionValue::Float(OrderedFloat::from(4.2)))
             )
         ]);
         assert_eq!(tfe("'Foo'"), vec![
             ExpressionToken::Expression(
-                itk!(0, 5, "'Foo'", "Foo"),
+                itk!(0, 5, "Foo"),
                 Expression::Value(ExpressionValue::String("Foo".to_string()))
             )
         ]);
@@ -432,9 +432,9 @@ mod test {
     fn test_builtin_call() {
         assert_eq!(tfe("DBG()"), vec![
             ExpressionToken::Expression(
-                itk!(0, 3, "DBG", "DBG"),
+                itk!(0, 3, "DBG"),
                 Expression::BuiltinCall {
-                    inner: itk!(0, 3, "DBG", "DBG"),
+                    inner: itk!(0, 3, "DBG"),
                     name: "DBG".to_string(),
                     args: vec![]
                 }
@@ -450,14 +450,14 @@ mod test {
     fn test_builtin_call_with_args() {
         assert_eq!(tfe("MAX(4, MIN(1, 2))"), vec![
             ExpressionToken::Expression(
-                itk!(0, 3, "MAX", "MAX"),
+                itk!(0, 3, "MAX"),
                 Expression::BuiltinCall {
-                    inner: itk!(0, 3, "MAX", "MAX"),
+                    inner: itk!(0, 3, "MAX"),
                     name: "MAX".to_string(),
                     args: vec![
                         Expression::Value(ExpressionValue::Integer(4)),
                         Expression::BuiltinCall {
-                            inner: itk!(7, 10, "MIN", "MIN"),
+                            inner: itk!(7, 10, "MIN"),
                             name: "MIN".to_string(),
                             args: vec![
                                 Expression::Value(ExpressionValue::Integer(1)),
@@ -474,13 +474,13 @@ mod test {
     fn test_label_global_ref() {
         assert_eq!(tfe("global_label:\nglobal_label"), vec![
             ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label", "global_label"),
+                inner: itk!(0, 13, "global_label"),
                 name: "global_label".to_string()
             },
             ExpressionToken::Expression(
-                itk!(14, 26, "global_label", "global_label"),
+                itk!(14, 26, "global_label"),
                 Expression::Value(ExpressionValue::GlobalLabelAddress (
-                    itk!(14, 26, "global_label", "global_label"),
+                    itk!(14, 26, "global_label"),
                     "global_label".to_string()
                 ))
             )
@@ -491,17 +491,17 @@ mod test {
     fn test_label_local_ref() {
         assert_eq!(tfe("global_label:\n.local_label:\n.local_label"), vec![
             ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label", "global_label"),
+                inner: itk!(0, 13, "global_label"),
                 name: "global_label".to_string()
             },
             ExpressionToken::LocalLabelDef {
-                inner: itk!(14, 27, ".", "."),
+                inner: itk!(14, 27, "."),
                 name: "local_label".to_string()
             },
             ExpressionToken::Expression(
-                itk!(28, 40, ".", "."),
+                itk!(28, 40, "."),
                 Expression::Value(ExpressionValue::LocalLabelAddress (
-                    itk!(28, 40, ".", "."),
+                    itk!(28, 40, "."),
                     "local_label".to_string()
                 ))
             )
