@@ -84,6 +84,7 @@ pub struct InnerToken {
     pub start_index: usize,
     // Only used for error locations so we can trace back to the source code in macro expansions
     pub end_index: usize,
+    // TODO remove since it's never used
     raw_value: String,
     pub value: String,
     pub macro_call_id: Option<usize>

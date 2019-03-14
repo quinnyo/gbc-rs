@@ -306,7 +306,9 @@ impl ExpressionParser {
                         args
                     })
                 }
-                token => unreachable!("Unexpected value token: {:?}", token)
+                token => {
+                    Err(token.error(format!("Unexpected \"{}\" token in incomplete expression.", token.value())))
+                }
             }
 
         }
@@ -363,7 +365,8 @@ impl ExpressionParser {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use super::{ExpressionLexer, ExpressionToken, ValueToken, InnerToken};
+    use ordered_float::OrderedFloat;
+    use super::{ExpressionLexer, ExpressionToken, InnerToken, Expression, ExpressionValue};
     use crate::lexer::mocks::value_lex;
 
     fn expr_lexer<S: Into<String>>(s: S) -> ExpressionLexer {
@@ -399,16 +402,43 @@ mod test {
 
     #[test]
     fn test_standalone() {
-        assert_eq!(tfe("foo"), vec![]);
-        assert_eq!(tfe("4"), vec![]);
-        assert_eq!(tfe("4.2"), vec![]);
-        assert_eq!(tfe("'Foo'"), vec![]);
+        assert_eq!(tfe("foo"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 3, "foo", "foo"),
+                Expression::Value(ExpressionValue::VariableValue(itk!(0, 3, "foo", "foo"), "foo".to_string()))
+            )
+        ]);
+        assert_eq!(tfe("4"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "4", "4"),
+                Expression::Value(ExpressionValue::Integer(4))
+            )
+        ]);
+        assert_eq!(tfe("4.2"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 3, "4.2", "4.2"),
+                Expression::Value(ExpressionValue::Float(OrderedFloat::from(4.2)))
+            )
+        ]);
+        assert_eq!(tfe("'Foo'"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 5, "'Foo'", "Foo"),
+                Expression::Value(ExpressionValue::String("Foo".to_string()))
+            )
+        ]);
     }
 
     #[test]
     fn test_builtin_call() {
         assert_eq!(tfe("DBG()"), vec![
-            //ExpressionToken::Expression(itk!(0, 3, "DBG", "DBG"))
+            ExpressionToken::Expression(
+                itk!(0, 3, "DBG", "DBG"),
+                Expression::BuiltinCall {
+                    inner: itk!(0, 3, "DBG", "DBG"),
+                    name: "DBG".to_string(),
+                    args: vec![]
+                }
+            )
 
         ]);
     }
@@ -418,7 +448,26 @@ mod test {
 
     #[test]
     fn test_builtin_call_with_args() {
-        assert_eq!(tfe("MAX(4, MIN(1, 2))"), vec![]);
+        assert_eq!(tfe("MAX(4, MIN(1, 2))"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 3, "MAX", "MAX"),
+                Expression::BuiltinCall {
+                    inner: itk!(0, 3, "MAX", "MAX"),
+                    name: "MAX".to_string(),
+                    args: vec![
+                        Expression::Value(ExpressionValue::Integer(4)),
+                        Expression::BuiltinCall {
+                            inner: itk!(7, 10, "MIN", "MIN"),
+                            name: "MIN".to_string(),
+                            args: vec![
+                                Expression::Value(ExpressionValue::Integer(1)),
+                                Expression::Value(ExpressionValue::Integer(2))
+                            ]
+                        }
+                    ]
+                }
+            )
+        ]);
     }
 
     #[test]
@@ -427,7 +476,14 @@ mod test {
             ExpressionToken::GlobalLabelDef {
                 inner: itk!(0, 13, "global_label", "global_label"),
                 name: "global_label".to_string()
-            }
+            },
+            ExpressionToken::Expression(
+                itk!(14, 26, "global_label", "global_label"),
+                Expression::Value(ExpressionValue::GlobalLabelAddress (
+                    itk!(14, 26, "global_label", "global_label"),
+                    "global_label".to_string()
+                ))
+            )
         ]);
     }
 
@@ -441,7 +497,14 @@ mod test {
             ExpressionToken::LocalLabelDef {
                 inner: itk!(14, 27, ".", "."),
                 name: "local_label".to_string()
-            }
+            },
+            ExpressionToken::Expression(
+                itk!(28, 40, ".", "."),
+                Expression::Value(ExpressionValue::LocalLabelAddress (
+                    itk!(28, 40, ".", "."),
+                    "local_label".to_string()
+                ))
+            )
         ]);
     }
 
