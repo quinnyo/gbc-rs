@@ -31,7 +31,7 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
         // TODO size get from Mnemonic
     },
     SectionDeclaration {
-        // TODO offset etc.
+        // TODO offset, bank etc.
         name => String
     },
     GlobalLabelDef {

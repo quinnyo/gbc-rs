@@ -173,7 +173,7 @@ impl MacroLexer {
 
         let builtin_macro_defs = Self::builtin_macro_defs();
         let mut user_macro_defs = Vec::new();
-        let mut tokens_without_macro_defs = Vec::new();
+        let mut tokens_without_macro_defs = Vec::with_capacity(tokens.len());
 
         // Drop all newlines
         let mut tokens = TokenIterator::new(tokens.into_iter().filter(|t| !t.is(TokenType::Newline)).collect());
@@ -282,7 +282,7 @@ impl MacroLexer {
 
     ) -> Result<Vec<IncludeToken>, LexerError> {
 
-        let mut tokens_without_macro_calls = Vec::new();
+        let mut tokens_without_macro_calls = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
 
@@ -331,7 +331,7 @@ impl MacroLexer {
 
                 // Expand user calls
                 } else {
-                    let mut expanded_macro_tokens = Vec::new();
+                    let mut expanded_macro_tokens = Vec::with_capacity(macro_def.body.len());
 
                     // Recursively expand all body tokens
                     for token in macro_def.body.clone() {
@@ -390,7 +390,7 @@ impl MacroLexer {
         let mut arguments = Vec::with_capacity(arg_tokens.len());
         for tokens in arg_tokens {
 
-            let mut expanded = Vec::new();
+            let mut expanded = Vec::with_capacity(tokens.len() * 2);
             for t in tokens {
                 // Expand token groups when calling builtin macros
                 // This allows us to have a "BYTESIZE" / "CYCLES" builtin

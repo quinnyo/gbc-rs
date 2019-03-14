@@ -28,7 +28,7 @@ impl Compiler {
         let expr_lexer = ExpressionLexer::try_from(value_lexer).map_err(|e| CompilerError::new("EXPRESSION CONSTRUCTION", e))?;
         println!("{} token(s) after expression construction.", expr_lexer.len());
 
-        // TODO EntryLexer, removes: Comma, OpenBracket, CloseBracket -> Generates: Sections, Data, Variables, Instructions)
+        // TODO EntryLexer, removes: Name, Comma, OpenBracket, CloseBracket -> Generates: Sections, Data, Constants, Variables, Instructions)
             // TODO Everything at this stage takes expansion arguments of either Type=Number or Type=String
             // TODO When does Integer Conversion happen? Are Expressions also float as soon as one
             // is introduced and Conversion only happens when required or is there an error thown

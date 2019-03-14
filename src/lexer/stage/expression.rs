@@ -88,7 +88,7 @@ impl ExpressionLexer {
     }
 
     fn parse_expression(tokens: Vec<ValueToken>, expression_id: &mut usize, is_argument: bool) -> Result<Vec<ExpressionToken>, LexerError> {
-        let mut expression_tokens = Vec::new();
+        let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
             if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQU")) {
@@ -346,7 +346,7 @@ impl ExpressionParser {
                     Expression::Value(ExpressionValue::LocalLabelAddress(inner, name)),
                 ),
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
-                    let mut args = Vec::new();
+                    let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
                         args.push(ExpressionLexer::parse_expression_argument(tokens, expression_id)?);
                     }

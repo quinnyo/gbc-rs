@@ -162,7 +162,7 @@ impl ValueLexer {
         let mut global_labels_names: Vec<String> = Vec::new();
         let mut local_labels: HashMap<String, InnerToken> = HashMap::new();
 
-        let mut value_tokens = Vec::new();
+        let mut value_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
             let value_token = match token {
@@ -182,7 +182,7 @@ impl ValueLexer {
 
                 // Values
                 MacroToken::BuiltinCall(inner, args) => {
-                    let mut value_args = Vec::new();
+                    let mut value_args = Vec::with_capacity(args.len());
                     for tokens in args {
                         value_args.push(Self::from_tokens(tokens)?);
                     }
