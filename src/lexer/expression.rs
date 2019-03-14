@@ -121,12 +121,16 @@ impl ExpressionLexer {
                 match ExpressionToken::try_from(token) {
                     Ok(token) => token,
                     Err(token) => {
-                        return Err(token.error(format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())));
+                        return Err(token.error(
+                            format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
+                        ));
                     }
                 }
 
             } else {
-                return Err(token.error(format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())));
+                return Err(token.error(
+                    format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
+                ));
             };
 
             expression_tokens.push(expr_token);
@@ -197,17 +201,24 @@ impl Expression {
 
 pub struct ExpressionParser {
     token: Option<ValueToken>,
-    tokens: TokenIterator<ValueToken>
+    tokens: TokenIterator<ValueToken>,
+    last_file_index: usize,
+    last_index: usize
 }
 
 impl ExpressionParser {
 
     fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, LexerError> {
         let mut tokens = TokenIterator::new(tokens);
-        Ok(Self {
-            token: tokens.next(),
-            tokens
-        })
+        let first = tokens.next();
+        let mut parser = Self {
+            token: None,
+            tokens,
+            last_file_index: 0,
+            last_index: 0
+        };
+        parser.update(first);
+        Ok(parser)
     }
 
     fn parse_binary(&mut self, expression_id: &mut usize, prec: usize) -> Result<Expression, LexerError> {
@@ -240,16 +251,19 @@ impl ExpressionParser {
 
     }
 
-    fn next(&mut self) -> ValueToken {
-        mem::replace(&mut self.token, self.tokens.next()).expect("ExpressionParser::next failed")
+    fn next(&mut self) -> Option<ValueToken> {
+        let next = self.tokens.next();
+        self.update(next)
     }
 
     fn expect<S: Into<String>>(&mut self, msg: S) -> Result<ValueToken, LexerError> {
-        Ok(mem::replace(&mut self.token, Some(self.tokens.get(msg.into())?)).expect("ExpressionParser::expect failed"))
+        let next =self.tokens.get(msg.into())?;
+        Ok(self.update(Some(next)).expect("ExpressionParser::expect failed"))
     }
 
     fn assert_typ<S: Into<String>>(&mut self, typ: TokenType, msg: S) -> Result<ValueToken, LexerError> {
-        match mem::replace(&mut self.token, self.tokens.next()) {
+        let next = self.tokens.next();
+        match self.update(next) {
             Some(token) => if token.is(typ) {
                 Ok(token)
 
@@ -258,6 +272,14 @@ impl ExpressionParser {
             },
             _ => unreachable!("ExpressionParser::assert_typ failed")
         }
+    }
+
+    fn update(&mut self, token: Option<ValueToken>) -> Option<ValueToken> {
+        if let Some(token) = &token {
+            self.last_file_index = token.inner().file_index;
+            self.last_index = token.inner().start_index;
+        }
+        mem::replace(&mut self.token, token)
     }
 
     fn parse_unary(&mut self, expression_id: &mut usize) -> Result<Expression, LexerError> {
@@ -287,43 +309,43 @@ impl ExpressionParser {
         // Parse Values and Calls
         } else {
             match self.next() {
-                ValueToken::Name(inner) => {
+                Some(ValueToken::Name(inner)) => {
                     let name = inner.value.clone();
                     Ok(Expression::Value(ExpressionValue::VariableValue(inner, name)))
                 },
-                ValueToken::Offset { inner, value } => Ok(
+                Some(ValueToken::Offset { inner, value }) => Ok(
                     Expression::Value(ExpressionValue::OffsetAddress(inner, value)),
                 ),
-                ValueToken::Float { value, .. } => Ok(
+                Some(ValueToken::Float { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::Float(value)),
                 ),
-                ValueToken::Integer { value, .. } => Ok(
+                Some(ValueToken::Integer { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::Integer(value)),
                 ),
-                ValueToken::String { value, .. } => Ok(
+                Some(ValueToken::String { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::String(value)),
                 ),
-                ValueToken::GlobalLabelRef { inner, name } => Ok(
+                Some(ValueToken::GlobalLabelRef { inner, name }) => Ok(
                     Expression::Value(ExpressionValue::GlobalLabelAddress(inner, name)),
                 ),
-                ValueToken::LocalLabelRef { inner, name } => Ok(
+                Some(ValueToken::LocalLabelRef { inner, name }) => Ok(
                     Expression::Value(ExpressionValue::LocalLabelAddress(inner, name)),
                 ),
-                ValueToken::BuiltinCall(inner, arguments) => {
+                Some(ValueToken::BuiltinCall(inner, arguments)) => {
                     let mut args = Vec::new();
                     for tokens in arguments {
                         args.push(ExpressionLexer::parse_expression_argument(tokens, expression_id)?);
                     }
-                    let name = inner.value.clone();
                     Ok(Expression::BuiltinCall {
+                        name: inner.value.clone(),
                         inner,
-                        name,
                         args
                     })
                 }
-                token => {
+                Some(token) => {
                     Err(token.error(format!("Unexpected \"{}\" token in incomplete expression.", token.value())))
-                }
+                },
+                _ => Err(LexerError::new(self.last_file_index, self.last_index, "Unexpected end of expression.".to_string()))
             }
 
         }
@@ -358,15 +380,7 @@ impl ExpressionParser {
     }
 
     fn is_start_token(current: TokenType) -> bool {
-        match current {
-            TokenType::Name => true,
-            TokenType::BuiltinCall => true,
-            TokenType::Operator => true,
-            TokenType::Float | TokenType::Integer | TokenType::String => true,
-            TokenType::GlobalLabelRef | TokenType::LocalLabelRef => true,
-            TokenType::OpenParen => true,
-            _ => false
-        }
+        Self::is_value_token_type(current) || current == TokenType::OpenParen || current == TokenType::Operator
     }
 
     fn is_follow_up_token(prev: TokenType, next: TokenType) -> bool {
@@ -377,7 +391,7 @@ impl ExpressionParser {
             next == TokenType::CloseParen || next == TokenType::Operator
 
         } else if prev == TokenType::Operator {
-            next == TokenType::OpenParen || ExpressionParser::is_value_token_type(next)
+            next == TokenType::OpenParen || ExpressionParser::is_value_token_type(next) || next == TokenType::Operator
 
         } else if ExpressionParser::is_value_token_type(prev) {
             next == TokenType::CloseParen || next == TokenType::Operator
@@ -389,7 +403,8 @@ impl ExpressionParser {
 
     fn is_value_token_type(typ: TokenType) -> bool {
         match typ {
-            TokenType::Integer | TokenType::Float | TokenType::String | TokenType::Name | TokenType::Offset | TokenType::GlobalLabelRef | TokenType::LocalLabelRef | TokenType::BuiltinCall => {
+            TokenType::Integer | TokenType::Float | TokenType::String | TokenType::Name |
+            TokenType::Offset | TokenType::GlobalLabelRef | TokenType::LocalLabelRef | TokenType::BuiltinCall => {
                 true
             },
             _=> false
@@ -459,6 +474,20 @@ mod test {
                 itk!(0, 5, "Foo"),
                 0,
                 Expression::Value(ExpressionValue::String("Foo".to_string()))
+            )
+        ]);
+        assert_eq!(tfe("@+4"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 3, "+4"),
+                0,
+                Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 3, "+4"), 4))
+            )
+        ]);
+        assert_eq!(tfe("@-4"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 3, "-4"),
+                0,
+                Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 3, "-4"), -4))
             )
         ]);
     }
@@ -596,6 +625,17 @@ mod test {
 
     #[test]
     fn test_unary_operator_minus() {
+        assert_eq!(tfe("- 2"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "-"),
+                0,
+                Expression::Unary {
+                    inner: itk!(0, 1, "-"),
+                    op: Operator::Minus,
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }
+            )
+        ]);
         assert_eq!(tfe("-foo"), vec![
             ExpressionToken::Expression(
                 itk!(0, 1, "-"),
@@ -704,7 +744,7 @@ mod test {
 
     #[test]
     fn test_unary_error_operator_righthand() {
-        assert_eq!(expr_lexer_error("++"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n++\n^--- Here");
+        assert_eq!(expr_lexer_error("++"), "In file \"main.gb.s\" on line 1, column 2: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n++\n ^--- Here");
     }
 
 
@@ -802,7 +842,193 @@ mod test {
         ]);
     }
 
-    // TODO test binary operators
+    // Binary -----------------------------------------------------------------
+    #[test]
+    fn test_binary_operator_single() {
+        let operators = vec![
+            (Operator::LessThan, "<"),
+            (Operator::GreaterThan, ">"),
+            (Operator::Plus, "+"),
+            (Operator::Minus, "-"),
+            (Operator::Mul, "*"),
+            (Operator::Div, "/"),
+            (Operator::Modulo, "%"),
+            (Operator::BitAnd, "&"),
+            (Operator::BitOr, "|"),
+            (Operator::BitXor, "^")
+        ];
+        for (op, s) in operators {
+            assert_eq!(tfe(format!("4 {} 2", s)), vec![
+                ExpressionToken::Expression(
+                    itk!(0, 1, "4"),
+                    0,
+                    Expression::Binary {
+                        inner: itk!(2, 3, s),
+                        op,
+                        right: Box::new(Expression::Value(ExpressionValue::Integer(2))),
+                        left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                    }
+                )
+            ]);
+        }
+    }
+
+    #[test]
+    fn test_binary_operator_double() {
+        let operators = vec![
+            (Operator::ShiftRight, ">>"),
+            (Operator::ShiftLeft, "<<"),
+            (Operator::LogicalAnd, "&&"),
+            (Operator::LogicalOr, "||"),
+            (Operator::Equals, "=="),
+            (Operator::Unequals, "!="),
+            (Operator::GreaterThanEqual, ">="),
+            (Operator::LessThanEqual, "<="),
+            (Operator::Pow, "**"),
+            (Operator::DivInt, "//")
+        ];
+        for (op, s) in operators {
+            assert_eq!(tfe(format!("4 {} 2", s)), vec![
+                ExpressionToken::Expression(
+                    itk!(0, 1, "4"),
+                    0,
+                    Expression::Binary {
+                        inner: itk!(2, 4, s.chars().next().unwrap().to_string()),
+                        op,
+                        right: Box::new(Expression::Value(ExpressionValue::Integer(2))),
+                        left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                    }
+                )
+            ]);
+        }
+    }
+
+    #[test]
+    fn test_binary_operator_with_parens() {
+        assert_eq!(tfe("((4) + ((2)))"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "("),
+                0,
+                Expression::Binary {
+                    inner: itk!(5, 6, "+"),
+                    op: Operator::Plus,
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2))),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                }
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_binary_unary_takes_precedence() {
+        assert_eq!(tfe("4 + ~2"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "4"),
+                0,
+                Expression::Binary {
+                    inner: itk!(2, 3, "+"),
+                    op: Operator::Plus,
+                    right: Box::new(
+                        Expression::Unary {
+                            inner: itk!(4, 5, "~"),
+                            op: Operator::BitNegate,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                        }
+                    ),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                }
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_binary_precedence() {
+        assert_eq!(tfe("4 || 2 && 8"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "4"),
+                0,
+                Expression::Binary {
+                    inner: itk!(7, 9, "&"),
+                    op: Operator::LogicalAnd,
+                    left: Box::new(
+                        Expression::Binary {
+                            inner: itk!(2, 4, "|"),
+                            op: Operator::LogicalOr,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(2))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                        }
+                    ),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(8)))
+                }
+            )
+        ]);
+
+        assert_eq!(tfe("4 + 2 * 8"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "4"),
+                0,
+                Expression::Binary {
+                    inner: itk!(2, 3, "+"),
+                    op: Operator::Plus,
+                    right: Box::new(
+                        Expression::Binary {
+                            inner: itk!(6, 7, "*"),
+                            op: Operator::Mul,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(8))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                        }
+                    ),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                }
+            )
+        ]);
+
+        assert_eq!(tfe("4 * 2 + 8"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "4"),
+                0,
+                Expression::Binary {
+                    inner: itk!(6, 7, "+"),
+                    op: Operator::Plus,
+                    left: Box::new(
+                        Expression::Binary {
+                            inner: itk!(2, 3, "*"),
+                            op: Operator::Mul,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(2))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                        }
+                    ),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(8)))
+                }
+            )
+        ]);
+
+        // TODO test further operators?
+
+    }
+
+    #[test]
+    fn test_binary_precedence_parens() {
+        assert_eq!(tfe("4 * (2 + 8)"), vec![
+            ExpressionToken::Expression(
+                itk!(0, 1, "4"),
+                0,
+                Expression::Binary {
+                    inner: itk!(2, 3, "*"),
+                    op: Operator::Mul,
+                    right: Box::new(
+                        Expression::Binary {
+                            inner: itk!(7, 8, "+"),
+                            op: Operator::Plus,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(8))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                        }
+                    ),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                }
+            )
+        ]);
+    }
 
 }
 
