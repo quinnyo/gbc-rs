@@ -580,6 +580,29 @@ mod test {
     }
 
     #[test]
+    fn test_expression_non_constant() {
+        assert_eq!(tfe("global_label:\nfoo + global_label"), vec![
+            ExpressionToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label"),
+                name: "global_label".to_string()
+            },
+            ExpressionToken::Expression(
+                itk!(14, 17, "foo"),
+                0,
+                Expression::Binary {
+                    inner: itk!(18, 19, "+"),
+                    op: Operator::Plus,
+                    right: Box::new(Expression::Value(ExpressionValue::GlobalLabelAddress(
+                        itk!(20, 32, "global_label"),
+                        "global_label".to_string()
+                    ))),
+                    left: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(14, 17, "foo"), "foo".to_string())))
+                }
+            )
+        ]);
+    }
+
+    #[test]
     fn test_expression_id() {
         assert_eq!(tfe("4\n2"), vec![
             ExpressionToken::ConstExpression(
