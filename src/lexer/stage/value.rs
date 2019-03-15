@@ -51,9 +51,79 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     },
     Operator {
         typ => Operator
+    },
+    Register {
+        name => Register
+    },
+    Flag {
+        typ => Flag
     }
 });
 
+
+// Flags ----------------------------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub enum Flag {
+    Zero,
+    NoZero,
+    Carry,
+    NoCarry
+}
+
+impl From<&str> for Flag {
+    fn from(s: &str) -> Self {
+        match s {
+            "z" => Flag::Zero,
+            "nz" => Flag::NoZero,
+            "c" => Flag::Carry,
+            "nc" => Flag::NoCarry,
+            f => unreachable!("Invalid flag: {}", f)
+        }
+    }
+}
+
+
+// Registers ------------------------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub enum Register {
+    Accumulator,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+    AF,
+    BC,
+    DE,
+    HL,
+    HLIncrement,
+    HLDecrement
+}
+
+impl From<&str> for Register {
+    fn from(s: &str) -> Self {
+        match s {
+            "a" => Register::Accumulator,
+            "b" => Register::B,
+            "c" => Register::C,
+            "d" => Register::D,
+            "e" => Register::E,
+            "h" => Register::H,
+            "l" => Register::L,
+            "af" => Register::AF,
+            "bc" => Register::BC,
+            "de" => Register::DE,
+            "hl" => Register::HL,
+            "hli" => Register::HLIncrement,
+            "hld" => Register::HLDecrement,
+            r => unreachable!("Invalid Register: {}", r)
+        }
+    }
+}
+
+
+// Types ----------------------------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
 pub enum Operator {
     ShiftRight,
@@ -176,6 +246,18 @@ impl ValueLexer {
                 MacroToken::CloseParen(inner) => ValueToken::CloseParen(inner),
                 MacroToken::OpenBracket(inner) => ValueToken::OpenBracket(inner),
                 MacroToken::CloseBracket(inner)=> ValueToken::CloseBracket(inner),
+
+                // Registers
+                MacroToken::Register(inner) => ValueToken::Register {
+                    name: Register::from(inner.value.as_str()),
+                    inner
+                },
+
+                // Flags
+                MacroToken::Flag(inner) => ValueToken::Flag {
+                    typ: Flag::from(inner.value.as_str()),
+                    inner
+                },
 
                 // Drop Comments
                 MacroToken::Comment(_) => continue,
@@ -432,7 +514,7 @@ impl ValueLexer {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
-    use super::{ValueLexer, ValueToken, InnerToken, Operator};
+    use super::{ValueLexer, ValueToken, InnerToken, Operator, Register, Flag};
     use super::super::mocks::{macro_lex, macro_lex_child};
 
     fn value_lexer<S: Into<String>>(s: S) -> ValueLexer {
@@ -842,6 +924,49 @@ mod test {
             vtko!(Operator::Mul, 2, 3, "*"),
             vtko!(Operator::Modulo, 3, 4, "%")
         ]);
+    }
+
+    #[test]
+    fn test_registers() {
+        let registers = vec![
+            (Register::Accumulator, "a"),
+            (Register::B, "b"),
+            (Register::C, "c"),
+            (Register::D, "d"),
+            (Register::E, "e"),
+            (Register::H, "h"),
+            (Register::L, "l"),
+            (Register::BC, "bc"),
+            (Register::DE, "de"),
+            (Register::HL, "hl"),
+            (Register::HLIncrement, "hli"),
+            (Register::HLDecrement, "hld")
+        ];
+        for (r, s) in registers {
+            assert_eq!(tfv(s), vec![
+                ValueToken::Register {
+                    inner: itk!(0, s.len(), s),
+                    name: r
+                }
+            ]);
+        }
+    }
+
+    #[test]
+    fn test_flags() {
+        let flags = vec![
+            (Flag::Zero, "z"),
+            (Flag::NoZero, "nz"),
+            (Flag::NoCarry, "nc")
+        ];
+        for (f, s) in flags {
+            assert_eq!(tfv(s), vec![
+                ValueToken::Flag {
+                    inner: itk!(0, s.len(), s),
+                    typ: f
+                }
+            ]);
+        }
     }
 
     #[test]

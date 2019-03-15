@@ -49,6 +49,8 @@ pub trait LexerToken {
 pub enum TokenType {
     Newline,
     Name,
+    Register,
+    Flag,
     Reserved,
     Instruction,
     Parameter,

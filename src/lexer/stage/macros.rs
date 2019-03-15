@@ -17,6 +17,8 @@ const MAX_EXPANSION_DEPTH: usize = 8;
 lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     Name(()),
     Reserved(()),
+    Register(()),
+    Flag(()),
     Instruction(()),
     Offset(()),
     NumberLiteral(()),
@@ -39,6 +41,8 @@ impl From<IncludeToken> for MacroToken {
         match token {
             IncludeToken::Name(inner) => MacroToken::Name(inner),
             IncludeToken::Reserved(inner) => MacroToken::Reserved(inner),
+            IncludeToken::Register(inner) => MacroToken::Register(inner),
+            IncludeToken::Flag(inner) => MacroToken::Flag(inner),
             IncludeToken::Instruction(inner) => MacroToken::Instruction(inner),
             IncludeToken::Offset(inner) => MacroToken::Offset(inner),
             IncludeToken::NumberLiteral(inner) => MacroToken::NumberLiteral(inner),
@@ -688,7 +692,7 @@ mod test {
             // TODO test pass through of all tokens
             mtk!(NumberLiteral, 0, 1, "4"),
             mtk!(Offset, 2, 5, "-2"),
-            mtk!(Name, 6, 8, "hl"),
+            mtk!(Register, 6, 8, "hl"),
             mtk!(Comma, 8, 9, ","),
             mtk!(Point, 9, 10, "."),
             mtk!(Colon, 10, 11, ":"),
@@ -743,9 +747,9 @@ mod test {
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.macro_defs, vec![
             mdef!(itk!(6, 9, "FOO"), vec![], vec![
-                tk!(Name, 12, 14, "hl"),
+                tk!(Register, 12, 14, "hl"),
                 tk!(Comma, 14, 15, ","),
-                tk!(Name, 15, 16, "a")
+                tk!(Register, 15, 16, "a")
             ])
         ]);
     }
@@ -840,12 +844,12 @@ mod test {
 
     #[test]
     fn test_macro_call_unwrap_token_group_args() {
-        let lexer = macro_lexer("ABS(`a b`)");
+        let lexer = macro_lexer("ABS(`i k`)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
                 itk!(0, 3, "ABS"),
                 vec![
-                    vec![mtk!(Name, 5, 6, "a"), mtk!(Name, 7, 8, "b")]
+                    vec![mtk!(Name, 5, 6, "i"), mtk!(Name, 7, 8, "k")]
                 ]
            )
         ]);
@@ -854,8 +858,8 @@ mod test {
                 vec![IncludeToken::TokenGroup(
                     itk!(4, 5, "`"),
                     vec![
-                        tk!(Name, 5, 6, "a"),
-                        tk!(Name, 7, 8, "b")
+                        tk!(Name, 5, 6, "i"),
+                        tk!(Name, 7, 8, "k")
                     ]
                 )]
             ])
@@ -1047,16 +1051,16 @@ mod test {
         let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(Name, 25, 27, "op", 0),
-            mtke!(Name, 5, 6, "a", 0),
-            mtke!(Name, 7, 8, "b", 0),
+            mtke!(Register, 5, 6, "a", 0),
+            mtke!(Register, 7, 8, "b", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
             mcall!(0, itk!(0, 3, "FOO"), vec![
                 vec![IncludeToken::TokenGroup(
                     itk!(4, 5, "`"),
                     vec![
-                        tk!(Name, 5, 6, "a"),
-                        tk!(Name, 7, 8, "b")
+                        tk!(Register, 5, 6, "a"),
+                        tk!(Register, 7, 8, "b")
                     ]
                 )]
             ])

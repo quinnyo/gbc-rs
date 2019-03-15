@@ -13,6 +13,8 @@ use super::super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 lexer_token!(IncludeToken, (Debug, Eq, PartialEq, Clone), {
     Newline(()),
     Name(()),
+    Register(()),
+    Flag(()),
     Reserved(()),
     Instruction(()),
     Parameter(()),
@@ -224,6 +226,14 @@ impl IncludeLexer {
                         "INCBIN" | "SECTION" | "INCLUDE" |
                         "ENDMACRO" => {
                             Some(IncludeToken::Reserved(name))
+                        },
+                        // Registers
+                        "af" | "bc" | "de" | "hl" | "a" | "b" | "c" | "d" | "e" | "h" | "l" | "hld" | "hli" => {
+                            Some(IncludeToken::Register(name))
+                        },
+                        // Flags
+                        "z" | "nz" | "nc" => {
+                            Some(IncludeToken::Flag(name))
                         },
                         // Instructions
                         "cp" | "di" | "ei" | "jp" | "jr" | "or" | "rl" | "rr" | "ld" |
@@ -595,8 +605,8 @@ mod test {
     #[test]
     fn test_name() {
         assert_eq!(tfs("INCLUDEX"), vec![tk!(Name, 0, 8, "INCLUDEX")]);
-        assert_eq!(tfs("hl"), vec![tk!(Name, 0, 2, "hl")]);
-        assert_eq!(tfs("a"), vec![tk!(Name, 0, 1, "a")]);
+        assert_eq!(tfs("ol"), vec![tk!(Name, 0, 2, "ol")]);
+        assert_eq!(tfs("q"), vec![tk!(Name, 0, 1, "q")]);
         assert_eq!(tfs("foo_bar"), vec![tk!(Name, 0, 7, "foo_bar")]);
         assert_eq!(tfs("_test"), vec![tk!(Name, 0, 5, "_test")]);
         assert_eq!(tfs("abcdefghijklmnopqrstuvwxyz"), vec![tk!(Name, 0, 26, "abcdefghijklmnopqrstuvwxyz")]);
@@ -606,6 +616,16 @@ mod test {
     #[test]
     fn test_reserved() {
         token_types!(Reserved, "DB", "DW", "BW", "DS8", "DS16", "EQU", "EQUS", "BANK", "MACRO", "SECTION", "ENDMACRO");
+    }
+
+    #[test]
+    fn test_registers() {
+        token_types!(Register, "af", "bc", "de", "hl", "a", "b", "c", "d", "e", "h", "l", "hli", "hld");
+    }
+
+    #[test]
+    fn test_flags() {
+        token_types!(Flag, "nc", "z", "nz");
     }
 
     #[test]
@@ -752,8 +772,8 @@ mod test {
 
     #[test]
     fn test_multiline() {
-        assert_eq!(tfs("a\n'Text'\n4"), vec![
-            tk!(Name, 0, 1, "a"),
+        assert_eq!(tfs("q\n'Text'\n4"), vec![
+            tk!(Name, 0, 1, "q"),
             tk!(Newline, 1, 2, "\n"),
             tk!(StringLiteral, 2, 8, "Text"),
             tk!(Newline, 8, 9, "\n"),
@@ -771,9 +791,9 @@ mod test {
         assert_eq!(tfs("``"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), Vec::new())
         ]);
-        assert_eq!(tfs("`a\n'Text'\n4`"), vec![
+        assert_eq!(tfs("`q\n'Text'\n4`"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
-                tk!(Name, 1, 2, "a"),
+                tk!(Name, 1, 2, "q"),
                 tk!(Newline, 2, 3, "\n"),
                 tk!(StringLiteral, 3, 9, "Text"),
                 tk!(Newline, 9, 10, "\n"),

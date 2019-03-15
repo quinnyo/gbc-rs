@@ -9,7 +9,7 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use super::super::{ValueLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
-use super::value::{Operator, ValueToken};
+use super::value::{Flag, Register, Operator, ValueToken};
 use super::macros::MacroCall;
 
 
@@ -29,6 +29,12 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     },
     LocalLabelDef {
         name => String
+    },
+    Register {
+        name => Register
+    },
+    Flag {
+        typ => Flag
     }
 });
 
@@ -48,6 +54,14 @@ impl ExpressionToken {
             ValueToken::LocalLabelDef { inner, name } => Ok(ExpressionToken::LocalLabelDef {
                 inner,
                 name
+            }),
+            ValueToken::Register { inner, name } => Ok(ExpressionToken::Register {
+                inner,
+                name
+            }),
+            ValueToken::Flag { inner, typ } => Ok(ExpressionToken::Flag {
+                inner,
+                typ
             }),
             token => Err(token)
         }
@@ -432,7 +446,7 @@ impl ExpressionParser {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
-    use super::{ExpressionLexer, ExpressionToken, InnerToken, Expression, ExpressionValue, Operator};
+    use super::{ExpressionLexer, ExpressionToken, InnerToken, Expression, ExpressionValue, Operator, Register, Flag};
     use super::super::mocks::value_lex;
 
     fn expr_lexer<S: Into<String>>(s: S) -> ExpressionLexer {
@@ -458,6 +472,26 @@ mod test {
     #[test]
     fn test_empty() {
         assert_eq!(tfe(""), vec![]);
+    }
+
+    #[test]
+    fn test_passthrough_registers() {
+        assert_eq!(tfe("hl"), vec![
+            ExpressionToken::Register {
+                inner: itk!(0, 2, "hl"),
+                name: Register::HL
+            }
+        ]);
+    }
+
+    #[test]
+    fn test_passthrough_flags() {
+        assert_eq!(tfe("nz"), vec![
+            ExpressionToken::Flag {
+                inner: itk!(0, 2, "nz"),
+                typ: Flag::NoZero
+            }
+        ]);
     }
 
     #[test]
