@@ -163,8 +163,9 @@ use self::file::LexerFile;
 
 
 // Re-Exports --------------------------------------------------------------------
-pub use self::stage::include::IncludeLexer;
+pub use self::stage::entry::EntryLexer;
 pub use self::stage::expression::ExpressionLexer;
+pub use self::stage::include::IncludeLexer;
 pub use self::stage::macros::MacroLexer;
 pub use self::stage::value::ValueLexer;
 

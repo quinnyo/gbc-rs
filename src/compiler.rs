@@ -4,7 +4,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{IncludeLexer, MacroLexer, ValueLexer, ExpressionLexer};
+use crate::lexer::{IncludeLexer, MacroLexer, ValueLexer, ExpressionLexer, EntryLexer};
 use crate::traits::FileReader;
 
 
@@ -28,14 +28,15 @@ impl Compiler {
         let expr_lexer = ExpressionLexer::try_from(value_lexer).map_err(|e| CompilerError::new("EXPRESSION CONSTRUCTION", e))?;
         println!("{} token(s) after expression construction.", expr_lexer.len());
 
-        // TODO EntryLexer, removes: Name, Comma, OpenBracket, CloseBracket -> Generates: Sections, Data, Constants, Variables, Instructions)
-            // TODO Everything at this stage takes expansion arguments of either Type=Number or Type=String
-            // TODO When does Integer Conversion happen? Are Expressions also float as soon as one
-            // is introduced and Conversion only happens when required or is there an error thown
-            // and Conversion must be explicit when trying to store a Float Expression into a byte?
+        let entry_lexer = EntryLexer::try_from(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
+        println!("{} token(s) after entry construction.", entry_lexer.len());
 
-        // TODO Parser
-            // TODO handle file local global labels which start with a "_"
+        // TODO EntryLexer, removes: Name, Comma, OpenBracket, CloseBracket, Flag, Register -> Generates: Sections, Data, Constants, Variables, Instructions)
+
+        // TODO ROM Layout
+            // TODO handle file local global labels which start with a "_" by searching for a
+            // matching label
+            // TODO the names should already have been made unique in the value stage
         // TODO Optimizer
         // TODO Generator
         // Parser

@@ -47,46 +47,56 @@ pub trait LexerToken {
 // Inner Token Abstraction ----------------------------------------------------
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum TokenType {
+    // Include
     Newline,
     Name,
-    Constant,
-    Register,
-    Flag,
     Reserved,
     Instruction,
     Parameter,
-    Offset,
     NumberLiteral,
-    Integer,
-    Float,
     StringLiteral,
-    String,
     TokenGroup,
     BinaryFile,
-    BuiltinCall,
     Comma,
     Point,
     Colon,
     Operator,
-    GlobalLabelDef,
-    GlobalLabelRef,
-    LocalLabelDef,
-    LocalLabelRef,
     Comment,
     OpenParen,
     CloseParen,
     OpenBracket,
     CloseBracket,
+
+    // Macro
+    BuiltinCall,
+
+    // Value Tokens
+    Offset,
+    Integer,
+    Float,
+    String,
+    Constant,
+    Register,
+    Flag,
+    GlobalLabelDef,
+    GlobalLabelRef,
+    LocalLabelDef,
+    LocalLabelRef,
+
+    // Expression Tokens
     Expression,
-    ConstExpression
+    ConstExpression,
+
+    // Entry Tokens
+    Variable,
+    SectionDeclaration
+
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct InnerToken {
     pub file_index: usize,
-    // Only used for error locations so we can trace back to the source code in macro expansions
     pub start_index: usize,
-    // Only used for error locations so we can trace back to the source code in macro expansions
     pub end_index: usize,
     pub value: String,
     pub macro_call_id: Option<usize>
