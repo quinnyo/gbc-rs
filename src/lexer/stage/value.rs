@@ -212,9 +212,19 @@ impl ValueLexer {
     pub fn try_from(lexer: MacroLexer) -> Result<ValueLexer, Box<dyn Error>> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        let tokens = Self::from_tokens(lexer.tokens).map_err(|err| {
+
+        let mut global_labels: HashMap<(String, Option<usize>), InnerToken> = HashMap::new();
+        let mut global_labels_names: Vec<String> = Vec::new();
+        let tokens = Self::from_tokens(
+            &mut global_labels,
+            &mut global_labels_names,
+            false,
+            lexer.tokens
+
+        ).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?;
+
         Ok(Self {
             files,
             tokens,
@@ -226,10 +236,14 @@ impl ValueLexer {
         self.tokens.len()
     }
 
-    fn from_tokens(tokens: Vec<MacroToken>) -> Result<Vec<ValueToken>, LexerError> {
+    fn from_tokens(
+        global_labels: &mut HashMap<(String, Option<usize>), InnerToken>,
+        global_labels_names: &mut Vec<String>,
+        is_argument: bool,
+        tokens: Vec<MacroToken>
 
-        let mut global_labels: HashMap<(String, Option<usize>), InnerToken> = HashMap::new();
-        let mut global_labels_names: Vec<String> = Vec::new();
+    ) -> Result<Vec<ValueToken>, LexerError> {
+
         let mut local_labels: HashMap<String, InnerToken> = HashMap::new();
 
         let mut value_tokens = Vec::with_capacity(tokens.len());
@@ -266,7 +280,12 @@ impl ValueLexer {
                 MacroToken::BuiltinCall(inner, args) => {
                     let mut value_args = Vec::with_capacity(args.len());
                     for tokens in args {
-                        value_args.push(Self::from_tokens(tokens)?);
+                        value_args.push(Self::from_tokens(
+                            global_labels,
+                            global_labels_names,
+                            true,
+                            tokens
+                        )?);
                     }
                     ValueToken::BuiltinCall(inner, value_args)
                 },
@@ -280,6 +299,9 @@ impl ValueLexer {
                                 inner.value
 
                             )).with_reference(previous, "Original definition of global label was"));
+
+                        } else if is_argument {
+                            return Err(inner.error("Global label cannot be defined inside an argument list".to_string()));
 
                         } else {
                             inner.end_index = colon.end_index;
@@ -333,6 +355,9 @@ impl ValueLexer {
                                 global_labels_names.last().unwrap()
 
                             )).with_reference(previous, "Original definition of local label was"));
+
+                        } else if is_argument {
+                            return Err(inner.error("Local label cannot be defined inside an argument list".to_string()));
 
                         } else {
                             inner.end_index = colon.end_index;
@@ -416,7 +441,16 @@ impl ValueLexer {
             value_tokens.push(value_token);
         }
 
-        Ok(value_tokens.into_iter().map(|token| {
+        // TODO check if local labels do exist
+        Ok(Self::convert_global_label_refs(&global_labels, value_tokens))
+    }
+
+    fn convert_global_label_refs(
+        global_labels: &HashMap<(String, Option<usize>), InnerToken>,
+        tokens: Vec<ValueToken>
+
+    ) -> Vec<ValueToken> {
+        tokens.into_iter().map(|token| {
             if let ValueToken::Name(inner) = token {
 
                 // Generate references to global labels
@@ -431,11 +465,17 @@ impl ValueLexer {
                     ValueToken::Name(inner)
                 }
 
+            } else if let ValueToken::BuiltinCall(inner, arguments) = token {
+                ValueToken::BuiltinCall(inner, arguments.into_iter().map(|tokens| {
+                    Self::convert_global_label_refs(global_labels, tokens)
+
+                }).collect())
+
             } else {
                 token
             }
 
-        }).collect())
+        }).collect()
     }
 
     fn global_label_id(inner: &InnerToken) -> (String, Option<usize>) {
@@ -690,6 +730,24 @@ mod test {
             inner: itf!(14, 26, "global_label", 0),
             name: "global_label".to_string()
         }]);
+        assert_eq!(tfv("global_label:\nCEIL(global_label)"), vec![
+            ValueToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label"),
+                name: "global_label".to_string()
+
+            },
+            ValueToken::BuiltinCall(
+                itk!(14, 18, "CEIL"),
+                vec![
+                    vec![
+                        ValueToken::GlobalLabelRef {
+                            inner: itf!(19, 31, "global_label", 0),
+                            name: "global_label".to_string()
+                        }
+                    ]
+                ]
+            )
+        ]);
     }
 
     #[test]
@@ -757,7 +815,7 @@ mod test {
     }
 
     #[test]
-    fn test_global_label_def_duplicate() {
+    fn test_error_global_label_def_duplicate() {
         assert_eq!(value_lexer_error(
             "global_label:\nglobal_label:"
 
@@ -765,7 +823,7 @@ mod test {
     }
 
     #[test]
-    fn test_global_file_local_label_def_duplicate() {
+    fn test_error_global_file_local_label_def_duplicate() {
         assert_eq!(
             value_lexer_error("_global_file_local_label:\n_global_file_local_label:"),
             "In file \"main.gb.s\" on line 2, column 1: Global label \"_global_file_local_label\" was already defined.\n\n_global_file_local_label:\n^--- Here\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\n_global_file_local_label:\n^--- Here"
@@ -773,12 +831,28 @@ mod test {
     }
 
     #[test]
-    fn test_global_label_def_duplicate_child() {
+    fn test_error_global_label_def_duplicate_child() {
         assert_eq!(value_lexer_child_error(
             "global_label:\nINCLUDE 'child.gb.s'",
             "global_label:"
 
         ), "In file \"child.gb.s\" on line 1, column 1: Global label \"global_label\" was already defined.\n\nglobal_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_global_label_def_in_call() {
+        assert_eq!(value_lexer_error(
+            "CEIL(global_label:)"
+
+        ), "In file \"main.gb.s\" on line 1, column 6: Global label cannot be defined inside an argument list\n\nCEIL(global_label:)\n     ^--- Here");
+    }
+
+    #[test]
+    fn test_error_local_label_def_in_call() {
+        assert_eq!(value_lexer_error(
+            "global_label:\nCEIL(.locall_label:)"
+
+        ), "In file \"main.gb.s\" on line 2, column 6: Local label cannot be defined inside an argument list\n\nCEIL(.locall_label:)\n     ^--- Here");
     }
 
     #[test]
@@ -835,6 +909,26 @@ mod test {
             inner: itk!(27, 45, "."),
             name: "local_other_label".to_string()
         }]);
+        assert_eq!(tfv("global_label:\n.local_label\nCEIL(.local_label)"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::LocalLabelRef {
+            inner: itk!(14, 26, "."),
+            name: "local_label".to_string()
+
+        }, ValueToken::BuiltinCall(
+            itk!(27, 31, "CEIL"),
+            vec![
+                vec![
+                    ValueToken::LocalLabelRef {
+                        inner: itf!(32, 44, ".", 0),
+                        name: "local_label".to_string()
+                    }
+                ]
+            ]
+        )]);
+
     }
 
     #[test]

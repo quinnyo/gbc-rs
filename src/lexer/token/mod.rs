@@ -49,6 +49,7 @@ pub trait LexerToken {
 pub enum TokenType {
     Newline,
     Name,
+    Constant,
     Register,
     Flag,
     Reserved,
@@ -76,7 +77,8 @@ pub enum TokenType {
     CloseParen,
     OpenBracket,
     CloseBracket,
-    Expression
+    Expression,
+    ConstExpression
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

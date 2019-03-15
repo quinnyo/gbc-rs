@@ -15,14 +15,15 @@ use super::macros::MacroCall;
 
 // Expression Specific Tokens -------------------------------------------------
 lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
-    Name(()),
+    Constant(()),
     Reserved(()),
     Instruction(()),
     BinaryFile((Vec<u8>)),
     Comma(()),
     OpenBracket(()),
     CloseBracket(()),
-    Expression((usize, Expression))
+    Expression((usize, Expression)),
+    ConstExpression((usize, Expression))
 }, {
     GlobalLabelDef {
         name => String
@@ -106,10 +107,10 @@ impl ExpressionLexer {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
             if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQU")) {
-                expression_tokens.push(ExpressionToken::Name(token.into_inner()));
+                expression_tokens.push(ExpressionToken::Constant(token.into_inner()));
 
             } else if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
-                expression_tokens.push(ExpressionToken::Name(token.into_inner()));
+                expression_tokens.push(ExpressionToken::Constant(token.into_inner()));
 
             } else {
                 expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument, expression_id)?);
@@ -146,7 +147,12 @@ impl ExpressionLexer {
             let expr = Expression::from_tokens(value_tokens, expression_id)?;
             let id = *expression_id;
             *expression_id += 1;
-            Ok(ExpressionToken::Expression(inner, id, expr))
+            if expr.is_constant() {
+                Ok(ExpressionToken::ConstExpression(inner, id, expr))
+
+            } else {
+                Ok(ExpressionToken::Expression(inner, id, expr))
+            }
 
         } else if is_argument == false {
 
@@ -173,7 +179,7 @@ impl ExpressionLexer {
             // TODO can this even happen?
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
         }
-        if let ExpressionToken::Expression(_, _, expr) = expression_tokens.remove(0) {
+        if let ExpressionToken::Expression(_, _, expr) | ExpressionToken::ConstExpression(_, _, expr) = expression_tokens.remove(0) {
             Ok(expr)
 
         } else {
@@ -187,13 +193,24 @@ impl ExpressionLexer {
 // Expression Abstraction -----------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
 pub enum ExpressionValue {
-    VariableValue(InnerToken, String),
+    ConstantValue(InnerToken, String),
     Integer(i32),
     Float(OrderedFloat<f32>),
     String(String),
     OffsetAddress(InnerToken, i32),
     GlobalLabelAddress(InnerToken, String),
     LocalLabelAddress(InnerToken, String)
+}
+
+impl ExpressionValue {
+
+    fn is_constant(&self) -> bool {
+        match self {
+            ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
+            ExpressionValue::OffsetAddress(_, _) | ExpressionValue::GlobalLabelAddress(_, _) | ExpressionValue::LocalLabelAddress(_, _) => false
+        }
+    }
+
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -218,8 +235,18 @@ pub enum Expression {
 }
 
 impl Expression {
+
     fn from_tokens(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
         ExpressionParser::new(tokens)?.parse_binary(expression_id, 0)
+    }
+
+    fn is_constant(&self) -> bool {
+        match self {
+            Expression::Binary { left, right, .. } => right.is_constant() && left.is_constant(),
+            Expression::Unary { right, .. } => right.is_constant(),
+            Expression::Value(value) => value.is_constant(),
+            Expression::BuiltinCall { args, .. } => args.iter().all(|arg| arg.is_constant())
+        }
     }
     // TODO implement both type / type operator interaction as well as type / type value interaction
     // TODO macro return type based on weak type interactions in expression walk
@@ -339,7 +366,7 @@ impl ExpressionParser {
             match self.next() {
                 Some(ValueToken::Name(inner)) => {
                     let name = inner.value.clone();
-                    Ok(Expression::Value(ExpressionValue::VariableValue(inner, name)))
+                    Ok(Expression::Value(ExpressionValue::ConstantValue(inner, name)))
                 },
                 Some(ValueToken::Offset { inner, value }) => Ok(
                     Expression::Value(ExpressionValue::OffsetAddress(inner, value)),
@@ -495,13 +522,13 @@ mod test {
     }
 
     #[test]
-    fn test_keep_equ_names() {
+    fn test_constants() {
         assert_eq!(tfe("foo EQU"), vec![
-            ExpressionToken::Name(itk!(0, 3, "foo")),
+            ExpressionToken::Constant(itk!(0, 3, "foo")),
             ExpressionToken::Reserved(itk!(4, 7, "EQU"))
         ]);
         assert_eq!(tfe("foo EQUS"), vec![
-            ExpressionToken::Name(itk!(0, 3, "foo")),
+            ExpressionToken::Constant(itk!(0, 3, "foo")),
             ExpressionToken::Reserved(itk!(4, 8, "EQUS"))
         ]);
     }
@@ -509,28 +536,28 @@ mod test {
     #[test]
     fn test_standalone() {
         assert_eq!(tfe("foo"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 3, "foo"),
                 0,
-                Expression::Value(ExpressionValue::VariableValue(itk!(0, 3, "foo"), "foo".to_string()))
+                Expression::Value(ExpressionValue::ConstantValue(itk!(0, 3, "foo"), "foo".to_string()))
             )
         ]);
         assert_eq!(tfe("4"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Value(ExpressionValue::Integer(4))
             )
         ]);
         assert_eq!(tfe("4.2"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 3, "4.2"),
                 0,
                 Expression::Value(ExpressionValue::Float(OrderedFloat::from(4.2)))
             )
         ]);
         assert_eq!(tfe("'Foo'"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 5, "Foo"),
                 0,
                 Expression::Value(ExpressionValue::String("Foo".to_string()))
@@ -554,13 +581,13 @@ mod test {
 
     #[test]
     fn test_expression_id() {
-        assert_eq!(tfe("4 2"), vec![
-            ExpressionToken::Expression(
+        assert_eq!(tfe("4\n2"), vec![
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Value(ExpressionValue::Integer(4))
             ),
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(2, 3, "2"),
                 1,
                 Expression::Value(ExpressionValue::Integer(2))
@@ -572,7 +599,7 @@ mod test {
     #[test]
     fn test_builtin_call() {
         assert_eq!(tfe("DBG()"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 3, "DBG"),
                 0,
                 Expression::BuiltinCall {
@@ -588,7 +615,7 @@ mod test {
     #[test]
     fn test_builtin_call_with_args() {
         assert_eq!(tfe("MAX(4, MIN(1, 2))"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 3, "MAX"),
                 4,
                 Expression::BuiltinCall {
@@ -604,6 +631,58 @@ mod test {
                                 Expression::Value(ExpressionValue::Integer(2))
                             ]
                         }
+                    ]
+                }
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_builtin_call_with_global_label() {
+        assert_eq!(tfe("global_label:\nCEIL(global_label)"), vec![
+            ExpressionToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label"),
+                name: "global_label".to_string()
+            },
+            ExpressionToken::Expression(
+                itk!(14, 18, "CEIL"),
+                1,
+                Expression::BuiltinCall {
+                    inner: itk!(14, 18, "CEIL"),
+                    name: "CEIL".to_string(),
+                    args: vec![
+                        Expression::Value(ExpressionValue::GlobalLabelAddress(
+                            itk!(19, 31, "global_label"),
+                            "global_label".to_string()
+                        ))
+                    ]
+                }
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_builtin_call_with_local_label() {
+        assert_eq!(tfe("global_label:\n.local_label:\nCEIL(.local_label)"), vec![
+            ExpressionToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label"),
+                name: "global_label".to_string()
+            },
+            ExpressionToken::LocalLabelDef {
+                inner: itk!(14, 27, "."),
+                name: "local_label".to_string()
+            },
+            ExpressionToken::Expression(
+                itk!(28, 32, "CEIL"),
+                1,
+                Expression::BuiltinCall {
+                    inner: itk!(28, 32, "CEIL"),
+                    name: "CEIL".to_string(),
+                    args: vec![
+                        Expression::Value(ExpressionValue::LocalLabelAddress(
+                            itk!(33, 45, "."),
+                            "local_label".to_string()
+                        ))
                     ]
                 }
             )
@@ -660,7 +739,7 @@ mod test {
     #[test]
     fn test_unary_operator_plus() {
         assert_eq!(tfe("+4"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "+"),
                 0,
                 Expression::Unary {
@@ -671,13 +750,13 @@ mod test {
             )
         ]);
         assert_eq!(tfe("+foo"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "+"),
                 0,
                 Expression::Unary {
                     inner: itk!(0, 1, "+"),
                     op: Operator::Plus,
-                    right: Box::new(Expression::Value(ExpressionValue::VariableValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
                 }
             )
         ]);
@@ -686,7 +765,7 @@ mod test {
     #[test]
     fn test_unary_operator_minus() {
         assert_eq!(tfe("- 2"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "-"),
                 0,
                 Expression::Unary {
@@ -697,13 +776,13 @@ mod test {
             )
         ]);
         assert_eq!(tfe("-foo"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "-"),
                 0,
                 Expression::Unary {
                     inner: itk!(0, 1, "-"),
                     op: Operator::Minus,
-                    right: Box::new(Expression::Value(ExpressionValue::VariableValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
                 }
             )
         ]);
@@ -712,7 +791,7 @@ mod test {
     #[test]
     fn test_unary_operator_logical_not() {
         assert_eq!(tfe("!4"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "!"),
                 0,
                 Expression::Unary {
@@ -723,13 +802,13 @@ mod test {
             )
         ]);
         assert_eq!(tfe("!foo"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "!"),
                 0,
                 Expression::Unary {
                     inner: itk!(0, 1, "!"),
                     op: Operator::LogicalNot,
-                    right: Box::new(Expression::Value(ExpressionValue::VariableValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
                 }
             )
         ]);
@@ -738,7 +817,7 @@ mod test {
     #[test]
     fn test_unary_operator_bit_negate() {
         assert_eq!(tfe("~4"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "~"),
                 0,
                 Expression::Unary {
@@ -749,13 +828,13 @@ mod test {
             )
         ]);
         assert_eq!(tfe("~foo"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "~"),
                 0,
                 Expression::Unary {
                     inner: itk!(0, 1, "~"),
                     op: Operator::BitNegate,
-                    right: Box::new(Expression::Value(ExpressionValue::VariableValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
                 }
             )
         ]);
@@ -764,7 +843,7 @@ mod test {
     #[test]
     fn test_unary_operator_string() {
         assert_eq!(tfe("+'Foo'"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "+"),
                 0,
                 Expression::Unary {
@@ -779,7 +858,7 @@ mod test {
     #[test]
     fn test_unary_operator_builtin_call() {
         assert_eq!(tfe("+DBG()"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "+"),
                 0,
                 Expression::Unary {
@@ -827,21 +906,21 @@ mod test {
     #[test]
     fn test_paren_wrap_inner() {
         assert_eq!(tfe("(4)"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "("),
                 0,
                 Expression::Value(ExpressionValue::Integer(4))
             )
         ]);
         assert_eq!(tfe("((4))"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "("),
                 0,
                 Expression::Value(ExpressionValue::Integer(4))
             )
         ]);
         assert_eq!(tfe("(((4)))"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "("),
                 0,
                 Expression::Value(ExpressionValue::Integer(4))
@@ -852,12 +931,12 @@ mod test {
     #[test]
     fn test_paren_double_expr() {
         assert_eq!(tfe("(4)(4)"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "("),
                 0,
                 Expression::Value(ExpressionValue::Integer(4))
             ),
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(3, 4, "("),
                 1,
                 Expression::Value(ExpressionValue::Integer(4))
@@ -868,7 +947,7 @@ mod test {
     #[test]
     fn test_paren_wrap_inner_unary() {
         assert_eq!(tfe("+(4)"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "+"),
                 0,
                 Expression::Unary {
@@ -879,7 +958,7 @@ mod test {
             )
         ]);
         assert_eq!(tfe("+((4))"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "+"),
                 0,
                 Expression::Unary {
@@ -890,7 +969,7 @@ mod test {
             )
         ]);
         assert_eq!(tfe("(+((4)))"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "("),
                 0,
                 Expression::Unary {
@@ -919,7 +998,7 @@ mod test {
         ];
         for (op, s) in operators {
             assert_eq!(tfe(format!("4 {} 2", s)), vec![
-                ExpressionToken::Expression(
+                ExpressionToken::ConstExpression(
                     itk!(0, 1, "4"),
                     0,
                     Expression::Binary {
@@ -949,7 +1028,7 @@ mod test {
         ];
         for (op, s) in operators {
             assert_eq!(tfe(format!("4 {} 2", s)), vec![
-                ExpressionToken::Expression(
+                ExpressionToken::ConstExpression(
                     itk!(0, 1, "4"),
                     0,
                     Expression::Binary {
@@ -966,7 +1045,7 @@ mod test {
     #[test]
     fn test_binary_operator_with_parens() {
         assert_eq!(tfe("((4) + ((2)))"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "("),
                 0,
                 Expression::Binary {
@@ -982,7 +1061,7 @@ mod test {
     #[test]
     fn test_binary_unary_takes_precedence() {
         assert_eq!(tfe("4 + ~2"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Binary {
@@ -1004,7 +1083,7 @@ mod test {
     #[test]
     fn test_binary_precedence() {
         assert_eq!(tfe("4 || 2 && 8"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Binary {
@@ -1024,7 +1103,7 @@ mod test {
         ]);
 
         assert_eq!(tfe("4 + 2 * 8"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Binary {
@@ -1044,7 +1123,7 @@ mod test {
         ]);
 
         assert_eq!(tfe("4 * 2 + 8"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Binary {
@@ -1070,7 +1149,7 @@ mod test {
     #[test]
     fn test_binary_precedence_parens() {
         assert_eq!(tfe("4 * (2 + 8)"), vec![
-            ExpressionToken::Expression(
+            ExpressionToken::ConstExpression(
                 itk!(0, 1, "4"),
                 0,
                 Expression::Binary {
