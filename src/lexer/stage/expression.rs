@@ -17,6 +17,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken,
 lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     Constant(()),
     Reserved(()),
+    Segment(()),
     Instruction(()),
     BinaryFile((Vec<u8>)),
     Comma(()),
@@ -42,6 +43,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
 impl ExpressionToken {
     fn try_from(token: ValueToken) -> Result<ExpressionToken, ValueToken> {
         match token {
+            ValueToken::Segment(inner) => Ok(ExpressionToken::Segment(inner)),
             ValueToken::Reserved(inner) => Ok(ExpressionToken::Reserved(inner)),
             ValueToken::Instruction(inner) => Ok(ExpressionToken::Instruction(inner)),
             ValueToken::BinaryFile(inner, bytes) => Ok(ExpressionToken::BinaryFile(inner, bytes)),
@@ -707,6 +709,11 @@ mod test {
     #[test]
     fn test_builtin_call_error_with_invalid_arg_expr() {
         assert_eq!(expr_lexer_error("CEIL((4)(4))"), "In file \"main.gb.s\" on line 1, column 9: Unexpected expression after argument.\n\nCEIL((4)(4))\n        ^--- Here");
+    }
+
+    #[test]
+    fn test_builtin_call_error_with_invalid_arg_tokens() {
+        assert_eq!(expr_lexer_error("CEIL((4) DB)"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"DB\" token, expected the start of a expression instead.\n\nCEIL((4) DB)\n         ^--- Here");
     }
 
     // Label Refs -------------------------------------------------------------

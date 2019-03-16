@@ -16,6 +16,7 @@ lexer_token!(IncludeToken, (Debug, Eq, PartialEq, Clone), {
     Register(()),
     Flag(()),
     Reserved(()),
+    Segment(()),
     Instruction(()),
     Parameter(()),
     Offset(()),
@@ -221,9 +222,13 @@ impl IncludeStage {
                         "DS8" | "EQU" |
                         "DS16" | "EQUS" | "BANK" |
                         "MACRO" |
-                        "INCBIN" | "SECTION" | "INCLUDE" |
+                        "INCBIN" | "SECTION" | "INCLUDE" | "SEGMENT" |
                         "ENDMACRO" => {
                             Some(IncludeToken::Reserved(name))
+                        },
+                        // ROM Segments
+                        "ROM0" | "ROMX" | "WRAM0" | "WRAMX" | "HRAM" | "RAM" | "RAMX" => {
+                            Some(IncludeToken::Segment(name))
                         },
                         // Registers
                         "af" | "bc" | "de" | "hl" | "a" | "b" | "c" | "d" | "e" | "h" | "l" | "hld" | "hli" => {
@@ -624,7 +629,12 @@ mod test {
 
     #[test]
     fn test_reserved() {
-        token_types!(Reserved, "DB", "DW", "BW", "DS8", "DS16", "EQU", "EQUS", "BANK", "MACRO", "SECTION", "ENDMACRO");
+        token_types!(Reserved, "DB", "DW", "BW", "DS8", "DS16", "EQU", "EQUS", "BANK", "MACRO", "SECTION", "ENDMACRO", "SEGMENT");
+    }
+
+    #[test]
+    fn test_segment() {
+        token_types!(Segment, "ROM0", "ROMX", "WRAM0", "WRAMX", "HRAM", "RAM", "RAMX");
     }
 
     #[test]

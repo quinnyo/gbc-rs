@@ -16,6 +16,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken,
 lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     Name(()),
     Reserved(()),
+    Segment(()),
     Instruction(()),
     BinaryFile((Vec<u8>)),
     Comma(()),
@@ -245,6 +246,7 @@ impl ValueStage {
 
                 // Pass through
                 MacroToken::Reserved(inner) => ValueToken::Reserved(inner),
+                MacroToken::Segment(inner) => ValueToken::Segment(inner),
                 MacroToken::Instruction(inner) => ValueToken::Instruction(inner),
                 MacroToken::BinaryFile(inner, bytes) => ValueToken::BinaryFile(inner, bytes),
                 MacroToken::Comma(inner) => ValueToken::Comma(inner),

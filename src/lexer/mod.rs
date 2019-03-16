@@ -17,6 +17,7 @@ macro_rules! underscore {
 
 #[macro_export]
 macro_rules! lexer_token {
+    // Tuple only
     ($name:ident, ($($de:ident),*), {
         $(
             $variant:ident(
@@ -71,6 +72,69 @@ macro_rules! lexer_token {
             }
         }
     };
+// Struct only
+    ($name:ident, ($($de:ident),*), {}, {
+        $(
+            $struct_variant:ident {
+                $($struct_name:ident => $struct_type:ty),*
+            }
+        ),*
+
+    }) => {
+        #[derive($($de),*)]
+        pub enum $name {
+            $(
+                $struct_variant {
+                    inner: InnerToken,
+                    $($struct_name: $struct_type),*
+                }
+            ),*
+        }
+
+        impl LexerToken for $name {
+            fn typ(&self) -> TokenType {
+                match self {
+                    $(
+                        $name::$struct_variant { .. } => TokenType::$struct_variant
+                    ),*
+                }
+            }
+
+            fn inner(&self) -> &InnerToken {
+                match self {
+                    $(
+                        $name::$struct_variant {inner, ..}
+                    )|*
+                    => {
+                        inner
+                    }
+                }
+            }
+
+            fn inner_mut(&mut self) -> &mut InnerToken {
+                match self {
+                    $(
+                        $name::$struct_variant {inner, ..}
+                    )|*
+                    => {
+                        inner
+                    }
+                }
+            }
+
+            fn into_inner(self) -> InnerToken {
+                match self {
+                    $(
+                        $name::$struct_variant {inner, ..}
+                    )|*
+                    => {
+                        inner
+                    }
+                }
+            }
+        }
+    };
+    // Tuple and Struct
     ($name:ident, ($($de:ident),*), {
         $(
             $variant:ident(
@@ -155,7 +219,7 @@ macro_rules! lexer_token {
                 }
             }
         }
-    }
+    };
 }
 
 

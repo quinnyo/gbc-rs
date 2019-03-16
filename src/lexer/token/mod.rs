@@ -51,6 +51,7 @@ pub enum TokenType {
     Newline,
     Name,
     Reserved,
+    Segment,
     Instruction,
     Parameter,
     NumberLiteral,
@@ -88,7 +89,7 @@ pub enum TokenType {
     ConstExpression,
 
     // Entry Tokens
-    Variable,
+    Data,
     SectionDeclaration
 
 }

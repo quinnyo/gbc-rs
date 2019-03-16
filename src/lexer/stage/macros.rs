@@ -17,6 +17,7 @@ const MAX_EXPANSION_DEPTH: usize = 8;
 lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     Name(()),
     Reserved(()),
+    Segment(()),
     Register(()),
     Flag(()),
     Instruction(()),
@@ -41,6 +42,7 @@ impl From<IncludeToken> for MacroToken {
         match token {
             IncludeToken::Name(inner) => MacroToken::Name(inner),
             IncludeToken::Reserved(inner) => MacroToken::Reserved(inner),
+            IncludeToken::Segment(inner) => MacroToken::Segment(inner),
             IncludeToken::Register(inner) => MacroToken::Register(inner),
             IncludeToken::Flag(inner) => MacroToken::Flag(inner),
             IncludeToken::Instruction(inner) => MacroToken::Instruction(inner),

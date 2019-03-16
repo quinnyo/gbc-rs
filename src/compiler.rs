@@ -33,6 +33,8 @@ impl Compiler {
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
         // TODO EntryLexer, removes: Name, Comma, OpenBracket, CloseBracket, Flag, Register -> Generates: Sections, Data, Constants, Variables, Instructions)
+        // TODO after resolving expression values check if their type fits into the storage (e.g.
+        // DB only takes integers etc.)
 
         // TODO ROM Layout
             // TODO handle file local global labels which start with a "_" by searching for a

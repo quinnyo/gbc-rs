@@ -128,5 +128,15 @@ mod mocks {
         Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
     }
 
+    pub fn expr_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<ExpressionStage> {
+        let mut reader = MockFileReader::default();
+        reader.add_file("main.gb.s", s.into().as_str());
+        reader.add_binary_file("child.bin", b);
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
+        let lexer = Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed");
+        let lexer = Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed");
+        Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
+    }
+
 }
 
