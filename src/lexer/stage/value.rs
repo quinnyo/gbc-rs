@@ -1,5 +1,4 @@
 // STD Dependencies -----------------------------------------------------------
-use std::error::Error;
 use std::collections::HashMap;
 
 
@@ -8,8 +7,9 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::super::{MacroLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
+use crate::lexer::MacroStage;
 use super::macros::{MacroCall, MacroToken};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
 // Value Specific Tokens ------------------------------------------------------
@@ -201,42 +201,34 @@ impl Operator {
 }
 
 // Value Level Lexer Implementation -------------------------------------------
-pub struct ValueLexer {
-    pub files: Vec<LexerFile>,
-    pub tokens: Vec<ValueToken>,
-    pub macro_calls: Vec<MacroCall>
-}
+pub struct ValueStage;
+impl LexerStage for ValueStage {
 
-impl ValueLexer {
+    type Input = MacroStage;
+    type Output = ValueToken;
+    type Data = ();
 
-    pub fn try_from(lexer: MacroLexer) -> Result<ValueLexer, Box<dyn Error>> {
-        let files = lexer.files;
-        let macro_calls = lexer.macro_calls;
+    fn from_tokens(
+        tokens: Vec<<Self::Input as LexerStage>::Output>,
+        _macro_calls: &mut Vec<MacroCall>,
+        _data: &mut Vec<Self::Data>
 
+    ) -> Result<Vec<Self::Output>, LexerError> {
         let mut global_labels: HashMap<(String, Option<usize>), InnerToken> = HashMap::new();
         let mut global_labels_names: Vec<String> = Vec::new();
-        let tokens = Self::from_tokens(
+        Self::parse_tokens(
             &mut global_labels,
             &mut global_labels_names,
             false,
-            lexer.tokens
-
-        ).map_err(|err| {
-            err.extend_with_location_and_macros(&files, &macro_calls)
-        })?;
-
-        Ok(Self {
-            files,
-            tokens,
-            macro_calls
-        })
+            tokens
+        )
     }
 
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
+}
 
-    fn from_tokens(
+impl ValueStage {
+
+    fn parse_tokens(
         global_labels: &mut HashMap<(String, Option<usize>), InnerToken>,
         global_labels_names: &mut Vec<String>,
         is_argument: bool,
@@ -280,7 +272,7 @@ impl ValueLexer {
                 MacroToken::BuiltinCall(inner, args) => {
                     let mut value_args = Vec::with_capacity(args.len());
                     for tokens in args {
-                        value_args.push(Self::from_tokens(
+                        value_args.push(Self::parse_tokens(
                             global_labels,
                             global_labels_names,
                             true,
@@ -554,23 +546,24 @@ impl ValueLexer {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
-    use super::{ValueLexer, ValueToken, InnerToken, Operator, Register, Flag};
+    use crate::lexer::Lexer;
+    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag};
     use super::super::mocks::{macro_lex, macro_lex_child};
 
-    fn value_lexer<S: Into<String>>(s: S) -> ValueLexer {
-        ValueLexer::try_from(macro_lex(s)).expect("ValueLexer failed")
+    fn value_lexer<S: Into<String>>(s: S) -> Lexer<ValueStage> {
+        Lexer::<ValueStage>::from_lexer(macro_lex(s)).expect("ValueLexer failed")
     }
 
-    fn value_lexer_child<S: Into<String>>(s: S, c: S) -> ValueLexer {
-        ValueLexer::try_from(macro_lex_child(s, c)).expect("ValueLexer failed")
+    fn value_lexer_child<S: Into<String>>(s: S, c: S) -> Lexer<ValueStage> {
+        Lexer::<ValueStage>::from_lexer(macro_lex_child(s, c)).expect("ValueLexer failed")
     }
 
     fn value_lexer_error<S: Into<String>>(s: S) -> String {
-        ValueLexer::try_from(macro_lex(s)).err().unwrap().to_string()
+        Lexer::<ValueStage>::from_lexer(macro_lex(s)).err().unwrap().to_string()
     }
 
     fn value_lexer_child_error<S: Into<String>>(s: S, c: S) -> String {
-        ValueLexer::try_from(macro_lex_child(s, c)).err().unwrap().to_string()
+        Lexer::<ValueStage>::from_lexer(macro_lex_child(s, c)).err().unwrap().to_string()
     }
 
     fn tfv<S: Into<String>>(s: S) -> Vec<ValueToken> {

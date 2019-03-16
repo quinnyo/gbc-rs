@@ -1,6 +1,5 @@
 // STD Dependencies -----------------------------------------------------------
 use std::mem;
-use std::error::Error;
 
 
 // External Dependencies ------------------------------------------------------
@@ -8,9 +7,10 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::super::{ValueLexer, InnerToken, TokenIterator, TokenType, LexerToken, LexerFile, LexerError};
-use super::value::{Flag, Register, Operator, ValueToken};
 use super::macros::MacroCall;
+use crate::lexer::ValueStage;
+use super::value::{Flag, Register, Operator, ValueToken};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
 // Expression Specific Tokens -------------------------------------------------
@@ -71,36 +71,27 @@ impl ExpressionToken {
 
 
 // Expression Level Lexer Implementation --------------------------------------
-pub struct ExpressionLexer {
-    pub files: Vec<LexerFile>,
-    pub tokens: Vec<ExpressionToken>,
-    pub macro_calls: Vec<MacroCall>
-}
+pub struct ExpressionStage;
+impl LexerStage for ExpressionStage {
 
-impl ExpressionLexer {
+    type Input = ValueStage;
+    type Output = ExpressionToken;
+    type Data = ();
 
-    pub fn try_from(lexer: ValueLexer) -> Result<ExpressionLexer, Box<dyn Error>> {
-        let files = lexer.files;
-        let macro_calls = lexer.macro_calls;
-        let tokens = Self::from_tokens(lexer.tokens).map_err(|err| {
-            err.extend_with_location_and_macros(&files, &macro_calls)
-        })?;
-        Ok(Self {
-            files,
-            tokens,
-            macro_calls
-        })
-    }
+    fn from_tokens(
+        tokens: Vec<<Self::Input as LexerStage>::Output>,
+        _macro_calls: &mut Vec<MacroCall>,
+        _data: &mut Vec<Self::Data>
 
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
-
-    fn from_tokens(tokens: Vec<ValueToken>) -> Result<Vec<ExpressionToken>, LexerError> {
+    ) -> Result<Vec<Self::Output>, LexerError> {
         let mut expression_id = 0;
         let parsed_tokens = Self::parse_expression(tokens, &mut expression_id, false)?;
         Ok(parsed_tokens)
     }
+
+}
+
+impl ExpressionStage {
 
     fn parse_expression(tokens: Vec<ValueToken>, expression_id: &mut usize, is_argument: bool) -> Result<Vec<ExpressionToken>, LexerError> {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
@@ -174,7 +165,7 @@ impl ExpressionLexer {
     }
 
     fn parse_expression_argument(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
-        let mut expression_tokens = ExpressionLexer::parse_expression(tokens, expression_id, true)?;
+        let mut expression_tokens = Self::parse_expression(tokens, expression_id, true)?;
         if expression_tokens.len() > 1 {
             // TODO can this even happen?
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
@@ -389,7 +380,7 @@ impl ExpressionParser {
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
-                        args.push(ExpressionLexer::parse_expression_argument(tokens, expression_id)?);
+                        args.push(ExpressionStage::parse_expression_argument(tokens, expression_id)?);
                     }
                     Ok(Expression::BuiltinCall {
                         name: inner.value.clone(),
@@ -473,15 +464,16 @@ impl ExpressionParser {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
-    use super::{ExpressionLexer, ExpressionToken, InnerToken, Expression, ExpressionValue, Operator, Register, Flag};
+    use crate::lexer::Lexer;
+    use super::{ExpressionStage, ExpressionToken, InnerToken, Expression, ExpressionValue, Operator, Register, Flag};
     use super::super::mocks::value_lex;
 
-    fn expr_lexer<S: Into<String>>(s: S) -> ExpressionLexer {
-        ExpressionLexer::try_from(value_lex(s)).expect("ExpressionLexer failed")
+    fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
+        Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")
     }
 
     fn expr_lexer_error<S: Into<String>>(s: S) -> String {
-        ExpressionLexer::try_from(value_lex(s)).err().unwrap().to_string()
+        Lexer::<ExpressionStage>::from_lexer(value_lex(s)).err().unwrap().to_string()
     }
 
     fn tfe<S: Into<String>>(s: S) -> Vec<ExpressionToken> {

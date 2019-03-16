@@ -1,11 +1,7 @@
-// STD Dependencies -----------------------------------------------------------
-use std::error::Error;
-
-
 // Internal Dependencies ------------------------------------------------------
-use super::super::{ExpressionLexer, InnerToken, TokenType, LexerToken, LexerFile, LexerError};
-use super::expression::ExpressionToken;
 use super::macros::MacroCall;
+use crate::lexer::ExpressionStage;
+use super::super::{LexerStage, InnerToken, TokenType, LexerToken, LexerError};
 
 
 // Types ----------------------------------------------------------------------
@@ -67,32 +63,19 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
 });
 
 // Entry Level Lexer Implementation -------------------------------------------
-pub struct EntryLexer {
-    pub files: Vec<LexerFile>,
-    pub tokens: Vec<EntryToken>,
-    pub macro_calls: Vec<MacroCall>
-}
+pub struct EntryStage;
+impl LexerStage for EntryStage {
 
-impl EntryLexer {
+    type Input = ExpressionStage;
+    type Output = EntryToken;
+    type Data = ();
 
-    pub fn try_from(lexer: ExpressionLexer) -> Result<EntryLexer, Box<dyn Error>> {
-        let files = lexer.files;
-        let macro_calls = lexer.macro_calls;
-        let tokens = Self::from_tokens(lexer.tokens).map_err(|err| {
-            err.extend_with_location_and_macros(&files, &macro_calls)
-        })?;
-        Ok(Self {
-            files,
-            tokens,
-            macro_calls
-        })
-    }
+    fn from_tokens(
+        _tokens: Vec<<Self::Input as LexerStage>::Output>,
+        _macro_calls: &mut Vec<MacroCall>,
+        _data: &mut Vec<Self::Data>
 
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
-
-    fn from_tokens(tokens: Vec<ExpressionToken>) -> Result<Vec<EntryToken>, LexerError> {
+    ) -> Result<Vec<Self::Output>, LexerError> {
         Ok(Vec::new())
     }
 
@@ -102,11 +85,12 @@ impl EntryLexer {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use super::{EntryLexer, EntryToken};
+    use crate::lexer::Lexer;
+    use super::{EntryStage, EntryToken};
     use super::super::mocks::expr_lex;
 
-    fn entry_lexer<S: Into<String>>(s: S) -> EntryLexer {
-        EntryLexer::try_from(expr_lex(s)).expect("EntryLexer failed")
+    fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
+        Lexer::<EntryStage>::from_lexer(expr_lex(s)).expect("EntryStage failed")
     }
 
     // fn entry_lexer_error<S: Into<String>>(s: S) -> String {

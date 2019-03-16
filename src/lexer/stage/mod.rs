@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::path::PathBuf;
+
+
 // Modules --------------------------------------------------------------------
 pub mod entry;
 pub mod expression;
@@ -5,20 +9,50 @@ pub mod include;
 pub mod macros;
 pub mod value;
 
+
+// Internal Dependencies ------------------------------------------------------
+use crate::traits::FileReader;
+use super::{LexerFile, LexerToken, LexerError};
+use macros::MacroCall;
+
+
+// Traits ---------------------------------------------------------------------
+pub trait LexerStage {
+    type Input: LexerStage;
+    type Output: LexerToken;
+    type Data;
+
+    fn from_file<R: FileReader>(
+        _: &R,
+        _: &PathBuf,
+        _: &mut Vec<LexerFile>
+
+    ) -> Result<Vec<Self::Output>, LexerError> {
+        Ok(Vec::new())
+    }
+
+    fn from_tokens(
+        _: Vec<<Self::Input as LexerStage>::Output>,
+        _: &mut Vec<MacroCall>,
+        _: &mut Vec<Self::Data>
+
+    ) -> Result<Vec<Self::Output>, LexerError> {
+        Ok(Vec::new())
+    }
+}
+
+
+// Test Mocks -----------------------------------------------------------------
 #[cfg(test)]
 mod mocks {
     // STD Dependencies -------------------------------------------------------
     use std::path::PathBuf;
     use std::collections::HashMap;
-    use std::error::Error;
     use std::io::{Error as IOError, ErrorKind};
 
     // Internal Dependencies --------------------------------------------------
     use crate::traits::{FileReader, FileError};
-    use super::include::{IncludeLexer, IncludeToken};
-    use super::macros::MacroLexer;
-    use super::value::ValueLexer;
-    use super::expression::ExpressionLexer;
+    use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage};
 
     #[derive(Default)]
     pub struct MockFileReader {
@@ -62,59 +96,36 @@ mod mocks {
 
     }
 
-    pub fn include_lex<S: Into<String>>(s: S) -> IncludeLexer {
+    pub fn include_lex<S: Into<String>>(s: S) -> Lexer<IncludeStage> {
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
         assert_eq!(lexer.files.len(), 1);
         lexer
     }
 
-    pub fn macro_lex<S: Into<String>>(s: S) -> MacroLexer {
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
-        assert_eq!(lexer.files.len(), 1);
-        MacroLexer::try_from(lexer).expect("MacroLexer failed")
+    pub fn macro_lex<S: Into<String>>(s: S) -> Lexer<MacroStage> {
+        let lexer = include_lex(s);
+        Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed")
     }
 
-    pub fn macro_lex_child<S: Into<String>>(s: S, c: S) -> MacroLexer {
+    pub fn macro_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<MacroStage> {
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         reader.add_file("child.gb.s", c.into().as_str());
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
         assert_eq!(lexer.files.len(), 2);
-        MacroLexer::try_from(lexer).expect("MacroLexer failed")
+        Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed")
     }
 
-    pub fn value_lex<S: Into<String>>(s: S) -> ValueLexer {
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
-        assert_eq!(lexer.files.len(), 1);
-        let lexer = MacroLexer::try_from(lexer).expect("MacroLexer failed");
-        ValueLexer::try_from(lexer).expect("ValueLexer failed")
+    pub fn value_lex<S: Into<String>>(s: S) -> Lexer<ValueStage> {
+        let lexer = macro_lex(s);
+        Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed")
     }
 
-
-    pub fn expr_lex<S: Into<String>>(s: S) -> ExpressionLexer {
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
-        assert_eq!(lexer.files.len(), 1);
-        let lexer = MacroLexer::try_from(lexer).expect("MacroLexer failed");
-        let lexer = ValueLexer::try_from(lexer).expect("ValueLexer failed");
-        ExpressionLexer::try_from(lexer).expect("ExpressionLexer failed")
-    }
-
-    pub fn tfs<S: Into<String>>(s: S) -> Vec<IncludeToken> {
-        include_lex(s).tokens
-    }
-
-    pub fn tfe<S: Into<String>>(s: S) -> Result<usize, Box<dyn Error>> {
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        Ok(IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s"))?.len())
+    pub fn expr_lex<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
+        let lexer = value_lex(s);
+        Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
     }
 
 }

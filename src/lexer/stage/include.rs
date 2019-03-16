@@ -1,10 +1,10 @@
 // STD Dependencies -----------------------------------------------------------
-use std::error::Error;
 use std::path::PathBuf;
 
 
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
+use super::super::LexerStage;
 use super::super::token::{TokenGenerator, TokenChar};
 use super::super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
 
@@ -53,33 +53,31 @@ impl<'a, T: FileReader> IncludeLexerState<'a, T> {
 
 
 // Include Level Lexer Implementation -----------------------------------------
-pub struct IncludeLexer {
-    pub files: Vec<LexerFile>,
-    pub tokens: Vec<IncludeToken>
-}
+pub struct IncludeStage;
+impl LexerStage for IncludeStage {
 
-impl IncludeLexer {
+    type Input = Self;
+    type Output = IncludeToken;
+    type Data = ();
 
-    pub fn from_file<T: FileReader>(file_reader: &T, child_path: &PathBuf) -> Result<Self, Box<dyn Error>>{
+    fn from_file<R: FileReader>(
+        file_reader: &R,
+        child_path: &PathBuf,
+        files: &mut Vec<LexerFile>
 
-        let mut files = Vec::new();
-        let tokens = Self::include_child(IncludeLexerState {
+    ) -> Result<Vec<Self::Output>, LexerError> {
+        Self::include_child(IncludeLexerState {
             file_reader,
-            files: &mut files,
+            files,
             parent_path: None,
             child_path
 
-        }, Vec::new(), 0, 0).map_err(|err| err.extend_with_location(&files))?;
-
-        Ok(Self {
-            files,
-            tokens
-        })
+        }, Vec::new(), 0, 0)
     }
 
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
+}
+
+impl IncludeStage {
 
     fn include_child<T: FileReader>(
         state: IncludeLexerState<T>,
@@ -430,8 +428,19 @@ impl IncludeLexer {
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
-    use super::{IncludeLexer, IncludeToken, InnerToken};
-    use super::super::mocks::{MockFileReader, tfs, tfe};
+    use crate::lexer::Lexer;
+    use crate::lexer::stage::mocks::{MockFileReader, include_lex};
+    use super::{IncludeStage, IncludeToken, InnerToken};
+
+    fn include_lexer<S: Into<String>>(s: S) -> Vec<IncludeToken> {
+        include_lex(s).tokens
+    }
+
+    fn include_lexer_error<S: Into<String>>(s: S) -> String {
+        let mut reader = MockFileReader::default();
+        reader.add_file("main.gb.s", s.into().as_str());
+        Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap().to_string()
+    }
 
     macro_rules! tk {
         ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
@@ -453,7 +462,7 @@ mod test {
 
     macro_rules! token_types {
         ($tok:ident, $id:expr) => {
-            assert_eq!(tfs($id), vec![tk!($tok, 0, $id.len(), $id)]);
+            assert_eq!(include_lexer($id), vec![tk!($tok, 0, $id.len(), $id)]);
         };
         ($tok:ident, $id:expr, $($rest:expr), +) => {
             token_types!($tok, $id);
@@ -463,7 +472,7 @@ mod test {
 
     #[test]
     fn test_empty() {
-        assert_eq!(tfs(""), vec![]);
+        assert_eq!(include_lexer(""), vec![]);
     }
 
     #[test]
@@ -476,7 +485,7 @@ mod test {
         reader.add_file("src/extra/bar.gb.s", "BAR");
         reader.add_file("src/abs.gb.s", "ABS");
 
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(1, NumberLiteral, 0, 2, "42"),
             tkf!(0, Newline, 18, 19, "\n"),
@@ -497,7 +506,7 @@ mod test {
         reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
         reader.add_file("src/three.gb.s", "3");
 
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(0, NumberLiteral, 0, 1, "1"),
             tkf!(0, Newline, 1, 2, "\n"),
@@ -517,7 +526,7 @@ mod test {
         reader.base = PathBuf::from("src");
         reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
 
-        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 2, column 9: File \"src/one.gb.s\" not found\n\nINCLUDE \'one.gb.s\'\n        ^--- Here");
 
     }
@@ -532,7 +541,7 @@ mod test {
         reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
         reader.add_file("src/three.gb.s", "@");
 
-        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "In file \"src/three.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
@@ -545,15 +554,15 @@ mod test {
         reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
         reader.add_file("src/one.gb.s", "@");
 
-        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "In file \"src/one.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
 
     #[test]
     fn test_resolve_include_incomplete() {
-        assert_eq!(tfe("INCLUDE 4").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
-        assert_eq!(tfe("INCLUDE").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 4"), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
     }
 
     #[test]
@@ -565,7 +574,7 @@ mod test {
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
         reader.add_binary_file("src/second.bin", vec![42]);
 
-        let lexer = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             IncludeToken::BinaryFile(itk!(7, 17, "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
             tkf!(0, Newline, 17, 18, "\n"),
@@ -580,20 +589,20 @@ mod test {
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
         reader.add_file("src/main.gb.s", "INCBIN 'data.bin'");
-        let err = IncludeLexer::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
         assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 1, column 8: File \"src/data.bin\" not found\n\nINCBIN \'data.bin\'\n       ^--- Here");
 
     }
 
     #[test]
     fn test_resolve_incbin_incomplete() {
-        assert_eq!(tfe("INCBIN 4").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 8: Expected a StringLiteral instead.\n\nINCBIN 4\n       ^--- Here");
-        assert_eq!(tfe("INCBIN").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCBIN\n^--- Here");
+        assert_eq!(include_lexer_error("INCBIN 4"), "In file \"main.gb.s\" on line 1, column 8: Expected a StringLiteral instead.\n\nINCBIN 4\n       ^--- Here");
+        assert_eq!(include_lexer_error("INCBIN"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCBIN\n^--- Here");
     }
 
     #[test]
     fn test_newlinews() {
-        assert_eq!(tfs("\n\r\n\n\r"), vec![
+        assert_eq!(include_lexer("\n\r\n\n\r"), vec![
             tk!(Newline, 0, 1, "\n"),
             tk!(Newline, 1, 2, "\r"),
             tk!(Newline, 2, 3, "\n"),
@@ -604,13 +613,13 @@ mod test {
 
     #[test]
     fn test_name() {
-        assert_eq!(tfs("INCLUDEX"), vec![tk!(Name, 0, 8, "INCLUDEX")]);
-        assert_eq!(tfs("ol"), vec![tk!(Name, 0, 2, "ol")]);
-        assert_eq!(tfs("q"), vec![tk!(Name, 0, 1, "q")]);
-        assert_eq!(tfs("foo_bar"), vec![tk!(Name, 0, 7, "foo_bar")]);
-        assert_eq!(tfs("_test"), vec![tk!(Name, 0, 5, "_test")]);
-        assert_eq!(tfs("abcdefghijklmnopqrstuvwxyz"), vec![tk!(Name, 0, 26, "abcdefghijklmnopqrstuvwxyz")]);
-        assert_eq!(tfs("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), vec![tk!(Name, 0, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]);
+        assert_eq!(include_lexer("INCLUDEX"), vec![tk!(Name, 0, 8, "INCLUDEX")]);
+        assert_eq!(include_lexer("ol"), vec![tk!(Name, 0, 2, "ol")]);
+        assert_eq!(include_lexer("q"), vec![tk!(Name, 0, 1, "q")]);
+        assert_eq!(include_lexer("foo_bar"), vec![tk!(Name, 0, 7, "foo_bar")]);
+        assert_eq!(include_lexer("_test"), vec![tk!(Name, 0, 5, "_test")]);
+        assert_eq!(include_lexer("abcdefghijklmnopqrstuvwxyz"), vec![tk!(Name, 0, 26, "abcdefghijklmnopqrstuvwxyz")]);
+        assert_eq!(include_lexer("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), vec![tk!(Name, 0, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]);
     }
 
     #[test]
@@ -638,33 +647,33 @@ mod test {
 
     #[test]
     fn test_number_literal() {
-        assert_eq!(tfs("20_48"), vec![
+        assert_eq!(include_lexer("20_48"), vec![
             tk!(NumberLiteral, 0, 5, "2048")
         ]);
-        assert_eq!(tfs("-512"), vec![
+        assert_eq!(include_lexer("-512"), vec![
             tk!(NumberLiteral, 0, 4, "-512")
         ]);
-        assert_eq!(tfs("$1234"), vec![
+        assert_eq!(include_lexer("$1234"), vec![
             tk!(NumberLiteral, 0, 5, "$1234")
         ]);
-        assert_eq!(tfs("$1234"), vec![
+        assert_eq!(include_lexer("$1234"), vec![
             tk!(NumberLiteral, 0, 5, "$1234")
         ]);
-        assert_eq!(tfs("$abcdefABCDEF"), vec![
+        assert_eq!(include_lexer("$abcdefABCDEF"), vec![
             tk!(NumberLiteral, 0, 13, "$abcdefABCDEF")
         ]);
-        assert_eq!(tfs("%1001_0020"), vec![
+        assert_eq!(include_lexer("%1001_0020"), vec![
             tk!(NumberLiteral, 0, 8, "%100100"),
             tk!(NumberLiteral, 8, 10, "20")
         ]);
-        assert_eq!(tfs("2.4"), vec![
+        assert_eq!(include_lexer("2.4"), vec![
             tk!(NumberLiteral, 0, 3, "2.4")
         ]);
-        assert_eq!(tfs("2.4."), vec![
+        assert_eq!(include_lexer("2.4."), vec![
             tk!(NumberLiteral, 0, 3, "2.4"),
             tk!(Point, 3, 4, ".")
         ]);
-        assert_eq!(tfs("2.4.1"), vec![
+        assert_eq!(include_lexer("2.4.1"), vec![
             tk!(NumberLiteral, 0, 3, "2.4"),
             tk!(Point, 3, 4, "."),
             tk!(NumberLiteral, 4, 5, "1"),
@@ -673,66 +682,66 @@ mod test {
 
     #[test]
     fn test_number_literal_hex_incomplete() {
-        assert_eq!(tfe("$").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error("$"), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
     }
 
     #[test]
     fn test_string_literal() {
-        assert_eq!(tfs("'Hello World'"), vec![
+        assert_eq!(include_lexer("'Hello World'"), vec![
             tk!(StringLiteral, 0, 13, "Hello World")
         ]);
-        assert_eq!(tfs("\"Hello World\""), vec![
+        assert_eq!(include_lexer("\"Hello World\""), vec![
             tk!(StringLiteral, 0, 13, "Hello World")
         ]);
-        assert_eq!(tfs("'\"'"), vec![
+        assert_eq!(include_lexer("'\"'"), vec![
             tk!(StringLiteral, 0, 3, "\"")
         ]);
-        assert_eq!(tfs("\"'\""), vec![
+        assert_eq!(include_lexer("\"'\""), vec![
             tk!(StringLiteral, 0, 3, "'")
         ]);
     }
 
     #[test]
     fn test_string_literal_unclosed() {
-        assert_eq!(tfe("'Hello World").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
-        assert_eq!(tfe("\"Hello World").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
-        assert_eq!(tfe("'''").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
-        assert_eq!(tfe("\"\"\"").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
+        assert_eq!(include_lexer_error("'Hello World"), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
+        assert_eq!(include_lexer_error("\"Hello World"), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
+        assert_eq!(include_lexer_error("'''"), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
+        assert_eq!(include_lexer_error("\"\"\""), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
     }
 
     #[test]
     fn test_string_literal_escapes() {
-        assert_eq!(tfs("'\\n'"), vec![
+        assert_eq!(include_lexer("'\\n'"), vec![
             tk!(StringLiteral, 0, 4, "\n")
         ]);
-        assert_eq!(tfs("'\\r'"), vec![
+        assert_eq!(include_lexer("'\\r'"), vec![
             tk!(StringLiteral, 0, 4, "\r")
         ]);
-        assert_eq!(tfs("'\\t'"), vec![
+        assert_eq!(include_lexer("'\\t'"), vec![
             tk!(StringLiteral, 0, 4, "\t")
         ]);
-        assert_eq!(tfs("'\\''"), vec![
+        assert_eq!(include_lexer("'\\''"), vec![
             tk!(StringLiteral, 0, 4, "'")
         ]);
-        assert_eq!(tfs("\"\\\"\""), vec![
+        assert_eq!(include_lexer("\"\\\"\""), vec![
             tk!(StringLiteral, 0, 4, "\"")
         ]);
     }
 
     #[test]
     fn test_string_punct() {
-        assert_eq!(tfs(","), vec![tk!(Comma, 0, 1, ",")]);
-        assert_eq!(tfs("."), vec![tk!(Point, 0, 1, ".")]);
-        assert_eq!(tfs(":"), vec![tk!(Colon, 0, 1, ":")]);
-        assert_eq!(tfs("()"), vec![
+        assert_eq!(include_lexer(","), vec![tk!(Comma, 0, 1, ",")]);
+        assert_eq!(include_lexer("."), vec![tk!(Point, 0, 1, ".")]);
+        assert_eq!(include_lexer(":"), vec![tk!(Colon, 0, 1, ":")]);
+        assert_eq!(include_lexer("()"), vec![
             tk!(OpenParen, 0, 1, "("),
             tk!(CloseParen, 1, 2, ")")
         ]);
-        assert_eq!(tfs("[]"), vec![
+        assert_eq!(include_lexer("[]"), vec![
             tk!(OpenBracket, 0, 1, "["),
             tk!(CloseBracket, 1, 2, "]")
         ]);
-        assert_eq!(tfs("=%&|!-+<>~*/^"), vec![
+        assert_eq!(include_lexer("=%&|!-+<>~*/^"), vec![
             tk!(Operator, 0, 1, "="),
             tk!(Operator, 1, 2, "%"),
             tk!(Operator, 2, 3, "&"),
@@ -751,20 +760,20 @@ mod test {
 
     #[test]
     fn test_param_offset() {
-        assert_eq!(tfs("@param"), vec![tk!(Parameter, 0, 6, "param")]);
-        assert_eq!(tfs("@param_foo"), vec![tk!(Parameter, 0, 10, "param_foo")]);
-        assert_eq!(tfs("@+4"), vec![tk!(Offset, 0, 3, "+4")]);
-        assert_eq!(tfs("@-4"), vec![tk!(Offset, 0, 3, "-4")]);
+        assert_eq!(include_lexer("@param"), vec![tk!(Parameter, 0, 6, "param")]);
+        assert_eq!(include_lexer("@param_foo"), vec![tk!(Parameter, 0, 10, "param_foo")]);
+        assert_eq!(include_lexer("@+4"), vec![tk!(Offset, 0, 3, "+4")]);
+        assert_eq!(include_lexer("@-4"), vec![tk!(Offset, 0, 3, "-4")]);
     }
 
     #[test]
     fn test_param_offset_incomplete() {
-        assert_eq!(tfe("@").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here");
+        assert_eq!(include_lexer_error("@"), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here");
     }
 
     #[test]
     fn test_comments() {
-        assert_eq!(tfs("2 ; A Comment"), vec![
+        assert_eq!(include_lexer("2 ; A Comment"), vec![
             tk!(NumberLiteral, 0, 1, "2"),
             tk!(Comment, 2, 13, "; A Comment")
         ]);
@@ -772,14 +781,14 @@ mod test {
 
     #[test]
     fn test_multiline() {
-        assert_eq!(tfs("q\n'Text'\n4"), vec![
+        assert_eq!(include_lexer("q\n'Text'\n4"), vec![
             tk!(Name, 0, 1, "q"),
             tk!(Newline, 1, 2, "\n"),
             tk!(StringLiteral, 2, 8, "Text"),
             tk!(Newline, 8, 9, "\n"),
             tk!(NumberLiteral, 9, 10, "4")
         ]);
-        assert_eq!(tfs("; A Comment\n2"), vec![
+        assert_eq!(include_lexer("; A Comment\n2"), vec![
             tk!(Comment, 0, 11, "; A Comment"),
             tk!(Newline, 11, 12, "\n"),
             tk!(NumberLiteral, 12, 13, "2"),
@@ -788,10 +797,10 @@ mod test {
 
     #[test]
     fn test_group() {
-        assert_eq!(tfs("``"), vec![
+        assert_eq!(include_lexer("``"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), Vec::new())
         ]);
-        assert_eq!(tfs("`q\n'Text'\n4`"), vec![
+        assert_eq!(include_lexer("`q\n'Text'\n4`"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
                 tk!(Name, 1, 2, "q"),
                 tk!(Newline, 2, 3, "\n"),
@@ -800,7 +809,7 @@ mod test {
                 tk!(NumberLiteral, 10, 11, "4")
             ])
         ]);
-        assert_eq!(tfs("`\n\n`"), vec![
+        assert_eq!(include_lexer("`\n\n`"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
                 tk!(Newline, 1, 2, "\n"),
                 tk!(Newline, 2, 3, "\n"),
@@ -810,16 +819,16 @@ mod test {
 
     #[test]
     fn test_group_unclosed() {
-        assert_eq!(tfe("`a").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
-        assert_eq!(tfe("`a``a").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
-        assert_eq!(tfe("```").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
+        assert_eq!(include_lexer_error("`a"), "In file \"main.gb.s\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
+        assert_eq!(include_lexer_error("`a``a"), "In file \"main.gb.s\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
+        assert_eq!(include_lexer_error("```"), "In file \"main.gb.s\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
     }
 
     #[test]
     fn test_error_location() {
-        assert_eq!(tfe(" $").unwrap_err().to_string(), "In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".\n\n $\n ^--- Here");
-        assert_eq!(tfe("\n$").unwrap_err().to_string(), "In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
-        assert_eq!(tfe("\n\n$").unwrap_err().to_string(), "In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error(" $"), "In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".\n\n $\n ^--- Here");
+        assert_eq!(include_lexer_error("\n$"), "In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error("\n\n$"), "In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
     }
 
 }

@@ -1,3 +1,8 @@
+// STD Dependencies -----------------------------------------------------------
+use std::error::Error;
+use std::path::PathBuf;
+
+
 // Token Abstraction ----------------------------------------------------------
 mod token;
 pub use self::token::{LexerToken, InnerToken, TokenType, TokenIterator};
@@ -163,9 +168,70 @@ use self::file::LexerFile;
 
 
 // Re-Exports --------------------------------------------------------------------
-pub use self::stage::entry::EntryLexer;
-pub use self::stage::expression::ExpressionLexer;
-pub use self::stage::include::IncludeLexer;
-pub use self::stage::macros::MacroLexer;
-pub use self::stage::value::ValueLexer;
+use self::stage::LexerStage;
+pub use self::stage::entry::EntryStage;
+pub use self::stage::expression::ExpressionStage;
+pub use self::stage::include::IncludeStage;
+pub use self::stage::macros::MacroStage;
+pub use self::stage::value::ValueStage;
+use self::stage::macros::MacroCall;
+
+
+// Internal Dependencies ------------------------------------------------------
+use crate::traits::FileReader;
+
+
+// Lexer Abstraction ----------------------------------------------------------
+pub struct Lexer<T: LexerStage> {
+    pub files: Vec<LexerFile>,
+    pub tokens: Vec<T::Output>,
+    pub macro_calls: Vec<MacroCall>,
+    pub data: Vec<T::Data>
+}
+
+impl<T: LexerStage> Lexer<T> {
+
+    pub fn from_file<R: FileReader>(file_reader: &R, child_path: &PathBuf) -> Result<Self, Box<dyn Error>>{
+        let mut files = Vec::new();
+        let tokens = T::from_file(file_reader, child_path, &mut files).map_err(|err| {
+            err.extend_with_location(&files)
+        })?;
+        Ok(Self {
+            files,
+            tokens,
+            macro_calls: Vec::new(),
+            data: Vec::new()
+        })
+    }
+
+    pub fn from_lexer(lexer: Lexer<T::Input>) -> Result<Self, Box<dyn Error>> {
+        let files = lexer.files;
+        let mut data = Vec::new();
+        let mut macro_calls = lexer.macro_calls;
+        let tokens = T::from_tokens(lexer.tokens, &mut macro_calls, &mut data).map_err(|err| {
+            err.extend_with_location_and_macros(&files, &macro_calls)
+        })?;
+        Ok(Self {
+            files,
+            tokens,
+            macro_calls,
+            data
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    #[cfg(test)]
+    pub fn macro_calls_count(&self) -> usize {
+        self.macro_calls.len()
+    }
+
+    #[cfg(test)]
+    pub fn data(&mut self) -> Vec<T::Data> {
+        self.data.drain(0..).collect()
+    }
+
+}
 

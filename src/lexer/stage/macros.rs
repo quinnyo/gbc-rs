@@ -1,12 +1,12 @@
 // STD Dependencies -----------------------------------------------------------
 use std::mem;
-use std::error::Error;
 use std::collections::HashSet;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::super::{IncludeLexer, InnerToken, TokenIterator, LexerFile, LexerToken, LexerError, TokenType};
+use crate::lexer::IncludeStage;
 use super::include::IncludeToken;
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, LexerError, TokenType};
 
 
 // Statics --------------------------------------------------------------------
@@ -92,7 +92,7 @@ enum MacroReturnType {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct MacroDefinition {
+pub struct MacroDefinition {
     name: InnerToken,
     parameters: Vec<(MacroArgumenType, InnerToken)>,
     return_type: MacroReturnType,
@@ -130,46 +130,29 @@ impl MacroCall {
 
 
 // Macro Level Lexer Implementation -------------------------------------------
-pub struct MacroLexer {
-    pub files: Vec<LexerFile>,
-    pub tokens: Vec<MacroToken>,
-    macro_defs: Vec<MacroDefinition>,
-    pub macro_calls: Vec<MacroCall>
-}
+pub struct MacroStage;
+impl LexerStage for MacroStage {
 
-impl MacroLexer {
-
-    // TODO use a trait for the boiler plate stuff
-    pub fn try_from(lexer: IncludeLexer) -> Result<MacroLexer, Box<dyn Error>> {
-
-        let files = lexer.files;
-        let mut macro_calls = Vec::new();
-        let (macro_defs, tokens) = Self::from_tokens(lexer.tokens, &mut macro_calls).map_err(|err| {
-            err.extend_with_location_and_macros(&files, &macro_calls)
-        })?;
-
-        Ok(Self {
-            files,
-            macro_defs,
-            macro_calls,
-            tokens
-        })
-
-    }
-
-    pub fn len(&self) -> usize {
-        self.tokens.len()
-    }
-
-    pub fn macro_defs_count(&self) -> usize {
-        self.macro_defs.len()
-    }
-
-    pub fn macro_calls_count(&self) -> usize {
-        self.macro_calls.len()
-    }
+    type Input = IncludeStage;
+    type Output = MacroToken;
+    type Data = MacroDefinition;
 
     fn from_tokens(
+        tokens: Vec<<Self::Input as LexerStage>::Output>,
+        macro_calls: &mut Vec<MacroCall>,
+        data: &mut Vec<Self::Data>
+
+    ) -> Result<Vec<Self::Output>, LexerError> {
+        let (mut macro_defs, tokens) = Self::parse_tokens(tokens, macro_calls)?;
+        data.append(&mut macro_defs);
+        Ok(tokens)
+    }
+
+}
+
+impl MacroStage {
+
+    fn parse_tokens(
         tokens: Vec<IncludeToken>,
         macro_calls: &mut Vec<MacroCall>
 
@@ -606,15 +589,16 @@ impl MacroLexer {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use super::{MacroLexer, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType, MacroReturnType};
+    use crate::lexer::Lexer;
+    use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType, MacroReturnType};
     use super::super::mocks::include_lex;
 
-    fn macro_lexer<S: Into<String>>(s: S) -> MacroLexer {
-        MacroLexer::try_from(include_lex(s)).expect("MacroLexer failed")
+    fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
+        Lexer::<MacroStage>::from_lexer(include_lex(s)).expect("MacroLexer failed")
     }
 
     fn macro_lexer_error<S: Into<String>>(s: S) -> String {
-        MacroLexer::try_from(include_lex(s)).err().unwrap().to_string()
+        Lexer::<MacroStage>::from_lexer(include_lex(s)).err().unwrap().to_string()
     }
 
     fn tfm<S: Into<String>>(s: S) -> Vec<MacroToken> {
@@ -708,18 +692,18 @@ mod test {
 
     #[test]
     fn test_macro_def_no_args_no_body() {
-        let lexer = macro_lexer("MACRO FOO() ENDMACRO");
+        let mut lexer = macro_lexer("MACRO FOO() ENDMACRO");
         assert!(lexer.tokens.is_empty());
-        assert_eq!(lexer.macro_defs, vec![
+        assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![], vec![])
         ]);
     }
 
     #[test]
     fn test_macro_def_one_arg() {
-        let lexer = macro_lexer("MACRO FOO(@a) ENDMACRO");
+        let mut lexer = macro_lexer("MACRO FOO(@a) ENDMACRO");
         assert!(lexer.tokens.is_empty());
-        assert_eq!(lexer.macro_defs, vec![
+        assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![
                 (MacroArgumenType::Any, itk!(10, 12, "a"))
 
@@ -729,9 +713,9 @@ mod test {
 
     #[test]
     fn test_macro_def_multiple_args() {
-        let lexer = macro_lexer("MACRO FOO(@a, @b, @c) ENDMACRO");
+        let mut lexer = macro_lexer("MACRO FOO(@a, @b, @c) ENDMACRO");
         assert!(lexer.tokens.is_empty());
-        assert_eq!(lexer.macro_defs, vec![
+        assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![
                 (MacroArgumenType::Any, itk!(10, 12, "a")),
                 (MacroArgumenType::Any, itk!(14, 16, "b")),
@@ -743,9 +727,9 @@ mod test {
 
     #[test]
     fn test_macro_def_body() {
-        let lexer = macro_lexer("MACRO FOO() hl,a ENDMACRO");
+        let mut lexer = macro_lexer("MACRO FOO() hl,a ENDMACRO");
         assert!(lexer.tokens.is_empty());
-        assert_eq!(lexer.macro_defs, vec![
+        assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![], vec![
                 tk!(Register, 12, 14, "hl"),
                 tk!(Comma, 14, 15, ","),
@@ -796,12 +780,12 @@ mod test {
 
     #[test]
     fn test_macro_extract() {
-        let lexer = macro_lexer("2 MACRO FOO() ENDMACRO 4");
+        let mut lexer = macro_lexer("2 MACRO FOO() ENDMACRO 4");
         assert_eq!(lexer.tokens, vec![
             mtk!(NumberLiteral, 0, 1, "2"),
             mtk!(NumberLiteral, 23, 24, "4"),
         ]);
-        assert_eq!(lexer.macro_defs, vec![
+        assert_eq!(lexer.data(), vec![
             mdef!(itk!(8, 11, "FOO"), vec![], vec![])
         ]);
     }
