@@ -11,6 +11,14 @@ pub enum Mnemonic {
 
 }
 
+type DataExpression = (usize, Expression);
+type OptionalDataExpression = Option<DataExpression>;
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum SegmentName {
+    // TODO from_str
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum DataEndianess {
     /// LL HH
@@ -18,7 +26,6 @@ pub enum DataEndianess {
     /// HH LL
     Big
 }
-
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum DataAlignment {
@@ -39,11 +46,11 @@ pub enum DataStorage {
     /// INCBIN "..."
     File(Vec<u8>),
     /// DB 1[, 2, 3]
-    Bytes(Vec<Expression>),
+    Bytes(Vec<DataExpression>),
     /// DW 1[, 2, 3]
-    Words(Vec<Expression>),
+    Words(Vec<DataExpression>),
     /// DS 1
-    ByteRange(Expression)
+    ByteRange(DataExpression)
 }
 
 // Entry Specific Tokens ------------------------------------------------------
@@ -59,7 +66,7 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {}, {
     Constant {
         name => String,
         is_string => bool,
-        value => Expression
+        value => DataExpression
     },
     // DS|DS8|DS16 + Size: ConstExpression [, fill value? (only in ROM segements)]
     // DB|DW|BW (Const)Expression, ...
@@ -75,8 +82,11 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {}, {
     },
     // SECTION EXPR[String]
     SectionDeclaration {
-        // TODO offset, bank etc.
-        name => String
+        name => OptionalDataExpression,
+        segment_name => String, // TODO enum
+        segment_offset => OptionalDataExpression,
+        segment_size => OptionalDataExpression,
+        bank_index => OptionalDataExpression
     }
 });
 
@@ -121,12 +131,12 @@ impl EntryStage {
                 ExpressionToken::Constant(inner) => {
                     if tokens.peek_is(TokenType::Reserved, Some("EQU")) {
                         tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
-                        if let ExpressionToken::ConstExpression(_, _, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
+                        if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
                             EntryToken::Constant {
                                 name: inner.value.clone(),
                                 inner,
                                 is_string: false,
-                                value: expr
+                                value: (id, expr)
                             }
 
                         } else {
@@ -135,12 +145,12 @@ impl EntryStage {
 
                     } else if tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
                         tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
-                        if let ExpressionToken::ConstExpression(_, _, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
+                        if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
                             EntryToken::Constant {
                                 name: inner.value.clone(),
                                 inner,
                                 is_string: true,
-                                value: expr
+                                value: (id, expr)
                             }
                         } else {
                             unreachable!();
@@ -172,42 +182,58 @@ impl EntryStage {
                     match inner.value.as_str() {
                         "SECTION" => {
 
-                            // SECTION "Optional Name",SEGMENT,BANK[ID]
-                            // SECTION "Optional Name",SEGMENT[Offset][SIZE],BANK[ID]
-
                             // Check for optional section name
-                            if tokens.peek_is(TokenType::ConstExpression, None) {
-                                let _expr = tokens.expect(TokenType::ConstExpression, None, "when parsing section declaration")?;
+                            let name = if tokens.peek_is(TokenType::ConstExpression, None) {
+                                let name = tokens.expect(TokenType::ConstExpression, None, "when parsing section declaration")?;
                                 tokens.expect(TokenType::Comma, None, "after section name")?;
-                            }
+                                if let ExpressionToken::ConstExpression(_, id, expr) = name {
+                                    Some((id, expr))
+
+                                } else {
+                                    None
+                                }
+
+                            } else {
+                                None
+                            };
 
                             // Required Segment
-                            let _segment = tokens.expect(TokenType::Segment, None, "when parsing section declaration")?;
+                            let segment_name = tokens.expect(TokenType::Segment, None, "when parsing section declaration")?.into_inner().value;
 
                             // Check for optional offset
-                            if tokens.peek_is(TokenType::OpenBracket, None) {
-                                tokens.expect(TokenType::OpenBracket, None, "when parsing section offset")?;
-                                let _offset = tokens.expect(TokenType::ConstExpression, None, "when parsing section offset")?;
-                                tokens.expect(TokenType::CloseBracket, None, "when parsing section offset")?;
-                            }
+                            let segment_offset = if tokens.peek_is(TokenType::OpenBracket, None) {
+                                Self::parse_bracket_expr(&mut tokens, "when parsing section offset", true)?
+
+                            } else {
+                                None
+                            };
 
                             // Check for optional size
-                            if tokens.peek_is(TokenType::OpenBracket, None) {
-                                tokens.expect(TokenType::OpenBracket, None, "when parsing section size")?;
-                                let _size = tokens.expect(TokenType::ConstExpression, None, "when parsing section size")?;
-                                tokens.expect(TokenType::CloseBracket, None, "when parsing section size")?;
-                            }
+                            let segment_size = if tokens.peek_is(TokenType::OpenBracket, None) {
+                                Self::parse_bracket_expr(&mut tokens, "when parsing section size", false)?
+
+                            } else {
+                                None
+                            };
 
                             // Check for optional bank
-                            if tokens.peek_is(TokenType::Comma, None) {
+                            let bank_index = if tokens.peek_is(TokenType::Comma, None) {
                                 tokens.expect(TokenType::Comma, None, "when parsing section bank")?;
                                 tokens.expect(TokenType::Reserved, Some("BANK"), "when parsing section bank")?;
-                                tokens.expect(TokenType::OpenBracket, None, "when parsing section bank")?;
-                                let _bank = tokens.expect(TokenType::ConstExpression, None, "when parsing section bank")?;
-                                tokens.expect(TokenType::CloseBracket, None, "when parsing section bank")?;
-                            }
+                                Self::parse_bracket_expr(&mut tokens, "when parsing section bank", false)?
 
-                            continue;
+                            } else {
+                                None
+                            };
+
+                            EntryToken::SectionDeclaration {
+                                inner,
+                                name,
+                                segment_name,
+                                segment_offset,
+                                segment_size,
+                                bank_index
+                            }
                         },
                         "DB" => {
                             Self::parse_data_directive_db(&mut tokens, inner)?
@@ -245,6 +271,24 @@ impl EntryStage {
             entry_tokens.push(entry);
         }
         Ok(entry_tokens)
+    }
+
+    fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, LexerError> {
+        tokens.expect(TokenType::OpenBracket, Some("["), msg)?;
+        if optional_value && tokens.peek_is(TokenType::CloseBracket, None) {
+            tokens.expect(TokenType::CloseBracket, Some("]"), msg)?;
+            Ok(None)
+
+        } else {
+            let value = tokens.expect(TokenType::ConstExpression, None, msg)?;
+            tokens.expect(TokenType::CloseBracket, Some("]"), msg)?;
+            if let ExpressionToken::ConstExpression(_, id, expr) = value {
+                Ok(Some((id, expr)))
+
+            } else {
+                Ok(None)
+            }
+        }
     }
 
     fn parse_data_directive_db(
@@ -320,26 +364,26 @@ impl EntryStage {
 
     ) -> Result<EntryToken, LexerError> {
         let token = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
-        if let ExpressionToken::ConstExpression(_, _, expr) = token {
+        if let ExpressionToken::ConstExpression(_, id, expr) = token {
             Ok(EntryToken::Data {
                 inner,
                 alignment,
                 endianess: DataEndianess::Little,
-                storage: DataStorage::ByteRange(expr)
+                storage: DataStorage::ByteRange((id, expr))
             })
         } else {
             unreachable!();
         }
     }
 
-    fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<Vec<Expression>>, LexerError> {
+    fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<Vec<DataExpression>>, LexerError> {
         if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
             let mut expressions = Vec::new();
             while tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
                 let expr = tokens.get("when parsing expression list")?;
                 match expr {
-                    ExpressionToken::ConstExpression(_, _, expr) | ExpressionToken::Expression(_, _, expr) => {
-                        expressions.push(expr);
+                    ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) => {
+                        expressions.push((id, expr));
                     },
                     _ => unreachable!()
                 }
@@ -373,7 +417,7 @@ mod test {
     }
 
     fn entry_lexer_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<EntryStage> {
-        let lexer = expr_lex_binary("INCBIN 'child.bin'", b);
+        let lexer = expr_lex_binary(s, b);
         Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
     }
 
@@ -443,16 +487,16 @@ mod test {
             inner: itk!(0, 3, "foo"),
             name: "foo".to_string(),
             is_string: false,
-            value: Expression::Value(ExpressionValue::Integer(2))
+            value: (0, Expression::Value(ExpressionValue::Integer(2)))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             name: "foo".to_string(),
             is_string: false,
-            value: Expression::Value(ExpressionValue::ConstantValue(
+            value: (0, Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
                 "bar".to_string()
-            ))
+            )))
         }]);
     }
 
@@ -462,16 +506,16 @@ mod test {
             inner: itk!(0, 3, "foo"),
             name: "foo".to_string(),
             is_string: true,
-            value: Expression::Value(ExpressionValue::String("test".to_string()))
+            value: (0, Expression::Value(ExpressionValue::String("test".to_string())))
         }]);
         assert_eq!(tfe("foo EQUS bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             name: "foo".to_string(),
             is_string: true,
-            value: Expression::Value(ExpressionValue::ConstantValue(
+            value: (0, Expression::Value(ExpressionValue::ConstantValue(
                 itk!(9, 12, "bar"),
                 "bar".to_string()
-            ))
+            )))
         }]);
     }
 
@@ -496,20 +540,20 @@ mod test {
             inner: itk!(0, 2, "DB"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(2))])
+            storage: DataStorage::Bytes(vec![(0, Expression::Value(ExpressionValue::Integer(2)))])
         }]);
         assert_eq!(tfe("DB 2 + 3, 1"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DB"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Bytes(vec![
-                Expression::Binary {
+                (0, Expression::Binary {
                     inner: itk!(5, 6, "+"),
                     op: Operator::Plus,
                     left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-                },
-                Expression::Value(ExpressionValue::Integer(1))
+                }),
+                (1, Expression::Value(ExpressionValue::Integer(1)))
             ])
         }]);
         assert_eq!(tfe("DB 2, 3, 4, 5"), vec![EntryToken::Data {
@@ -517,10 +561,10 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Bytes(vec![
-                Expression::Value(ExpressionValue::Integer(2)),
-                Expression::Value(ExpressionValue::Integer(3)),
-                Expression::Value(ExpressionValue::Integer(4)),
-                Expression::Value(ExpressionValue::Integer(5))
+                (0, Expression::Value(ExpressionValue::Integer(2))),
+                (1, Expression::Value(ExpressionValue::Integer(3))),
+                (2, Expression::Value(ExpressionValue::Integer(4))),
+                (3, Expression::Value(ExpressionValue::Integer(5)))
             ])
         }]);
     }
@@ -537,20 +581,20 @@ mod test {
             inner: itk!(0, 2, "DW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))])
+            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))])
         }]);
         assert_eq!(tfe("DW 2 + 3, 1"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Words(vec![
-                Expression::Binary {
+                (0, Expression::Binary {
                     inner: itk!(5, 6, "+"),
                     op: Operator::Plus,
                     left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-                },
-                Expression::Value(ExpressionValue::Integer(1))
+                }),
+                (1, Expression::Value(ExpressionValue::Integer(1)))
             ])
         }]);
         assert_eq!(tfe("DW 2000, 3000, 4000, 5000"), vec![EntryToken::Data {
@@ -558,10 +602,10 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Words(vec![
-                Expression::Value(ExpressionValue::Integer(2000)),
-                Expression::Value(ExpressionValue::Integer(3000)),
-                Expression::Value(ExpressionValue::Integer(4000)),
-                Expression::Value(ExpressionValue::Integer(5000))
+                (0, Expression::Value(ExpressionValue::Integer(2000))),
+                (1, Expression::Value(ExpressionValue::Integer(3000))),
+                (2, Expression::Value(ExpressionValue::Integer(4000))),
+                (3, Expression::Value(ExpressionValue::Integer(5000)))
             ])
         }]);
     }
@@ -578,20 +622,20 @@ mod test {
             inner: itk!(0, 2, "BW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
-            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))])
+            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))])
         }]);
         assert_eq!(tfe("BW 2 + 3, 1"), vec![EntryToken::Data {
             inner: itk!(0, 2, "BW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Words(vec![
-                Expression::Binary {
+                (0, Expression::Binary {
                     inner: itk!(5, 6, "+"),
                     op: Operator::Plus,
                     left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-                },
-                Expression::Value(ExpressionValue::Integer(1))
+                }),
+                (1, Expression::Value(ExpressionValue::Integer(1)))
             ])
         }]);
         assert_eq!(tfe("BW 2000, 3000, 4000, 5000"), vec![EntryToken::Data {
@@ -599,10 +643,10 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Words(vec![
-                Expression::Value(ExpressionValue::Integer(2000)),
-                Expression::Value(ExpressionValue::Integer(3000)),
-                Expression::Value(ExpressionValue::Integer(4000)),
-                Expression::Value(ExpressionValue::Integer(5000))
+                (0, Expression::Value(ExpressionValue::Integer(2000))),
+                (1, Expression::Value(ExpressionValue::Integer(3000))),
+                (2, Expression::Value(ExpressionValue::Integer(4000))),
+                (3, Expression::Value(ExpressionValue::Integer(5000)))
             ])
         }]);
     }
@@ -613,12 +657,12 @@ mod test {
             inner: itk!(0, 2, "DS"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteRange(Expression::Binary {
+            storage: DataStorage::ByteRange((0, Expression::Binary {
                 inner: itk!(5, 6, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-            })
+            }))
         }]);
     }
 
@@ -628,12 +672,12 @@ mod test {
             inner: itk!(0, 3, "DS8"),
             alignment: DataAlignment::WithinWord,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteRange(Expression::Binary {
+            storage: DataStorage::ByteRange((0, Expression::Binary {
                 inner: itk!(6, 7, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-            })
+            }))
         }]);
     }
 
@@ -643,12 +687,12 @@ mod test {
             inner: itk!(0, 4, "DS16"),
             alignment: DataAlignment::Word,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteRange(Expression::Binary {
+            storage: DataStorage::ByteRange((0, Expression::Binary {
                 inner: itk!(7, 8, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-            })
+            }))
         }]);
     }
 
@@ -667,35 +711,84 @@ mod test {
     // Section Declarations ---------------------------------------------------
     #[test]
     fn test_section_without_name() {
-        assert_eq!(tfe("SECTION ROM0"), vec![]);
+        assert_eq!(tfe("SECTION ROM0"), vec![EntryToken::SectionDeclaration {
+            inner: itk!(0, 7, "SECTION"),
+            name: None,
+            segment_name: "ROM0".to_string(),
+            segment_offset: None,
+            segment_size: None,
+            bank_index: None
+        }]);
     }
 
     #[test]
     fn test_section_with_name() {
-        assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![]);
+        assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![EntryToken::SectionDeclaration {
+            inner: itk!(0, 7, "SECTION"),
+            name: Some((0, Expression::Value(ExpressionValue::String("Foo".to_string())))),
+            segment_name: "ROM0".to_string(),
+            segment_offset: None,
+            segment_size: None,
+            bank_index: None
+        }]);
     }
 
     #[test]
     fn test_section_with_offset() {
-        assert_eq!(tfe("SECTION ROM0[$0000]"), vec![]);
+        assert_eq!(tfe("SECTION ROM0[$0000]"), vec![EntryToken::SectionDeclaration {
+            inner: itk!(0, 7, "SECTION"),
+            name: None,
+            segment_name: "ROM0".to_string(),
+            segment_offset: Some((0, Expression::Value(ExpressionValue::Integer(0)))),
+            segment_size: None,
+            bank_index: None
+        }]);
     }
 
     #[test]
     fn test_section_with_offset_and_size() {
-        assert_eq!(tfe("SECTION ROM0[$0000][$800]"), vec![]);
+        assert_eq!(tfe("SECTION ROM0[$0000][$800]"), vec![EntryToken::SectionDeclaration {
+            inner: itk!(0, 7, "SECTION"),
+            name: None,
+            segment_name: "ROM0".to_string(),
+            segment_offset: Some((0, Expression::Value(ExpressionValue::Integer(0)))),
+            segment_size: Some((1, Expression::Value(ExpressionValue::Integer(2048)))),
+            bank_index: None
+        }]);
+    }
+
+    #[test]
+    fn test_section_without_offset_and_size() {
+        assert_eq!(tfe("SECTION ROM0[][$800]"), vec![EntryToken::SectionDeclaration {
+            inner: itk!(0, 7, "SECTION"),
+            name: None,
+            segment_name: "ROM0".to_string(),
+            segment_offset: None,
+            segment_size: Some((0, Expression::Value(ExpressionValue::Integer(2048)))),
+            bank_index: None
+        }]);
     }
 
     #[test]
     fn test_section_with_bank() {
-        assert_eq!(tfe("SECTION ROM0,BANK[0]"), vec![]);
+        assert_eq!(tfe("SECTION ROM0,BANK[1]"), vec![EntryToken::SectionDeclaration {
+            inner: itk!(0, 7, "SECTION"),
+            name: None,
+            segment_name: "ROM0".to_string(),
+            segment_offset: None,
+            segment_size: None,
+            bank_index: Some((0, Expression::Value(ExpressionValue::Integer(1)))),
+        }]);
     }
 
     #[test]
     fn test_error_section() {
         assert_eq!(entry_lexer_error("SECTION"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION\n^--- Here");
-        assert_eq!(entry_lexer_error("SECTION ROM0,"), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input when parsing section bank, expected a \"Reserved\" token instead.\n\nSECTION ROM0,\n            ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION ROM0,"), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input when parsing section bank, expected \"BANK\" instead.\n\nSECTION ROM0,\n            ^--- Here");
         assert_eq!(entry_lexer_error("SECTION ROM0["), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input when parsing section offset, expected a \"ConstExpression\" token instead.\n\nSECTION ROM0[\n            ^--- Here");
-        assert_eq!(entry_lexer_error("SECTION ROM0,BANK"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input when parsing section bank, expected a \"OpenBracket\" token instead.\n\nSECTION ROM0,BANK\n             ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION ROM0,BANK"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input when parsing section bank, expected \"[\" instead.\n\nSECTION ROM0,BANK\n             ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION foo"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input after section name, expected a \"Comma\" token instead.\n\nSECTION foo\n        ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION foo,bar"), "In file \"main.gb.s\" on line 1, column 13: Unexpected token \"ConstExpression\" when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION foo,bar\n            ^--- Here");
     }
 
 }

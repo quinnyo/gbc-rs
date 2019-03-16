@@ -57,6 +57,9 @@ impl<T: LexerToken> TokenIterator<T> {
                             Err(token.error(format!("Unexpected token value \"{:?}\" {}, expected a value of \"{:?}\" instead.", token.value(), message.into(), value)))
                         }
 
+                    } else if let Some(value) = value {
+                        Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), value)))
+
                     } else {
                         Ok(token)
                     }
@@ -65,11 +68,20 @@ impl<T: LexerToken> TokenIterator<T> {
                     Err(token.error(format!("Unexpected token \"{:?}\" {}, expected a \"{:?}\" token instead.", token.typ(), message.into(), typ)))
                 }
             },
-            None => Err(LexerError::new(
-                self.file_index,
-                self.index,
-                format!("Unexpected end of input {}, expected a \"{:?}\" token instead.", message.into(), typ)
-            ))
+            None => if let Some(value) = value {
+                Err(LexerError::new(
+                    self.file_index,
+                    self.index,
+                    format!("Unexpected end of input {}, expected \"{}\" instead.", message.into(), value)
+                ))
+
+            } else {
+                Err(LexerError::new(
+                    self.file_index,
+                    self.index,
+                    format!("Unexpected end of input {}, expected a \"{:?}\" token instead.", message.into(), typ)
+                ))
+            }
         }
     }
 
