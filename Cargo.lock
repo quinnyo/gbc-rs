@@ -7,9 +7,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gbasm-cpu"
+version = "0.1.0"
+
+[[package]]
 name = "gbasm-lib"
 version = "0.1.0"
 dependencies = [
+ "gbasm-cpu 0.1.0",
  "ordered-float 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

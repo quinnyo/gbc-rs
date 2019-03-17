@@ -3,11 +3,11 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
+use gbasm_cpu::{Flag, Register};
 use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::cpu::{Flag, Register};
 use crate::lexer::MacroStage;
 use super::macros::{MacroCall, MacroToken};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};

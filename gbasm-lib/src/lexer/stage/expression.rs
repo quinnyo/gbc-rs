@@ -3,13 +3,13 @@ use std::mem;
 
 
 // External Dependencies ------------------------------------------------------
+use gbasm_cpu::{Flag, Register};
 use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ValueStage;
-use crate::cpu::{Flag, Register};
 use super::value::{Operator, ValueToken};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 

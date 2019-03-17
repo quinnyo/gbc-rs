@@ -1,8 +1,11 @@
+// External Dependencies ------------------------------------------------------
+use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
+
+
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ExpressionStage;
 use super::expression::{ExpressionToken, Expression};
-use crate::cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
@@ -47,10 +50,11 @@ pub enum DataStorage {
 
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
+    // TODO use 256-511 indicies and dump all instructions into one huge array this keeps the
+    // internals easier
+    // TODO code-gen will later prepend the prefix from the InstructionData
     Instruction((usize)),
-    InstructionWithArg((usize, DataExpression)),
-    InstructionEx((usize)),
-    InstructionExWithArg((usize, DataExpression))
+    InstructionWithArg((usize, DataExpression))
 
 }, {
     GlobalLabelDef {
@@ -97,7 +101,7 @@ impl LexerStage for EntryStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, LexerError> {
-        let layouts = cpu::instruction_layouts();
+        let layouts = gbasm_cpu::instruction_layouts();
         Self::parse_entry_tokens(tokens, &layouts)
     }
 
@@ -281,7 +285,7 @@ impl EntryStage {
 
     ) -> Result<EntryToken, LexerError> {
 
-        let max_arg_count = cpu::instruction_max_arg_count(&inner.value);
+        let max_arg_count = gbasm_cpu::instruction_max_arg_count(&inner.value);
         let mut expression: OptionalDataExpression = None;
 
         let mut layout = Vec::new();
@@ -300,7 +304,7 @@ impl EntryStage {
 
                     // Special casing for conditional instructions where "c" is the carry flag
                     // instead of a register if infront of the comma
-                    if !past_comma && cpu::instruction_is_conditional(&inner.value) && name == Register::C{
+                    if !past_comma && gbasm_cpu::instruction_is_conditional(&inner.value) && name == Register::C{
                         layout.push(LexerArgument::Flag(Flag::Carry));
 
                     } else {

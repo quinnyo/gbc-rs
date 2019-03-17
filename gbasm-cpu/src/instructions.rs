@@ -1,4 +1,4 @@
-use crate::cpu::{FlagModifier, FlagState, Instruction, Register, Flag, Argument};
+use crate::{FlagModifier, FlagState, Instruction, Register, Flag, Argument};
 
 // Auto generated Instruction Data
 pub fn instructions() -> Vec<Instruction> {

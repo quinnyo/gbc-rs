@@ -92,8 +92,6 @@ pub enum TokenType {
     // Entry Tokens
     Data,
     InstructionWithArg,
-    InstructionEx,
-    InstructionExWithArg,
     SectionDeclaration
 
 }

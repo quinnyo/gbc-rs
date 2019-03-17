@@ -77,7 +77,7 @@ fn layout_to_assert(index: usize, layout: String) -> String {
 fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
 
     let mut lines = vec![
-        "use crate::cpu::{FlagModifier, FlagState, Instruction, Register, Flag, Argument};\n".to_string(),
+        "use crate::{FlagModifier, FlagState, Instruction, Register, Flag, Argument};\n".to_string(),
     ];
 
     // Parse all sources
