@@ -6,8 +6,8 @@ use std::io::{Error as IOError, Read};
 
 
 // Internal Dependencies ------------------------------------------------------
-use gbasm::compiler::Compiler;
-use gbasm::traits::{FileError, FileReader};
+use gbasm_lib::compiler::Compiler;
+use gbasm_lib::traits::{FileError, FileReader};
 
 
 // CLI Interface --------------------------------------------------------------

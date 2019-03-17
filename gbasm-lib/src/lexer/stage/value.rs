@@ -376,8 +376,60 @@ impl ValueStage {
             value_tokens.push(value_token);
         }
 
-        // TODO check if local labels do exist
+        // Verify and build label references
+        Self::verify_local_label_refs(&value_tokens, None)?;
         Ok(Self::convert_global_label_refs(&global_labels, value_tokens))
+    }
+
+    fn verify_local_label_refs<'a>(
+        tokens: &'a [ValueToken],
+        mut global_label: Option<(&'a InnerToken, &'a String, Vec<&'a String>, Vec<(&'a InnerToken, &'a String)>)>
+
+    ) -> Result<(), LexerError> {
+        for token in tokens {
+            match token {
+                ValueToken::GlobalLabelDef { inner, name } => {
+                    Self::verify_local_label_refs_under_global(global_label.take())?;
+                    global_label = Some((inner, name, Vec::new(), Vec::new()));
+                },
+                ValueToken::LocalLabelDef { name, .. } => {
+                    if let Some(global_label) = global_label.as_mut() {
+                        global_label.2.push(&name);
+                    }
+                },
+                ValueToken::LocalLabelRef { inner, name } => {
+                    if let Some(global_label) = global_label.as_mut() {
+                        global_label.3.push((&inner, &name));
+                    }
+                },
+                ValueToken::BuiltinCall(_, arguments) => {
+                    for tokens in arguments {
+                        Self::verify_local_label_refs(tokens, global_label.clone())?;
+                    }
+                },
+                _ => {}
+            }
+        }
+        Self::verify_local_label_refs_under_global(global_label.take())
+    }
+
+    fn verify_local_label_refs_under_global(global_label: Option<(&InnerToken, &String, Vec<&String>, Vec<(&InnerToken, &String)>)>) -> Result<(), LexerError> {
+
+        // Check local labels under previous label
+        if let Some((previous, parent_name, local_defs, local_refs)) = global_label {
+            for (inner, name) in &local_refs {
+                if !local_defs.contains(name) {
+                    return Err(inner.error(format!(
+                        "Reference to unknown local label \"{}\", not defined under the current global label \"{}\".",
+                        name,
+                        parent_name
+
+                    )).with_reference(previous, "Definition of global label was"));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn convert_global_label_refs(
@@ -831,32 +883,32 @@ mod test {
 
     #[test]
     fn test_local_label_ref() {
-        assert_eq!(tfv("global_label:\n.local_label\n.local_other_label"), vec![ValueToken::GlobalLabelDef {
+        assert_eq!(tfv("global_label:\n.local_label:\n.local_label"), vec![ValueToken::GlobalLabelDef {
             inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
-        }, ValueToken::LocalLabelRef {
-            inner: itk!(14, 26, "."),
+        }, ValueToken::LocalLabelDef {
+            inner: itk!(14, 27, "."),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelRef {
-            inner: itk!(27, 45, "."),
-            name: "local_other_label".to_string()
+            inner: itk!(28, 40, "."),
+            name: "local_label".to_string()
         }]);
-        assert_eq!(tfv("global_label:\n.local_label\nCEIL(.local_label)"), vec![ValueToken::GlobalLabelDef {
+        assert_eq!(tfv("global_label:\n.local_label:\nCEIL(.local_label)"), vec![ValueToken::GlobalLabelDef {
             inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
 
-        }, ValueToken::LocalLabelRef {
-            inner: itk!(14, 26, "."),
+        }, ValueToken::LocalLabelDef {
+            inner: itk!(14, 27, "."),
             name: "local_label".to_string()
 
         }, ValueToken::BuiltinCall(
-            itk!(27, 31, "CEIL"),
+            itk!(28, 32, "CEIL"),
             vec![
                 vec![
                     ValueToken::LocalLabelRef {
-                        inner: itf!(32, 44, ".", 0),
+                        inner: itf!(33, 45, ".", 0),
                         name: "local_label".to_string()
                     }
                 ]
@@ -867,7 +919,7 @@ mod test {
 
     #[test]
     fn test_label_macro_postfix() {
-        assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.local_macro_label_def:\n.local_macro_label_ref\nENDMACRO"), vec![
+        assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.local_macro_label_def:\n.local_macro_label_def\nENDMACRO"), vec![
             ValueToken::GlobalLabelDef {
                 inner: itkm!(24, 40, "macro_label_def", 0),
                 name: "macro_label_def_from_macro_call_0".to_string()
@@ -878,7 +930,7 @@ mod test {
             },
             ValueToken::LocalLabelRef {
                 inner: itkm!(65, 87, ".", 0),
-                name: "local_macro_label_ref_from_macro_call_0".to_string()
+                name: "local_macro_label_def_from_macro_call_0".to_string()
             },
             ValueToken::GlobalLabelDef {
                 inner: itkm!(24, 40, "macro_label_def", 1),
@@ -890,7 +942,7 @@ mod test {
             },
             ValueToken::LocalLabelRef {
                 inner: itkm!(65, 87, ".", 1),
-                name: "local_macro_label_ref_from_macro_call_1".to_string()
+                name: "local_macro_label_def_from_macro_call_1".to_string()
             }
         ]);
     }
@@ -903,6 +955,16 @@ mod test {
     #[test]
     fn test_error_local_label_ref_outside_global() {
         assert_eq!(value_lexer_error(".local_label"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reference to local label \"local_label\" before any global label was defined.\n\n.local_label\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_local_label_ref_without_def() {
+        assert_eq!(value_lexer_error("global_label:\n.local_label"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown local label \"local_label\", not defined under the current global label \"global_label\".\n\n.local_label\n^--- Here\n\nDefinition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_local_label_ref_without_def_in_builtin_call() {
+        assert_eq!(value_lexer_error("global_label:\nCEIL(.local_label)"), "In file \"main.gb.s\" on line 2, column 6: Reference to unknown local label \"local_label\", not defined under the current global label \"global_label\".\n\nCEIL(.local_label)\n     ^--- Here\n\nDefinition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
     }
 
     #[test]
