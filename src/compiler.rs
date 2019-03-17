@@ -19,8 +19,6 @@ impl Compiler {
         println!("Included {} token(s).", included_token_count);
 
         let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
-        // println!("Found {} defined macro(s).", macro_lexer.macro_defs_count());
-        // println!("Found {} macro call(s).", macro_lexer.macro_calls_count());
         println!("{} token(s) after macro expansions.", macro_lexer.len());
 
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilerError::new("VALUE CONVERSION", e))?;
@@ -32,9 +30,18 @@ impl Compiler {
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
-        // TODO EntryLexer, removes: Name, Comma, OpenBracket, CloseBracket, Flag, Register -> Generates: Sections, Data, Constants, Variables, Instructions)
-        // TODO after resolving expression values check if their type fits into the storage (e.g.
-        // DB only takes integers etc.)
+
+        // TODO Layout
+        // Go through all Entry Tokens
+            // Extract Constants
+            // Add Remaining Tokens to Layout
+
+        // Resolve Constants
+        // Resolve Sizes
+        // Resolve all other expressions
+            // When looking for local labels search backwards through the rom entry list
+        // Optimize
+
 
         // TODO ROM Layout
             // TODO handle file local global labels which start with a "_" by searching for a

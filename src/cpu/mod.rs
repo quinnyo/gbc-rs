@@ -1,11 +1,27 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
+use std::collections::HashMap;
+
 
 // Modules --------------------------------------------------------------------
-// mod instructions;
+mod instructions;
+pub use self::instructions::instruction_max_arg_count;
+
+
+// Functions ------------------------------------------------------------------
+pub type InstructionLayouts = HashMap<(String, Vec<LexerArgument>), usize>;
+pub fn instruction_layouts() -> InstructionLayouts {
+    let mut layouts = HashMap::new();
+    for (index, instr) in instructions::instructions().into_iter().enumerate() {
+        let layout = instr.layout.into_iter().map(|a| a.into()).collect();
+        layouts.insert((instr.name, layout), index);
+    }
+    layouts
+}
+
 
 // Flags ----------------------------------------------------------------------
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 pub enum Flag {
     Zero,
     NoZero,
@@ -38,19 +54,19 @@ impl fmt::Debug for Flag {
 
 #[derive(Eq, PartialEq)]
 pub enum FlagModifier {
-    Untouched,
+    Keep,
     Set,
-    Unset,
-    Operation
+    Clear,
+    Result
 }
 
 impl From<&str> for FlagModifier {
     fn from(s: &str) -> Self {
         match s {
-            "0" => FlagModifier::Unset,
+            "0" => FlagModifier::Clear,
             "1" => FlagModifier::Set,
-            "-" => FlagModifier::Untouched,
-            _ => FlagModifier::Operation
+            "-" => FlagModifier::Keep,
+            _ => FlagModifier::Result
         }
     }
 }
@@ -58,25 +74,25 @@ impl From<&str> for FlagModifier {
 impl fmt::Debug for FlagModifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FlagModifier::Untouched => write!(f, "FlagModifier::Untouched"),
+            FlagModifier::Keep => write!(f, "FlagModifier::Keep"),
             FlagModifier::Set => write!(f, "FlagModifier::Set"),
-            FlagModifier::Unset => write!(f, "FlagModifier::Unset"),
-            FlagModifier::Operation => write!(f, "FlagModifier::Operation")
+            FlagModifier::Clear => write!(f, "FlagModifier::Clear"),
+            FlagModifier::Result => write!(f, "FlagModifier::Result")
         }
     }
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FlagState {
-    pub zero: FlagModifier,
-    pub negative: FlagModifier,
-    pub carry: FlagModifier,
-    pub half_carry: FlagModifier
+    pub z: FlagModifier,
+    pub n: FlagModifier,
+    pub c: FlagModifier,
+    pub h: FlagModifier
 }
 
 
 // Registers ------------------------------------------------------------------
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 pub enum Register {
     Accumulator,
     B,
@@ -141,97 +157,109 @@ impl fmt::Debug for Register {
 // Instructions ---------------------------------------------------------------
 #[derive(Debug)]
 pub struct Instruction {
-    pub op_code: usize,
+    pub code: usize,
     pub prefix: Option<usize>,
-    pub mnemonic: String,
+    pub name: String,
+    pub size: usize,
     pub cycles: usize,
     pub cycles_min: Option<usize>,
-    pub args: Vec<Argument>,
+    pub layout: Vec<Argument>,
+    pub argument: Option<Argument>,
     pub flags: FlagState
 }
 
-// TODO Calculate size from data
-
-pub enum Argument {
-    /// A Flag
-    Flag(Flag),
-
-    /// A hard coded value
-    Integer(usize),
-
-    /// Value in register
-    Register(Register),
-
-    /// r8: -128 - 127 forced signage
-    ByteSigned,
-
-    /// d16: 0 - 65535 converted to two's compliment
-    Word,
-
-    /// d8: 0 - 255 converted to two's compliment
-    Byte,
-
-    /// [r]: Memory addressing via value of register
+#[derive(Hash, Eq, PartialEq)]
+pub enum LexerArgument {
+    MemoryLookupValue,
     MemoryLookupRegister(Register),
+    Value,
+    Register(Register),
+    Flag(Flag)
+}
 
-    /// a16: Memory addressing via value of word
-    MemoryLookupWord,
+#[derive(Eq, PartialEq)]
+pub enum Argument {
+    MemoryLookupByteValue,
+    MemoryLookupWordValue,
+    MemoryLookupRegister(Register),
+    ByteValue,
+    SignedByteValue,
+    WordValue,
+    ConstantValue(usize),
+    Register(Register),
+    Flag(Flag)
+}
 
-    /// a8: Memory addressing via value of byte
-    MemoryLookupByte
+impl Into<LexerArgument> for Argument {
+    fn into(self) -> LexerArgument {
+        match self {
+            Argument::MemoryLookupByteValue => LexerArgument::MemoryLookupValue,
+            Argument::MemoryLookupWordValue => LexerArgument::MemoryLookupValue,
+            Argument::MemoryLookupRegister(r) => LexerArgument::MemoryLookupRegister(r.clone()),
+            Argument::ByteValue => LexerArgument::Value,
+            Argument::SignedByteValue => LexerArgument::Value,
+            Argument::WordValue => LexerArgument::Value,
+            Argument::ConstantValue(_) => LexerArgument::Value,
+            Argument::Register(r) => LexerArgument::Register(r.clone()),
+            Argument::Flag(f) => LexerArgument::Flag(f.clone()),
+        }
+    }
 }
 
 impl fmt::Debug for Argument {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Argument::Flag(l) => {
-                write!(f, "Argument::Flag({:?})", l)
-            },
-            Argument::Integer(v) => write!(f, "Argument::Integer({})", v),
-            Argument::Register(r) => {
-                write!(f, "Argument::Register({:?})", r)
-            },
-            Argument::MemoryLookupRegister(r) => {
-                write!(f, "Argument::MemoryLookupRegister({:?})", r)
-            },
-            Argument::ByteSigned => write!(f, "Argument::ByteSigned"),
-            Argument::Word => write!(f, "Argument::Word"),
-            Argument::Byte => write!(f, "Argument::Byte"),
-            Argument::MemoryLookupWord => write!(f, "Argument::MemoryLookupWord"),
-            Argument::MemoryLookupByte => write!(f, "Argument::MemoryLookupByte"),
+            Argument::MemoryLookupByteValue => write!(f, "Argument::MemoryLookupByteValue"),
+            Argument::MemoryLookupWordValue => write!(f, "Argument::MemoryLookupWordValue"),
+            Argument::MemoryLookupRegister(r) => write!(f, "Argument::MemoryLookupRegister({:?})", r),
+            Argument::ByteValue => write!(f, "Argument::ByteValue"),
+            Argument::SignedByteValue => write!(f, "Argument::SignedByteValue"),
+            Argument::WordValue => write!(f, "Argument::WordValue"),
+            Argument::ConstantValue(v) => write!(f, "Argument::ConstantValue({})", v),
+            Argument::Register(r) => write!(f, "Argument::Register({:?})", r),
+            Argument::Flag(r) => write!(f, "Argument::Flag({:?})", r)
         }
     }
 }
 
 impl Argument {
     pub fn from(a: &str, mnemonic: &str) -> Option<Self> {
-        let cond = mnemonic == "jr" || mnemonic == "jp" || mnemonic == "call";
+        let cond = mnemonic == "jr" || mnemonic == "jp" || mnemonic == "call" || mnemonic == "ret";
         match a {
-            "a8" => Some(Argument::MemoryLookupByte),
-            "a16" => Some(Argument::MemoryLookupWord),
-            "d8" => Some(Argument::Byte),
-            "d16" => Some(Argument::Word),
-            "r8" => Some(Argument::ByteSigned),
+            "00h" => Some(Argument::ConstantValue(0)),
+            "08h" => Some(Argument::ConstantValue(8)),
+            "10h" => Some(Argument::ConstantValue(16)),
+            "18h" => Some(Argument::ConstantValue(24)),
+            "20h" => Some(Argument::ConstantValue(32)),
+            "28h" => Some(Argument::ConstantValue(40)),
+            "30h" => Some(Argument::ConstantValue(48)),
+            "38h" => Some(Argument::ConstantValue(56)),
+
+            "sp+r8" => Some(Argument::SignedByteValue),
+            "r8" => Some(Argument::SignedByteValue),
+
+            // Unsigned
+            "a8" => Some(Argument::ByteValue),
+            "a16" => Some(Argument::WordValue),
+            "d8" => Some(Argument::ByteValue),
+            "d16" => Some(Argument::WordValue),
+            "[c]" => Some(Argument::MemoryLookupRegister("c".into())),
+            "[a16]" => Some(Argument::MemoryLookupWordValue),
+            "[a8]" => Some(Argument::MemoryLookupByteValue),
+
+            // Registers
             "a" | "b" | "d" | "e" | "h" | "l" |
             "af" | "bc" | "de" | "hl" | "sp" => Some(Argument::Register(a.into())),
-            "c" if cond => Some(Argument::Flag(a.into())),
             "c" if !cond => Some(Argument::Register(a.into())),
-            "nz" | "nc" | "z" => Some(Argument::Flag(a.into())),
             "[bc]" | "[de]" | "[hl]" => Some(Argument::MemoryLookupRegister(a[1..3].into())),
             "[hli]" => Some(Argument::MemoryLookupRegister("hli".into())),
             "[hld]" => Some(Argument::MemoryLookupRegister("hld".into())),
-            "[c]" => Some(Argument::MemoryLookupRegister("c".into())),
-            "[a16]" => Some(Argument::MemoryLookupWord),
-            "[a8]" => Some(Argument::MemoryLookupByte),
-            "00h" => Some(Argument::Integer(0)),
-            "08h" => Some(Argument::Integer(8)),
-            "10h" => Some(Argument::Integer(16)),
-            "18h" => Some(Argument::Integer(24)),
-            "20h" => Some(Argument::Integer(32)),
-            "28h" => Some(Argument::Integer(40)),
-            "30h" => Some(Argument::Integer(48)),
-            "38h" => Some(Argument::Integer(56)),
-            "sp+r8" => Some(Argument::ByteSigned),
+
+            // Flags
+            "c" if cond => Some(Argument::Flag(a.into())),
+            "nz" | "nc" | "z" => Some(Argument::Flag(a.into())),
+
+            // Ignored
             "0" => None,
             "cb" => None,
             a => panic!("Unknown argument type: {}", a)

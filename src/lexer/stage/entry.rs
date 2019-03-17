@@ -1,16 +1,12 @@
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ExpressionStage;
+use crate::cpu::{LexerArgument, InstructionLayouts, self};
 use super::expression::{ExpressionToken, Expression};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
 // Types ----------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
-pub enum Mnemonic {
-
-}
-
 type DataExpression = (usize, Expression);
 type OptionalDataExpression = Option<DataExpression>;
 
@@ -47,6 +43,7 @@ pub enum DataStorage {
     /// DS 1
     ByteRange(DataExpression)
 }
+
 
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
@@ -100,14 +97,19 @@ impl LexerStage for EntryStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, LexerError> {
-        Self::parse_entry_tokens(tokens)
+        let layouts = cpu::instruction_layouts();
+        Self::parse_entry_tokens(tokens, &layouts)
     }
 
 }
 
 impl EntryStage {
 
-    fn parse_entry_tokens(tokens: Vec<ExpressionToken>) -> Result<Vec<EntryToken>, LexerError> {
+    fn parse_entry_tokens(
+        tokens: Vec<ExpressionToken>,
+        layouts: &InstructionLayouts
+
+    ) -> Result<Vec<EntryToken>, LexerError> {
         let mut entry_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
@@ -158,9 +160,8 @@ impl EntryStage {
                 },
 
                 // Instructions
-                ExpressionToken::Instruction(_) => {
-                    // TODO handle flag, register, comma, OpenBracket, CloseBracket
-                    continue;
+                ExpressionToken::Instruction(inner) => {
+                    Self::parse_instruction(&mut tokens, layouts, inner)?
                 },
 
                 ExpressionToken::MetaInstruction(_) => {
@@ -272,6 +273,126 @@ impl EntryStage {
             entry_tokens.push(entry);
         }
         Ok(entry_tokens)
+    }
+
+    fn parse_instruction(
+        tokens: &mut TokenIterator<ExpressionToken>,
+        layouts: &InstructionLayouts,
+        inner: InnerToken
+
+    ) -> Result<EntryToken, LexerError> {
+
+        let max_arg_count = cpu::instruction_max_arg_count(&inner.value);
+        let mut expression: OptionalDataExpression = None;
+
+        let mut layout = Vec::new();
+        let mut arg_count = 0;
+        let mut past_comma = false;
+        let mut trailing_comma = None;
+
+        // Parse Instruction Arguments Structure
+        while arg_count < max_arg_count && arg_count < 2 {
+
+            // Register arguments
+            if tokens.peek_is(TokenType::Register, None) {
+                trailing_comma = None;
+                let reg = tokens.get("while parsing instruction register argument")?;
+                if let ExpressionToken::Register { name, .. } = reg {
+                    layout.push(LexerArgument::Register(name));
+
+                } else {
+                    unreachable!();
+                }
+
+            // Flag must always be infront of a comma
+            } else if tokens.peek_is(TokenType::Flag, None) && !past_comma {
+                trailing_comma = None;
+                let flag = tokens.get("while parsing instruction flag argument")?;
+                if let ExpressionToken::Flag { typ, .. } = flag {
+                    layout.push(LexerArgument::Flag(typ));
+
+                } else {
+                    unreachable!();
+                }
+
+            // Memory Locations must contain an expression or register
+            } else if tokens.peek_is(TokenType::OpenBracket, None) {
+                trailing_comma = None;
+                tokens.expect(TokenType::OpenBracket, None, "while parsing instruction memory argument")?;
+                if tokens.peek_is(TokenType::Register, None) {
+                    let reg = tokens.expect(TokenType::Register, None, "while parsing instruction memory argument")?;
+                    if let ExpressionToken::Register { name, .. } = reg {
+                        layout.push(LexerArgument::MemoryLookupRegister(name));
+
+                    } else {
+                        unreachable!();
+                    }
+
+                } else if tokens.peek_is(TokenType::ConstExpression, None) {
+                    let expr = tokens.expect(TokenType::ConstExpression, None, "while parsing instruction memory argument")?;
+                    if let ExpressionToken::ConstExpression(_, id, expr) = expr {
+                        layout.push(LexerArgument::MemoryLookupValue);
+                        expression = Some((id, expr));
+
+                    } else {
+                        unreachable!();
+                    }
+
+                } else {
+                    let expr = tokens.expect(TokenType::Expression, None, "while parsing instruction memory argument")?;
+                    if let ExpressionToken::Expression(_, id, expr) = expr {
+                        layout.push(LexerArgument::MemoryLookupValue);
+                        expression = Some((id, expr));
+
+                    } else {
+                        unreachable!();
+                    }
+                }
+                tokens.expect(TokenType::CloseBracket, None, "while parsing instruction memory argument")?;
+
+            // Expression arguments
+            } else if tokens.peek_is(TokenType::Expression, None) | tokens.peek_is(TokenType::ConstExpression, None) {
+                trailing_comma = None;
+                let expr = tokens.get("while parsing instruction register argument")?;
+                if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
+                    layout.push(LexerArgument::Value);
+                    expression = Some((id, expr));
+
+                } else {
+                    unreachable!();
+                }
+            }
+
+            arg_count += 1;
+
+            // Check for a single following comma between arguments
+            if tokens.peek_is(TokenType::Comma, None) && past_comma == false {
+                let inner = tokens.expect(TokenType::Comma, None, "while parsing instruction register argument")?.into_inner();
+                past_comma = true;
+                trailing_comma = Some(inner);
+            }
+        }
+
+        if let Some(comma) = trailing_comma {
+            Err(comma.error(
+                format!("Unexpected trailing comma in \"{}\" instruction.", inner.value)
+            ))
+
+        } else if let Some(op_code) = layouts.get(&(inner.value.clone(), layout)) {
+            if let Some(expression) = expression {
+                // TODO extended instruction when op_code > 255
+                Ok(EntryToken::InstructionWithArg(inner, *op_code, expression))
+
+            } else {
+                Ok(EntryToken::Instruction(inner, *op_code))
+            }
+
+        } else {
+            Err(inner.error(
+                format!("Unknown or invalid instruction \"{}\".", inner.value)
+            ))
+        }
+
     }
 
     fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, LexerError> {
@@ -791,6 +912,61 @@ mod test {
         assert_eq!(entry_lexer_error("SECTION ROM0,BANK"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input when parsing section bank, expected \"[\" instead.\n\nSECTION ROM0,BANK\n             ^--- Here");
         assert_eq!(entry_lexer_error("SECTION foo"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input after section name, expected a \"Comma\" token instead.\n\nSECTION foo\n        ^--- Here");
         assert_eq!(entry_lexer_error("SECTION foo,bar"), "In file \"main.gb.s\" on line 1, column 13: Unexpected token \"ConstExpression\" when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION foo,bar\n            ^--- Here");
+    }
+
+    // Instructions -----------------------------------------------------------
+    macro_rules! op {
+        ($mnemonic:expr, $op:expr, $arg:expr) => {
+            EntryToken::InstructionWithArg(
+                InnerToken::new(0, 0, $mnemonic.len(), $mnemonic.into()),
+                $op,
+                (0, Expression::Value(ExpressionValue::Integer($arg)))
+            )
+        };
+        ($mnemonic:expr, $op:expr) => {
+            EntryToken::Instruction(
+                InnerToken::new(0, 0, $mnemonic.len(), $mnemonic.into()),
+                $op
+            )
+        }
+    }
+
+    macro_rules! assert_op {
+        ($op:expr, $layout:expr, $arg:expr) => {
+            assert_eq!(tfe($layout), vec![op!($layout.split(" ").next().unwrap(), $op, $arg)]);
+        };
+        ($op:expr, $layout:expr) => {
+            assert_eq!(tfe($layout), vec![op!($layout.split(" ").next().unwrap(), $op)]);
+        }
+    }
+
+    #[test]
+    fn test_instructions() {
+        assert_op!( 0, "nop");
+        assert_op!( 1, "ld bc,$1234", 4660);
+        assert_op!( 2, "ld [bc],a");
+        assert_op!( 3, "inc bc");
+        assert_op!( 4, "inc b");
+        assert_op!( 5, "dec b");
+        assert_op!( 6, "ld b,$20", 32);
+        assert_op!( 7, "rlca");
+        assert_op!( 8, "ld [$1234],sp", 4660);
+        assert_op!( 9, "add hl,bc");
+        assert_op!(10, "ld a,[bc]");
+        assert_op!(11, "dec bc");
+        assert_op!(12, "inc c");
+        assert_op!(13, "dec c");
+        assert_op!(14, "ld c,$20", 32);
+        assert_op!(15, "rrca");
+    }
+
+    #[test]
+    fn test_error_instructions() {
+        assert_eq!(entry_lexer_error("ld"), "In file \"main.gb.s\" on line 1, column 1: Unknown or invalid instruction \"ld\".\n\nld\n^--- Here");
+        assert_eq!(entry_lexer_error("ld 4,["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction memory argument, expected a \"Expression\" token instead.\n\nld 4,[\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ld 4,[3"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction memory argument, expected a \"CloseBracket\" token instead.\n\nld 4,[3\n      ^--- Here");
+        assert_eq!(entry_lexer_error("stop 4"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"4\", expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma in \"ld\" instruction.\n\nld a,\n    ^--- Here");
     }
 
 }
