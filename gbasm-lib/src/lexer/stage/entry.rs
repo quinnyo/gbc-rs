@@ -954,6 +954,7 @@ mod test {
     #[test]
     fn test_instructions() {
         // TODO re-adjust and verify RST instructions on code gen
+        // RST base = 199
         assert_op!(0, "nop");
         assert_op!(1, "ld bc,$1234", 4660);
         assert_op!(2, "ld [bc],a");
@@ -1153,7 +1154,7 @@ mod test {
         assert_op!(196, "call nz,$1234", 4660);
         assert_op!(197, "push bc");
         assert_op!(198, "add $20", 32);
-        assert_op!(255, "rst $00", 0x00);
+        assert_op!(199, "rst $00", 0x00);
         assert_op!(200, "ret z");
         assert_op!(201, "ret");
         assert_op!(202, "jp z,$1234", 4660);
@@ -1161,7 +1162,7 @@ mod test {
         assert_op!(204, "call z,$1234", 4660);
         assert_op!(205, "call $1234", 4660);
         assert_op!(206, "adc $20", 32);
-        assert_op!(255, "rst $08", 0x08);
+        assert_op!(199, "rst $08", 0x08);
         assert_op!(208, "ret nc");
         assert_op!(209, "pop de");
         assert_op!(210, "jp nc,$1234", 4660);
@@ -1169,7 +1170,7 @@ mod test {
         assert_op!(212, "call nc,$1234", 4660);
         assert_op!(213, "push de");
         assert_op!(214, "sub $20", 32);
-        assert_op!(255, "rst $10", 0x10);
+        assert_op!(199, "rst $10", 0x10);
         assert_op!(216, "ret c");
         assert_op!(217, "reti");
         assert_op!(218, "jp c,$1234", 4660);
@@ -1177,7 +1178,7 @@ mod test {
         assert_op!(220, "call c,$1234", 4660);
         // assert_op!(221, "invalid");
         assert_op!(222, "sbc $20", 32);
-        assert_op!(255, "rst $18", 0x18);
+        assert_op!(199, "rst $18", 0x18);
         assert_op!(224, "ldh [$20],a", 32);
         assert_op!(225, "pop hl");
         assert_op!(226, "ld [c],a");
@@ -1185,7 +1186,7 @@ mod test {
         // assert_op!(228, "invalid");
         assert_op!(229, "push hl");
         assert_op!(230, "and $20", 32);
-        assert_op!(255, "rst $20", 0x20);
+        assert_op!(199, "rst $20", 0x20);
         assert_op!(232, "add sp,$20", 32);
         assert_op!(233, "jp [hl]");
         assert_op!(234, "ld [$1234],a", 4660);
@@ -1193,7 +1194,7 @@ mod test {
         // assert_op!(236, "invalid");
         // assert_op!(237, "invalid");
         assert_op!(238, "xor $20", 32);
-        assert_op!(255, "rst $28", 0x28);
+        assert_op!(199, "rst $28", 0x28);
         assert_op!(240, "ldh a,[$20]", 32);
         assert_op!(241, "pop af");
         assert_op!(242, "ld a,[c]");
@@ -1201,7 +1202,7 @@ mod test {
         // assert_op!(244, "invalid");
         assert_op!(245, "push af");
         assert_op!(246, "or $20", 32);
-        assert_op!(255, "rst $30", 0x30);
+        assert_op!(199, "rst $30", 0x30);
         assert_op!(248, "ldsp hl,$20", 32);
         assert_op!(249, "ld sp,hl");
         assert_op!(250, "ld a,[$1234]", 4660);
@@ -1209,11 +1210,297 @@ mod test {
         // assert_op!(252, "invalid");
         // assert_op!(253, "invalid");
         assert_op!(254, "cp $20", 32);
-        assert_op!(255, "rst $38", 0x38);
+        assert_op!(199, "rst $38", 0x38);
 
     }
 
-    // TODO test all base extended instructions
+    #[test]
+    fn test_instructions_ex() {
+        // TODO re-adjust and verify BIT, SET, RES instructions on code gen
+        assert_op!(256, "rlc b");
+        assert_op!(257, "rlc c");
+        assert_op!(258, "rlc d");
+        assert_op!(259, "rlc e");
+        assert_op!(260, "rlc h");
+        assert_op!(261, "rlc l");
+        assert_op!(262, "rlc [hl]");
+        assert_op!(263, "rlc a");
+        assert_op!(264, "rrc b");
+        assert_op!(265, "rrc c");
+        assert_op!(266, "rrc d");
+        assert_op!(267, "rrc e");
+        assert_op!(268, "rrc h");
+        assert_op!(269, "rrc l");
+        assert_op!(270, "rrc [hl]");
+        assert_op!(271, "rrc a");
+        assert_op!(272, "rl b");
+        assert_op!(273, "rl c");
+        assert_op!(274, "rl d");
+        assert_op!(275, "rl e");
+        assert_op!(276, "rl h");
+        assert_op!(277, "rl l");
+        assert_op!(278, "rl [hl]");
+        assert_op!(279, "rl a");
+        assert_op!(280, "rr b");
+        assert_op!(281, "rr c");
+        assert_op!(282, "rr d");
+        assert_op!(283, "rr e");
+        assert_op!(284, "rr h");
+        assert_op!(285, "rr l");
+        assert_op!(286, "rr [hl]");
+        assert_op!(287, "rr a");
+        assert_op!(288, "sla b");
+        assert_op!(289, "sla c");
+        assert_op!(290, "sla d");
+        assert_op!(291, "sla e");
+        assert_op!(292, "sla h");
+        assert_op!(293, "sla l");
+        assert_op!(294, "sla [hl]");
+        assert_op!(295, "sla a");
+        assert_op!(296, "sra b");
+        assert_op!(297, "sra c");
+        assert_op!(298, "sra d");
+        assert_op!(299, "sra e");
+        assert_op!(300, "sra h");
+        assert_op!(301, "sra l");
+        assert_op!(302, "sra [hl]");
+        assert_op!(303, "sra a");
+        assert_op!(304, "swap b");
+        assert_op!(305, "swap c");
+        assert_op!(306, "swap d");
+        assert_op!(307, "swap e");
+        assert_op!(308, "swap h");
+        assert_op!(309, "swap l");
+        assert_op!(310, "swap [hl]");
+        assert_op!(311, "swap a");
+        assert_op!(312, "srl b");
+        assert_op!(313, "srl c");
+        assert_op!(314, "srl d");
+        assert_op!(315, "srl e");
+        assert_op!(316, "srl h");
+        assert_op!(317, "srl l");
+        assert_op!(318, "srl [hl]");
+        assert_op!(319, "srl a");
+
+        // BIT base = 284
+        assert_op!(320, "bit 0,b", 0);
+        assert_op!(321, "bit 0,c", 0);
+        assert_op!(322, "bit 0,d", 0);
+        assert_op!(323, "bit 0,e", 0);
+        assert_op!(324, "bit 0,h", 0);
+        assert_op!(325, "bit 0,l", 0);
+        assert_op!(326, "bit 0,[hl]", 0);
+        assert_op!(327, "bit 0,a", 0);
+
+        assert_op!(320, "bit 1,b", 1);
+        assert_op!(321, "bit 1,c", 1);
+        assert_op!(322, "bit 1,d", 1);
+        assert_op!(323, "bit 1,e", 1);
+        assert_op!(324, "bit 1,h", 1);
+        assert_op!(325, "bit 1,l", 1);
+        assert_op!(326, "bit 1,[hl]", 1);
+        assert_op!(327, "bit 1,a", 1);
+
+        assert_op!(320, "bit 2,b", 2);
+        assert_op!(321, "bit 2,c", 2);
+        assert_op!(322, "bit 2,d", 2);
+        assert_op!(323, "bit 2,e", 2);
+        assert_op!(324, "bit 2,h", 2);
+        assert_op!(325, "bit 2,l", 2);
+        assert_op!(326, "bit 2,[hl]", 2);
+        assert_op!(327, "bit 2,a", 2);
+
+        assert_op!(320, "bit 3,b", 3);
+        assert_op!(321, "bit 3,c", 3);
+        assert_op!(322, "bit 3,d", 3);
+        assert_op!(323, "bit 3,e", 3);
+        assert_op!(324, "bit 3,h", 3);
+        assert_op!(325, "bit 3,l", 3);
+        assert_op!(326, "bit 3,[hl]", 3);
+        assert_op!(327, "bit 3,a", 3);
+
+        assert_op!(320, "bit 4,b", 4);
+        assert_op!(321, "bit 4,c", 4);
+        assert_op!(322, "bit 4,d", 4);
+        assert_op!(323, "bit 4,e", 4);
+        assert_op!(324, "bit 4,h", 4);
+        assert_op!(325, "bit 4,l", 4);
+        assert_op!(326, "bit 4,[hl]", 4);
+        assert_op!(327, "bit 4,a", 4);
+
+        assert_op!(320, "bit 5,b", 5);
+        assert_op!(321, "bit 5,c", 5);
+        assert_op!(322, "bit 5,d", 5);
+        assert_op!(323, "bit 5,e", 5);
+        assert_op!(324, "bit 5,h", 5);
+        assert_op!(325, "bit 5,l", 5);
+        assert_op!(326, "bit 5,[hl]", 5);
+        assert_op!(327, "bit 5,a", 5);
+
+        assert_op!(320, "bit 6,b", 6);
+        assert_op!(321, "bit 6,c", 6);
+        assert_op!(322, "bit 6,d", 6);
+        assert_op!(323, "bit 6,e", 6);
+        assert_op!(324, "bit 6,h", 6);
+        assert_op!(325, "bit 6,l", 6);
+        assert_op!(326, "bit 6,[hl]", 6);
+        assert_op!(327, "bit 6,a", 6);
+
+        assert_op!(320, "bit 7,b", 7);
+        assert_op!(321, "bit 7,c", 7);
+        assert_op!(322, "bit 7,d", 7);
+        assert_op!(323, "bit 7,e", 7);
+        assert_op!(324, "bit 7,h", 7);
+        assert_op!(325, "bit 7,l", 7);
+        assert_op!(326, "bit 7,[hl]", 7);
+        assert_op!(327, "bit 7,a", 7);
+
+        // RES base = 284
+        assert_op!(384, "res 0,b", 0);
+        assert_op!(385, "res 0,c", 0);
+        assert_op!(386, "res 0,d", 0);
+        assert_op!(387, "res 0,e", 0);
+        assert_op!(388, "res 0,h", 0);
+        assert_op!(389, "res 0,l", 0);
+        assert_op!(390, "res 0,[hl]", 0);
+        assert_op!(391, "res 0,a", 0);
+
+        assert_op!(384, "res 1,b", 1);
+        assert_op!(385, "res 1,c", 1);
+        assert_op!(386, "res 1,d", 1);
+        assert_op!(387, "res 1,e", 1);
+        assert_op!(388, "res 1,h", 1);
+        assert_op!(389, "res 1,l", 1);
+        assert_op!(390, "res 1,[hl]", 1);
+        assert_op!(391, "res 1,a", 1);
+
+        assert_op!(384, "res 2,b", 2);
+        assert_op!(385, "res 2,c", 2);
+        assert_op!(386, "res 2,d", 2);
+        assert_op!(387, "res 2,e", 2);
+        assert_op!(388, "res 2,h", 2);
+        assert_op!(389, "res 2,l", 2);
+        assert_op!(390, "res 2,[hl]", 2);
+        assert_op!(391, "res 2,a", 2);
+
+        assert_op!(384, "res 3,b", 3);
+        assert_op!(385, "res 3,c", 3);
+        assert_op!(386, "res 3,d", 3);
+        assert_op!(387, "res 3,e", 3);
+        assert_op!(388, "res 3,h", 3);
+        assert_op!(389, "res 3,l", 3);
+        assert_op!(390, "res 3,[hl]", 3);
+        assert_op!(391, "res 3,a", 3);
+
+        assert_op!(384, "res 4,b", 4);
+        assert_op!(385, "res 4,c", 4);
+        assert_op!(386, "res 4,d", 4);
+        assert_op!(387, "res 4,e", 4);
+        assert_op!(388, "res 4,h", 4);
+        assert_op!(389, "res 4,l", 4);
+        assert_op!(390, "res 4,[hl]", 4);
+        assert_op!(391, "res 4,a", 4);
+
+        assert_op!(384, "res 5,b", 5);
+        assert_op!(385, "res 5,c", 5);
+        assert_op!(386, "res 5,d", 5);
+        assert_op!(387, "res 5,e", 5);
+        assert_op!(388, "res 5,h", 5);
+        assert_op!(389, "res 5,l", 5);
+        assert_op!(390, "res 5,[hl]", 5);
+        assert_op!(391, "res 5,a", 5);
+
+        assert_op!(384, "res 6,b", 6);
+        assert_op!(385, "res 6,c", 6);
+        assert_op!(386, "res 6,d", 6);
+        assert_op!(387, "res 6,e", 6);
+        assert_op!(388, "res 6,h", 6);
+        assert_op!(389, "res 6,l", 6);
+        assert_op!(390, "res 6,[hl]", 6);
+        assert_op!(391, "res 6,a", 6);
+
+        assert_op!(384, "res 7,b", 7);
+        assert_op!(385, "res 7,c", 7);
+        assert_op!(386, "res 7,d", 7);
+        assert_op!(387, "res 7,e", 7);
+        assert_op!(388, "res 7,h", 7);
+        assert_op!(389, "res 7,l", 7);
+        assert_op!(390, "res 7,[hl]", 7);
+        assert_op!(391, "res 7,a", 7);
+
+        // SET base = 448
+        assert_op!(448, "set 0,b", 0);
+        assert_op!(449, "set 0,c", 0);
+        assert_op!(450, "set 0,d", 0);
+        assert_op!(451, "set 0,e", 0);
+        assert_op!(452, "set 0,h", 0);
+        assert_op!(453, "set 0,l", 0);
+        assert_op!(454, "set 0,[hl]", 0);
+        assert_op!(455, "set 0,a", 0);
+
+        assert_op!(448, "set 1,b", 1);
+        assert_op!(449, "set 1,c", 1);
+        assert_op!(450, "set 1,d", 1);
+        assert_op!(451, "set 1,e", 1);
+        assert_op!(452, "set 1,h", 1);
+        assert_op!(453, "set 1,l", 1);
+        assert_op!(454, "set 1,[hl]", 1);
+        assert_op!(455, "set 1,a", 1);
+
+        assert_op!(448, "set 2,b", 2);
+        assert_op!(449, "set 2,c", 2);
+        assert_op!(450, "set 2,d", 2);
+        assert_op!(451, "set 2,e", 2);
+        assert_op!(452, "set 2,h", 2);
+        assert_op!(453, "set 2,l", 2);
+        assert_op!(454, "set 2,[hl]", 2);
+        assert_op!(455, "set 2,a", 2);
+
+        assert_op!(448, "set 3,b", 3);
+        assert_op!(449, "set 3,c", 3);
+        assert_op!(450, "set 3,d", 3);
+        assert_op!(451, "set 3,e", 3);
+        assert_op!(452, "set 3,h", 3);
+        assert_op!(453, "set 3,l", 3);
+        assert_op!(454, "set 3,[hl]", 3);
+        assert_op!(455, "set 3,a", 3);
+
+        assert_op!(448, "set 4,b", 4);
+        assert_op!(449, "set 4,c", 4);
+        assert_op!(450, "set 4,d", 4);
+        assert_op!(451, "set 4,e", 4);
+        assert_op!(452, "set 4,h", 4);
+        assert_op!(453, "set 4,l", 4);
+        assert_op!(454, "set 4,[hl]", 4);
+        assert_op!(455, "set 4,a", 4);
+
+        assert_op!(448, "set 5,b", 5);
+        assert_op!(449, "set 5,c", 5);
+        assert_op!(450, "set 5,d", 5);
+        assert_op!(451, "set 5,e", 5);
+        assert_op!(452, "set 5,h", 5);
+        assert_op!(453, "set 5,l", 5);
+        assert_op!(454, "set 5,[hl]", 5);
+        assert_op!(455, "set 5,a", 5);
+
+        assert_op!(448, "set 6,b", 6);
+        assert_op!(449, "set 6,c", 6);
+        assert_op!(450, "set 6,d", 6);
+        assert_op!(451, "set 6,e", 6);
+        assert_op!(452, "set 6,h", 6);
+        assert_op!(453, "set 6,l", 6);
+        assert_op!(454, "set 6,[hl]", 6);
+        assert_op!(455, "set 6,a", 6);
+
+        assert_op!(448, "set 7,b", 7);
+        assert_op!(449, "set 7,c", 7);
+        assert_op!(450, "set 7,d", 7);
+        assert_op!(451, "set 7,e", 7);
+        assert_op!(452, "set 7,h", 7);
+        assert_op!(453, "set 7,l", 7);
+        assert_op!(454, "set 7,[hl]", 7);
+        assert_op!(455, "set 7,a", 7);
+    }
 
     #[test]
     fn test_error_instructions() {

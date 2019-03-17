@@ -13,9 +13,9 @@ use std::collections::HashMap;
 fn main() {
     convert_html_dump(&[
         ("examples/base.instr.html", None),
-        //("examples/ex.instr.html", Some(0xCB))
+        ("examples/ex.instr.html", Some(0xCB))
 
-    ], "src/cpu/instructions.rs");
+    ], "src/instructions.rs");
 }
 
 fn instr_to_string(instr: Instruction) -> String {
@@ -66,6 +66,30 @@ fn layout_to_assert(index: usize, layout: String) -> String {
     } else if layout.contains("00h") {
         format!("assert_op!({}, \"{}\", 0x00);", index, layout.replace("00h", "$00"))
 
+    } else if layout.contains("0,") {
+        format!("assert_op!({}, \"{}\", 0);", index, layout)
+
+    } else if layout.contains("1,") {
+        format!("assert_op!({}, \"{}\", 1);", index, layout)
+
+    } else if layout.contains("2,") {
+        format!("assert_op!({}, \"{}\", 2);", index, layout)
+
+    } else if layout.contains("3,") {
+        format!("assert_op!({}, \"{}\", 3);", index, layout)
+
+    } else if layout.contains("4,") {
+        format!("assert_op!({}, \"{}\", 4);", index, layout)
+
+    } else if layout.contains("5,") {
+        format!("assert_op!({}, \"{}\", 5);", index, layout)
+
+    } else if layout.contains("6,") {
+        format!("assert_op!({}, \"{}\", 6);", index, layout)
+
+    } else if layout.contains("7,") {
+        format!("assert_op!({}, \"{}\", 7);", index, layout)
+
     } else {
         format!("assert_op!({}, \"{}\");", index, layout)
     }
@@ -78,20 +102,27 @@ fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
 
     let mut lines = vec![
         "use crate::{FlagModifier, FlagState, Instruction, Register, Flag, Argument};\n".to_string(),
+        "// Auto generated Instruction Data".to_string(),
+        "pub fn instructions() -> Vec<Instruction> {".to_string(),
+        "    vec![".to_string()
     ];
 
     // Parse all sources
     let mut max_arg_count: HashMap<String, usize> = HashMap::new();
+    let mut index = 0;
     for (source, prefix) in sources {
         let mut file = File::open(source).unwrap();
         let mut contents = String::new();
         file.read_to_string(&mut contents).unwrap();
-        let instructions = parse_instructions_from_string(contents, *prefix, &mut max_arg_count);
+        let instructions = parse_instructions_from_string(contents, *prefix, &mut index, &mut max_arg_count);
         lines.push(instructions_to_vec("instructions", instructions));
     }
 
     let mut counts: Vec<(String, usize)> = max_arg_count.into_iter().collect();
     counts.sort_by(|a, b| a.cmp(&b));
+
+    lines.push("    ]".to_string());
+    lines.push("}\n".to_string());
 
     lines.push("pub fn instruction_max_arg_count(mnemonic: &str) -> usize {".to_string());
     lines.push("    match mnemonic {".to_string());
@@ -111,27 +142,21 @@ fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
 }
 
 fn instructions_to_vec(fn_name: &str, instructions: Vec<Instruction>) -> String {
-    let mut lines = vec![
-        "// Auto generated Instruction Data".to_string(),
-        format!("pub fn {}() -> Vec<Instruction> {{", fn_name),
-        "    vec![".to_string()
-    ];
+    let mut lines = Vec::new();
     for i in instructions {
         lines.push(instr_to_string(i));
     }
-    lines.push("    ]".to_string());
-    lines.push("}".to_string());
     lines.join("\n")
 }
 
 fn parse_instructions_from_string(
     contents: String ,
     prefix: Option<usize>,
+    index: &mut usize,
     max_arg_count: &mut HashMap<String, usize>
 
 ) -> Vec<Instruction> {
     let mut iter = htmlstream::tag_iter(&contents);
-    let mut index = 0;
     let mut instructions = Vec::new();
     while let Some((_, tag)) = iter.next() {
         if tag.name == "td" && tag.state == htmlstream::HTMLTagState::Opening {
@@ -151,9 +176,9 @@ fn parse_instructions_from_string(
                 (layout.html, cycles.html, flags.html)
             };
 
-            index += 1;
+            *index += 1;
             instructions.push(parse_instruction(
-                index,
+                *index,
                 prefix,
                 &layout,
                 &cycles,
@@ -500,8 +525,15 @@ impl Argument {
             "c" if cond => Some(Argument::Flag(a.into())),
             "nz" | "nc" | "z" => Some(Argument::Flag(a.into())),
 
-            // Ignored
-            "0" => None,
+            // Bit Index
+            "0" => Some(Argument::ConstantValue(0)),
+            "1" => Some(Argument::ConstantValue(1)),
+            "2" => Some(Argument::ConstantValue(2)),
+            "3" => Some(Argument::ConstantValue(3)),
+            "4" => Some(Argument::ConstantValue(4)),
+            "5" => Some(Argument::ConstantValue(5)),
+            "6" => Some(Argument::ConstantValue(6)),
+            "7" => Some(Argument::ConstantValue(7)),
             "cb" => None,
             a => panic!("Unknown argument type: {}", a)
         }

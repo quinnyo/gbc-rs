@@ -14,7 +14,10 @@ pub fn instruction_layouts() -> InstructionLayouts {
     let mut layouts = HashMap::new();
     for (index, instr) in instructions::instructions().into_iter().enumerate() {
         let layout = instr.layout.into_iter().map(|a| a.into()).collect();
-        layouts.insert((instr.name, layout), index);
+        let key: (String, Vec<LexerArgument>) = (instr.name, layout);
+        if !layouts.contains_key(&key) {
+            layouts.insert(key, index);
+        }
     }
     layouts
 }
