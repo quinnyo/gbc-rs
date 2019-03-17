@@ -174,10 +174,11 @@ pub struct Instruction {
     pub cycles_min: Option<usize>,
     pub layout: Vec<Argument>,
     pub argument: Option<Argument>,
+    pub offsets: Option<Vec<(usize, usize)>>,
     pub flags: FlagState
 }
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq, Clone)]
 pub enum LexerArgument {
     MemoryLookupValue,
     MemoryLookupRegister(Register),

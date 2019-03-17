@@ -3,11 +3,15 @@ use std::fmt;
 use std::cmp;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::hash::{Hash, Hasher};
 use std::collections::HashMap;
 
-// External Dependencies ------------------------------------------------------
-//use gbasm::cpu::{FlagModifier, FlagState, Instruction, Argument};
+
+// Types ----------------------------------------------------------------------
+pub type InstructionLayouts = HashMap<(String, Vec<LexerArgument>), usize>;
+
+// ConstantValue > OpCode
+pub type InstructionMappings = HashMap<(String, Vec<LexerArgument>), Vec<(usize, usize)>>;
+
 
 // Instruction Data Parser ----------------------------------------------------
 fn main() {
@@ -19,7 +23,7 @@ fn main() {
 }
 
 fn instr_to_string(instr: Instruction) -> String {
-    format!("        {:?},", instr).replace("layout: [", "layout: vec![").replace("\", size", "\".to_string(), size")
+    format!("        {:?},", instr).replace("layout: [", "layout: vec![").replace("Some([", "Some(vec![").replace("\", size", "\".to_string(), size")
 }
 
 fn layout_to_assert(index: usize, layout: String) -> String {
@@ -109,17 +113,28 @@ fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
 
     // Parse all sources
     let mut max_arg_count: HashMap<String, usize> = HashMap::new();
+    let mut layouts = HashMap::new();
+    let mut mappings = HashMap::new();
     let mut index = 0;
+    let mut instructions = Vec::new();
     for (source, prefix) in sources {
         let mut file = File::open(source).unwrap();
         let mut contents = String::new();
         file.read_to_string(&mut contents).unwrap();
-        let instructions = parse_instructions_from_string(contents, *prefix, &mut index, &mut max_arg_count);
-        lines.push(instructions_to_vec("instructions", instructions));
+        let mut i = parse_instructions_from_string(contents, *prefix, &mut index, &mut layouts, &mut mappings, &mut max_arg_count);
+        instructions.append(&mut i);
+    }
+
+    for (key, values) in mappings {
+        let base_index = *layouts.get(&key).unwrap();
+        println!("{}: {:?}", base_index, values);
+        instructions[base_index].offsets = Some(values);
     }
 
     let mut counts: Vec<(String, usize)> = max_arg_count.into_iter().collect();
     counts.sort_by(|a, b| a.cmp(&b));
+
+    lines.push(instructions_to_vec("instructions", instructions));
 
     lines.push("    ]".to_string());
     lines.push("}\n".to_string());
@@ -153,6 +168,8 @@ fn parse_instructions_from_string(
     contents: String ,
     prefix: Option<usize>,
     index: &mut usize,
+    layouts: &mut InstructionLayouts,
+    mappings: &mut InstructionMappings,
     max_arg_count: &mut HashMap<String, usize>
 
 ) -> Vec<Instruction> {
@@ -178,8 +195,10 @@ fn parse_instructions_from_string(
 
             *index += 1;
             instructions.push(parse_instruction(
-                *index,
+                *index - 1,
                 prefix,
+                layouts,
+                mappings,
                 &layout,
                 &cycles,
                 &flags,
@@ -193,6 +212,8 @@ fn parse_instructions_from_string(
 fn parse_instruction(
     index: usize,
     prefix: Option<usize>,
+    layouts: &mut InstructionLayouts,
+    mappings: &mut InstructionMappings,
     layout: &str,
     cycles: &str,
     flags: &str,
@@ -210,8 +231,6 @@ fn parse_instruction(
         .replace("ADC A,", "ADC ")
         .replace("SBC A,", "SBC ")
         .to_ascii_lowercase().split(" ").map(|s| s.to_string()).collect::<Vec<String>>();
-
-    println!("{}", layout_to_assert(index - 1, layout.join(" ").replace("stop 0", "stop")));
 
     // Clean up Cycle Info
     let cycles = cycles
@@ -246,8 +265,27 @@ fn parse_instruction(
     }
     let argument = argument.into_iter().next();
 
+    // Handle op code base
+    let arg_layout = args.clone().into_iter().map(|a| a.into()).collect();
+    let key: (String, Vec<LexerArgument>) = (mnemonic.clone(), arg_layout);
+    let code = if !layouts.contains_key(&key) {
+        layouts.insert(key.clone(), index);
+        if let Some(Argument::ConstantValue(ref c)) = argument {
+            mappings.insert(key, vec![(*c, index)]);
+        }
+        index
+
+    } else {
+        if let Some(Argument::ConstantValue(ref c)) = argument {
+            mappings.get_mut(&key).unwrap().push((*c, index));
+        }
+        *layouts.get(&key).unwrap()
+    };
+
+    println!("{}", layout_to_assert(code, layout.join(" ").replace("stop 0", "stop")));
+
     Instruction {
-        code: index - 1,
+        code: index,
         prefix,
         name: mnemonic.clone(),
         size: cycles[0].parse().unwrap(),
@@ -255,6 +293,7 @@ fn parse_instruction(
         cycles_min: if cycles.len() > 2 { cycles[2].parse().ok() } else { None  },
         layout: args,
         argument,
+        offsets: None,
         flags: FlagState {
             z: FlagModifier::from(flags[0].as_str()),
             n: FlagModifier::from(flags[1].as_str()),
@@ -412,11 +451,12 @@ pub struct Instruction {
     pub cycles_min: Option<usize>,
     pub layout: Vec<Argument>,
     pub argument: Option<Argument>,
+    pub offsets: Option<Vec<(usize, usize)>>,
     pub flags: FlagState
 }
 
-#[derive(Hash, Eq, PartialEq)]
-pub enum ParserArgument {
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub enum LexerArgument {
     MemoryLookupValue,
     MemoryLookupRegister(Register),
     Value,
@@ -453,22 +493,19 @@ impl Argument {
     }
 }
 
-impl Hash for Argument {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // We employ a customer hash so that we can store more detailed argument layouts for code
-        // gen but keep the ability to ignore data types during the entry lexerstage
-        let p = match self {
-            Argument::MemoryLookupByteValue => ParserArgument::MemoryLookupValue,
-            Argument::MemoryLookupWordValue => ParserArgument::MemoryLookupValue,
-            Argument::MemoryLookupRegister(r) => ParserArgument::MemoryLookupRegister(r.clone()),
-            Argument::ByteValue => ParserArgument::Value,
-            Argument::SignedByteValue => ParserArgument::Value,
-            Argument::WordValue => ParserArgument::Value,
-            Argument::ConstantValue(_) => ParserArgument::Value,
-            Argument::Register(r) => ParserArgument::Register(r.clone()),
-            Argument::Flag(f) => ParserArgument::Flag(f.clone()),
-        };
-        p.hash(state);
+impl Into<LexerArgument> for Argument {
+    fn into(self) -> LexerArgument {
+        match self {
+            Argument::MemoryLookupByteValue => LexerArgument::MemoryLookupValue,
+            Argument::MemoryLookupWordValue => LexerArgument::MemoryLookupValue,
+            Argument::MemoryLookupRegister(r) => LexerArgument::MemoryLookupRegister(r.clone()),
+            Argument::ByteValue => LexerArgument::Value,
+            Argument::SignedByteValue => LexerArgument::Value,
+            Argument::WordValue => LexerArgument::Value,
+            Argument::ConstantValue(_) => LexerArgument::Value,
+            Argument::Register(r) => LexerArgument::Register(r.clone()),
+            Argument::Flag(f) => LexerArgument::Flag(f.clone()),
+        }
     }
 }
 
