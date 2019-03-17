@@ -244,7 +244,7 @@ impl IncludeStage {
                         "adc" | "add" | "and" | "bit" | "ccf" | "cpl" | "daa" | "dec" | "inc" |
                         "ldh" | "nop" | "pop" | "res" | "ret" | "rla" | "rlc" | "rra" | "rrc" |
                         "rst" | "sbc" | "scf" | "set" | "sla" | "sra" | "srl" | "sub" | "xor" |
-                        "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "swap" => {
+                        "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "swap" | "ldsp" => {
                             Some(IncludeToken::Instruction(name))
                         },
                         // gbasm "meta" Instructions
@@ -657,7 +657,7 @@ mod test {
     fn test_instructions() {
         token_types!(Instruction, "cp", "di", "ei", "jp", "jr", "or", "rl", "rr", "ld");
         token_types!(Instruction, "adc", "add", "and", "bit", "ccf", "cpl", "daa", "dec", "inc", "ldh", "nop", "pop", "res", "ret", "rla", "rlc", "rra", "rrc", "rst", "sbc", "scf", "set", "sla", "sra", "srl", "sub", "xor");
-        token_types!(Instruction, "halt", "push", "call", "reti", "ldhl", "rlca", "rrca", "stop", "swap");
+        token_types!(Instruction, "halt", "push", "call", "reti", "ldhl", "rlca", "rrca", "stop", "swap", "ldsp");
     }
 
     #[test]

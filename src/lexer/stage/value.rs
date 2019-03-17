@@ -414,8 +414,6 @@ impl ValueStage {
     }
 
     fn global_label_id(inner: &InnerToken) -> (String, Option<usize>) {
-        // TODO the old implementation did not correct global label jump targets
-        // created by macros, can the new one somehow achieve this?
         let name = if let Some(call_id) = inner.macro_call_id() {
             // Postfix labels created by macros calls so they are unique
             format!("{}_from_macro_call_{}", inner.value, call_id)

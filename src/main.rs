@@ -12,11 +12,6 @@ use gbasm::traits::{FileError, FileReader};
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
-    // TODO minimal clap UI to lex a file and it's includes
-    // 1. Generate Low Level Lexer Output
-    // 2. Include Directives, Strings, Template Strings, Macro Calls, Macros Defs, Macro Parameters
-    // 3. Resolve all Includes
-    // 4. Expand all Macros calls and simply dump the tokens inline
     for file in env::args().skip(1) {
 
         // Create a project reader with the directory of the supplied argument file as the project

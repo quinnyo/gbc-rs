@@ -1,8 +1,8 @@
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ExpressionStage;
-use crate::cpu::{LexerArgument, InstructionLayouts, self};
 use super::expression::{ExpressionToken, Expression};
+use crate::cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
@@ -165,7 +165,6 @@ impl EntryStage {
                 },
 
                 ExpressionToken::MetaInstruction(_) => {
-                    // TODO handle flag, register, comma, OpenBracket, CloseBracket
                     continue;
                 },
 
@@ -298,7 +297,15 @@ impl EntryStage {
                 trailing_comma = None;
                 let reg = tokens.get("while parsing instruction register argument")?;
                 if let ExpressionToken::Register { name, .. } = reg {
-                    layout.push(LexerArgument::Register(name));
+
+                    // Special casing for conditional instructions where "c" is the carry flag
+                    // instead of a register if infront of the comma
+                    if !past_comma && cpu::instruction_is_conditional(&inner.value) && name == Register::C{
+                        layout.push(LexerArgument::Flag(Flag::Carry));
+
+                    } else {
+                        layout.push(LexerArgument::Register(name));
+                    }
 
                 } else {
                     unreachable!();
@@ -942,23 +949,267 @@ mod test {
 
     #[test]
     fn test_instructions() {
-        assert_op!( 0, "nop");
-        assert_op!( 1, "ld bc,$1234", 4660);
-        assert_op!( 2, "ld [bc],a");
-        assert_op!( 3, "inc bc");
-        assert_op!( 4, "inc b");
-        assert_op!( 5, "dec b");
-        assert_op!( 6, "ld b,$20", 32);
-        assert_op!( 7, "rlca");
-        assert_op!( 8, "ld [$1234],sp", 4660);
-        assert_op!( 9, "add hl,bc");
+        // TODO re-adjust and verify RST instructions on code gen
+        assert_op!(0, "nop");
+        assert_op!(1, "ld bc,$1234", 4660);
+        assert_op!(2, "ld [bc],a");
+        assert_op!(3, "inc bc");
+        assert_op!(4, "inc b");
+        assert_op!(5, "dec b");
+        assert_op!(6, "ld b,$20", 32);
+        assert_op!(7, "rlca");
+        assert_op!(8, "ld [$1234],sp", 4660);
+        assert_op!(9, "add hl,bc");
         assert_op!(10, "ld a,[bc]");
         assert_op!(11, "dec bc");
         assert_op!(12, "inc c");
         assert_op!(13, "dec c");
         assert_op!(14, "ld c,$20", 32);
         assert_op!(15, "rrca");
+        assert_op!(16, "stop");
+        assert_op!(17, "ld de,$1234", 4660);
+        assert_op!(18, "ld [de],a");
+        assert_op!(19, "inc de");
+        assert_op!(20, "inc d");
+        assert_op!(21, "dec d");
+        assert_op!(22, "ld d,$20", 32);
+        assert_op!(23, "rla");
+        assert_op!(24, "jr $20", 32);
+        assert_op!(25, "add hl,de");
+        assert_op!(26, "ld a,[de]");
+        assert_op!(27, "dec de");
+        assert_op!(28, "inc e");
+        assert_op!(29, "dec e");
+        assert_op!(30, "ld e,$20", 32);
+        assert_op!(31, "rra");
+        assert_op!(32, "jr nz,$20", 32);
+        assert_op!(33, "ld hl,$1234", 4660);
+        assert_op!(34, "ld [hli],a");
+        assert_op!(35, "inc hl");
+        assert_op!(36, "inc h");
+        assert_op!(37, "dec h");
+        assert_op!(38, "ld h,$20", 32);
+        assert_op!(39, "daa");
+        assert_op!(40, "jr z,$20", 32);
+        assert_op!(41, "add hl,hl");
+        assert_op!(42, "ld a,[hli]");
+        assert_op!(43, "dec hl");
+        assert_op!(44, "inc l");
+        assert_op!(45, "dec l");
+        assert_op!(46, "ld l,$20", 32);
+        assert_op!(47, "cpl");
+        assert_op!(48, "jr nc,$20", 32);
+        assert_op!(49, "ld sp,$1234", 4660);
+        assert_op!(50, "ld [hld],a");
+        assert_op!(51, "inc sp");
+        assert_op!(52, "inc [hl]");
+        assert_op!(53, "dec [hl]");
+        assert_op!(54, "ld [hl],$20", 32);
+        assert_op!(55, "scf");
+        assert_op!(56, "jr c,$20", 32);
+        assert_op!(57, "add hl,sp");
+        assert_op!(58, "ld a,[hld]");
+        assert_op!(59, "dec sp");
+        assert_op!(60, "inc a");
+        assert_op!(61, "dec a");
+        assert_op!(62, "ld a,$20", 32);
+        assert_op!(63, "ccf");
+        assert_op!(64, "ld b,b");
+        assert_op!(65, "ld b,c");
+        assert_op!(66, "ld b,d");
+        assert_op!(67, "ld b,e");
+        assert_op!(68, "ld b,h");
+        assert_op!(69, "ld b,l");
+        assert_op!(70, "ld b,[hl]");
+        assert_op!(71, "ld b,a");
+        assert_op!(72, "ld c,b");
+        assert_op!(73, "ld c,c");
+        assert_op!(74, "ld c,d");
+        assert_op!(75, "ld c,e");
+        assert_op!(76, "ld c,h");
+        assert_op!(77, "ld c,l");
+        assert_op!(78, "ld c,[hl]");
+        assert_op!(79, "ld c,a");
+        assert_op!(80, "ld d,b");
+        assert_op!(81, "ld d,c");
+        assert_op!(82, "ld d,d");
+        assert_op!(83, "ld d,e");
+        assert_op!(84, "ld d,h");
+        assert_op!(85, "ld d,l");
+        assert_op!(86, "ld d,[hl]");
+        assert_op!(87, "ld d,a");
+        assert_op!(88, "ld e,b");
+        assert_op!(89, "ld e,c");
+        assert_op!(90, "ld e,d");
+        assert_op!(91, "ld e,e");
+        assert_op!(92, "ld e,h");
+        assert_op!(93, "ld e,l");
+        assert_op!(94, "ld e,[hl]");
+        assert_op!(95, "ld e,a");
+        assert_op!(96, "ld h,b");
+        assert_op!(97, "ld h,c");
+        assert_op!(98, "ld h,d");
+        assert_op!(99, "ld h,e");
+        assert_op!(100, "ld h,h");
+        assert_op!(101, "ld h,l");
+        assert_op!(102, "ld h,[hl]");
+        assert_op!(103, "ld h,a");
+        assert_op!(104, "ld l,b");
+        assert_op!(105, "ld l,c");
+        assert_op!(106, "ld l,d");
+        assert_op!(107, "ld l,e");
+        assert_op!(108, "ld l,h");
+        assert_op!(109, "ld l,l");
+        assert_op!(110, "ld l,[hl]");
+        assert_op!(111, "ld l,a");
+        assert_op!(112, "ld [hl],b");
+        assert_op!(113, "ld [hl],c");
+        assert_op!(114, "ld [hl],d");
+        assert_op!(115, "ld [hl],e");
+        assert_op!(116, "ld [hl],h");
+        assert_op!(117, "ld [hl],l");
+        assert_op!(118, "halt");
+        assert_op!(119, "ld [hl],a");
+        assert_op!(120, "ld a,b");
+        assert_op!(121, "ld a,c");
+        assert_op!(122, "ld a,d");
+        assert_op!(123, "ld a,e");
+        assert_op!(124, "ld a,h");
+        assert_op!(125, "ld a,l");
+        assert_op!(126, "ld a,[hl]");
+        assert_op!(127, "ld a,a");
+        assert_op!(128, "add b");
+        assert_op!(129, "add c");
+        assert_op!(130, "add d");
+        assert_op!(131, "add e");
+        assert_op!(132, "add h");
+        assert_op!(133, "add l");
+        assert_op!(134, "add [hl]");
+        assert_op!(135, "add a");
+        assert_op!(136, "adc b");
+        assert_op!(137, "adc c");
+        assert_op!(138, "adc d");
+        assert_op!(139, "adc e");
+        assert_op!(140, "adc h");
+        assert_op!(141, "adc l");
+        assert_op!(142, "adc [hl]");
+        assert_op!(143, "adc a");
+        assert_op!(144, "sub b");
+        assert_op!(145, "sub c");
+        assert_op!(146, "sub d");
+        assert_op!(147, "sub e");
+        assert_op!(148, "sub h");
+        assert_op!(149, "sub l");
+        assert_op!(150, "sub [hl]");
+        assert_op!(151, "sub a");
+        assert_op!(152, "sbc b");
+        assert_op!(153, "sbc c");
+        assert_op!(154, "sbc d");
+        assert_op!(155, "sbc e");
+        assert_op!(156, "sbc h");
+        assert_op!(157, "sbc l");
+        assert_op!(158, "sbc [hl]");
+        assert_op!(159, "sbc a");
+        assert_op!(160, "and b");
+        assert_op!(161, "and c");
+        assert_op!(162, "and d");
+        assert_op!(163, "and e");
+        assert_op!(164, "and h");
+        assert_op!(165, "and l");
+        assert_op!(166, "and [hl]");
+        assert_op!(167, "and a");
+        assert_op!(168, "xor b");
+        assert_op!(169, "xor c");
+        assert_op!(170, "xor d");
+        assert_op!(171, "xor e");
+        assert_op!(172, "xor h");
+        assert_op!(173, "xor l");
+        assert_op!(174, "xor [hl]");
+        assert_op!(175, "xor a");
+        assert_op!(176, "or b");
+        assert_op!(177, "or c");
+        assert_op!(178, "or d");
+        assert_op!(179, "or e");
+        assert_op!(180, "or h");
+        assert_op!(181, "or l");
+        assert_op!(182, "or [hl]");
+        assert_op!(183, "or a");
+        assert_op!(184, "cp b");
+        assert_op!(185, "cp c");
+        assert_op!(186, "cp d");
+        assert_op!(187, "cp e");
+        assert_op!(188, "cp h");
+        assert_op!(189, "cp l");
+        assert_op!(190, "cp [hl]");
+        assert_op!(191, "cp a");
+        assert_op!(192, "ret nz");
+        assert_op!(193, "pop bc");
+        assert_op!(194, "jp nz,$1234", 4660);
+        assert_op!(195, "jp $1234", 4660);
+        assert_op!(196, "call nz,$1234", 4660);
+        assert_op!(197, "push bc");
+        assert_op!(198, "add $20", 32);
+        assert_op!(255, "rst $00", 0x00);
+        assert_op!(200, "ret z");
+        assert_op!(201, "ret");
+        assert_op!(202, "jp z,$1234", 4660);
+        // assert_op!(203, "prefix cb");
+        assert_op!(204, "call z,$1234", 4660);
+        assert_op!(205, "call $1234", 4660);
+        assert_op!(206, "adc $20", 32);
+        assert_op!(255, "rst $08", 0x08);
+        assert_op!(208, "ret nc");
+        assert_op!(209, "pop de");
+        assert_op!(210, "jp nc,$1234", 4660);
+        // assert_op!(211, "invalid");
+        assert_op!(212, "call nc,$1234", 4660);
+        assert_op!(213, "push de");
+        assert_op!(214, "sub $20", 32);
+        assert_op!(255, "rst $10", 0x10);
+        assert_op!(216, "ret c");
+        assert_op!(217, "reti");
+        assert_op!(218, "jp c,$1234", 4660);
+        // assert_op!(219, "invalid");
+        assert_op!(220, "call c,$1234", 4660);
+        // assert_op!(221, "invalid");
+        assert_op!(222, "sbc $20", 32);
+        assert_op!(255, "rst $18", 0x18);
+        assert_op!(224, "ldh [$20],a", 32);
+        assert_op!(225, "pop hl");
+        assert_op!(226, "ld [c],a");
+        // assert_op!(227, "invalid");
+        // assert_op!(228, "invalid");
+        assert_op!(229, "push hl");
+        assert_op!(230, "and $20", 32);
+        assert_op!(255, "rst $20", 0x20);
+        assert_op!(232, "add sp,$20", 32);
+        assert_op!(233, "jp [hl]");
+        assert_op!(234, "ld [$1234],a", 4660);
+        // assert_op!(235, "invalid");
+        // assert_op!(236, "invalid");
+        // assert_op!(237, "invalid");
+        assert_op!(238, "xor $20", 32);
+        assert_op!(255, "rst $28", 0x28);
+        assert_op!(240, "ldh a,[$20]", 32);
+        assert_op!(241, "pop af");
+        assert_op!(242, "ld a,[c]");
+        assert_op!(243, "di");
+        // assert_op!(244, "invalid");
+        assert_op!(245, "push af");
+        assert_op!(246, "or $20", 32);
+        assert_op!(255, "rst $30", 0x30);
+        assert_op!(248, "ldsp hl,$20", 32);
+        assert_op!(249, "ld sp,hl");
+        assert_op!(250, "ld a,[$1234]", 4660);
+        assert_op!(251, "ei");
+        // assert_op!(252, "invalid");
+        // assert_op!(253, "invalid");
+        assert_op!(254, "cp $20", 32);
+        assert_op!(255, "rst $38", 0x38);
+
     }
+
+    // TODO test all base extended instructions
 
     #[test]
     fn test_error_instructions() {

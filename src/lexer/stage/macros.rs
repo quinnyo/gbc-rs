@@ -677,7 +677,6 @@ mod test {
     #[test]
     fn test_passthrough() {
         assert_eq!(tfm("4\n@-2\nhl,.:"), vec![
-            // TODO test pass through of all tokens
             mtk!(NumberLiteral, 0, 1, "4"),
             mtk!(Offset, 2, 5, "-2"),
             mtk!(Register, 6, 8, "hl"),
@@ -979,8 +978,6 @@ mod test {
 
     // User Macro Calls -------------------------------------------------------
 
-    // TODO handle user macro call errors
-    // TODO handle errors inside of macro expansions and show expanded macro in error message
     #[test]
     fn test_macro_user_call_no_args() {
         let lexer = macro_lexer("FOO() MACRO FOO() op 4 ENDMACRO");

@@ -12,7 +12,8 @@ use std::collections::HashMap;
 // Instruction Data Parser ----------------------------------------------------
 fn main() {
     convert_html_dump(&[
-        ("examples/base.instr.html", None)
+        ("examples/base.instr.html", None),
+        //("examples/ex.instr.html", Some(0xCB))
 
     ], "src/cpu/instructions.rs");
 }
@@ -20,6 +21,57 @@ fn main() {
 fn instr_to_string(instr: Instruction) -> String {
     format!("        {:?},", instr).replace("layout: [", "layout: vec![").replace("\", size", "\".to_string(), size")
 }
+
+fn layout_to_assert(index: usize, layout: String) -> String {
+
+    if layout.contains("a16") {
+        format!("assert_op!({}, \"{}\", 4660);", index, layout.replace("a16", "$1234"))
+
+    } else if layout.contains("d16") {
+        format!("assert_op!({}, \"{}\", 4660);", index, layout.replace("d16", "$1234"))
+
+    } else if layout.contains("a8") {
+        format!("assert_op!({}, \"{}\", 32);", index, layout.replace("a8", "$20"))
+
+    } else if layout.contains("d8") {
+        format!("assert_op!({}, \"{}\", 32);", index, layout.replace("d8", "$20"))
+
+    } else if layout.contains("sp+r8") {
+        format!("assert_op!({}, \"{}\", 32);", index, layout.replace("sp+r8", "$20"))
+
+    } else if layout.contains("r8") {
+        format!("assert_op!({}, \"{}\", 32);", index, layout.replace("r8", "$20"))
+
+    } else if layout.contains("38h") {
+        format!("assert_op!({}, \"{}\", 0x38);", index, layout.replace("38h", "$38"))
+
+    } else if layout.contains("30h") {
+        format!("assert_op!({}, \"{}\", 0x30);", index, layout.replace("30h", "$30"))
+
+    } else if layout.contains("28h") {
+        format!("assert_op!({}, \"{}\", 0x28);", index, layout.replace("28h", "$28"))
+
+    } else if layout.contains("20h") {
+        format!("assert_op!({}, \"{}\", 0x20);", index, layout.replace("20h", "$20"))
+
+    } else if layout.contains("18h") {
+        format!("assert_op!({}, \"{}\", 0x18);", index, layout.replace("18h", "$18"))
+
+    } else if layout.contains("10h") {
+        format!("assert_op!({}, \"{}\", 0x10);", index, layout.replace("10h", "$10"))
+
+    } else if layout.contains("08h") {
+        format!("assert_op!({}, \"{}\", 0x08);", index, layout.replace("08h", "$08"))
+
+    } else if layout.contains("00h") {
+        format!("assert_op!({}, \"{}\", 0x00);", index, layout.replace("00h", "$00"))
+
+    } else {
+        format!("assert_op!({}, \"{}\");", index, layout)
+    }
+
+}
+
 
 // "base.instr.html"
 fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
@@ -50,9 +102,7 @@ fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
     lines.push("    }".to_string());
     lines.push("}".to_string());
 
-    println!("{}", lines.join("\n"));
-
-    // TODO build instruction layout hashes
+    // println!("{}", lines.join("\n"));
 
     // Write out
     let mut file = File::create(target).unwrap();
@@ -135,6 +185,8 @@ fn parse_instruction(
         .replace("ADC A,", "ADC ")
         .replace("SBC A,", "SBC ")
         .to_ascii_lowercase().split(" ").map(|s| s.to_string()).collect::<Vec<String>>();
+
+    println!("{}", layout_to_assert(index - 1, layout.join(" ").replace("stop 0", "stop")));
 
     // Clean up Cycle Info
     let cycles = cycles

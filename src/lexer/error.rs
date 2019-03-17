@@ -126,7 +126,6 @@ impl LexerError {
     fn format_location(files: &[LexerFile], file_index: usize, index: usize, message: String, prefix_message: bool) -> String {
         let file = &files[file_index];
         let (line, col) = file.get_line_and_col(index);
-        // TODO show multiple lines of context?
         let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
         let col_pointer = str::repeat(" ", col);
         if prefix_message {

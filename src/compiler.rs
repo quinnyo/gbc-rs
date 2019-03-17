@@ -31,7 +31,6 @@ impl Compiler {
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
 
-        // TODO Layout
         // Go through all Entry Tokens
             // Extract Constants
             // Add Remaining Tokens to Layout
@@ -41,26 +40,6 @@ impl Compiler {
         // Resolve all other expressions
             // When looking for local labels search backwards through the rom entry list
         // Optimize
-
-
-        // TODO ROM Layout
-            // TODO handle file local global labels which start with a "_" by searching for a
-            // matching label
-            // TODO the names should already have been made unique in the value stage
-        // TODO Optimizer
-        // TODO Generator
-        // Parser
-        // TODO 1. Go through all sections ordered by base adress ascending
-            // TODO 1.1. Calculate offsets for all the section's entries
-            // TODO 1.2. Check for section overlaps / out of bounds
-
-        // TODO 2. Peform jump target resolution
-        // TODO 3. Perform instruction optimizations
-        // TODO 4. go back to 1 and repeat until no more optimizations can be applied
-
-        // TODO 1. Go through all sections ordered by base adress ascending
-        // TODO 2. Serialize all section entries into the corresponding ROM part
-
         Ok(())
     }
 }

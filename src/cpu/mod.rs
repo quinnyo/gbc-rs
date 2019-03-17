@@ -19,6 +19,12 @@ pub fn instruction_layouts() -> InstructionLayouts {
     layouts
 }
 
+pub fn instruction_is_conditional(mnemonic: &str) -> bool {
+    match mnemonic {
+        "jr" | "jp" | "call" | "ret" => true,
+        _ => false
+    }
+}
 
 // Flags ----------------------------------------------------------------------
 #[derive(Eq, PartialEq, Hash, Clone)]

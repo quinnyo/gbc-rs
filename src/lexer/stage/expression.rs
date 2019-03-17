@@ -172,7 +172,6 @@ impl ExpressionStage {
     fn parse_expression_argument(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
         let mut expression_tokens = Self::parse_expression(tokens, expression_id, true)?;
         if expression_tokens.len() > 1 {
-            // TODO can this even happen?
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
         }
         if let ExpressionToken::Expression(_, _, expr) | ExpressionToken::ConstExpression(_, _, expr) = expression_tokens.remove(0) {
@@ -231,7 +230,6 @@ pub enum Expression {
 }
 
 impl Expression {
-
     fn from_tokens(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
         ExpressionParser::new(tokens)?.parse_binary(expression_id, 0)
     }
@@ -244,10 +242,6 @@ impl Expression {
             Expression::BuiltinCall { args, .. } => args.iter().all(|arg| arg.is_constant())
         }
     }
-    // TODO implement both type / type operator interaction as well as type / type value interaction
-    // TODO macro return type based on weak type interactions in expression walk
-    // TODO type check can only happen after name / value resolution
-    // pub fn evaluate_typ()
 }
 
 pub struct ExpressionParser {
@@ -1166,8 +1160,6 @@ mod test {
                 }
             )
         ]);
-
-        // TODO test further operators?
 
     }
 
