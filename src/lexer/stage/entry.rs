@@ -15,11 +15,6 @@ type DataExpression = (usize, Expression);
 type OptionalDataExpression = Option<DataExpression>;
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum SegmentName {
-    // TODO from_str
-}
-
-#[derive(Debug, Eq, PartialEq)]
 pub enum DataEndianess {
     /// LL HH
     Little,
@@ -76,14 +71,12 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {}, {
         storage => DataStorage
     },
     Instruction {
-        // TODO value(s) for parameters (Expression(s))
         mnemonic => Mnemonic // TODO put values directly into mnemonic enum
-        // TODO size get from Mnemonic
     },
     // SECTION EXPR[String]
     SectionDeclaration {
         name => OptionalDataExpression,
-        segment_name => String, // TODO enum
+        segment_name => String,
         segment_offset => OptionalDataExpression,
         segment_size => OptionalDataExpression,
         bank_index => OptionalDataExpression
@@ -478,6 +471,7 @@ mod test {
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("ROMX"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ROMX\", expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
+        assert_eq!(entry_lexer_error("DS 1 1"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"1\", expected either a constant declaration, directive or instruction instead.\n\nDS 1 1\n     ^--- Here");
     }
 
     // Constant Declarations --------------------------------------------------

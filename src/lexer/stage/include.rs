@@ -231,7 +231,7 @@ impl IncludeStage {
                             Some(IncludeToken::Segment(name))
                         },
                         // Registers
-                        "af" | "bc" | "de" | "hl" | "a" | "b" | "c" | "d" | "e" | "h" | "l" | "hld" | "hli" => {
+                        "af" | "bc" | "de" | "hl" | "a" | "b" | "c" | "d" | "e" | "h" | "l" | "hld" | "hli" | "sp" => {
                             Some(IncludeToken::Register(name))
                         },
                         // Flags
@@ -639,7 +639,7 @@ mod test {
 
     #[test]
     fn test_registers() {
-        token_types!(Register, "af", "bc", "de", "hl", "a", "b", "c", "d", "e", "h", "l", "hli", "hld");
+        token_types!(Register, "af", "bc", "de", "hl", "a", "b", "c", "d", "e", "h", "l", "hli", "hld", "sp");
     }
 
     #[test]

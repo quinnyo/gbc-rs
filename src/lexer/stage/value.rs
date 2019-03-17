@@ -7,6 +7,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
+use crate::cpu::{Flag, Register};
 use crate::lexer::MacroStage;
 use super::macros::{MacroCall, MacroToken};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
@@ -60,68 +61,6 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
         typ => Flag
     }
 });
-
-
-// Flags ----------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
-pub enum Flag {
-    Zero,
-    NoZero,
-    Carry,
-    NoCarry
-}
-
-impl From<&str> for Flag {
-    fn from(s: &str) -> Self {
-        match s {
-            "z" => Flag::Zero,
-            "nz" => Flag::NoZero,
-            "c" => Flag::Carry,
-            "nc" => Flag::NoCarry,
-            f => unreachable!("Invalid flag: {}", f)
-        }
-    }
-}
-
-
-// Registers ------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
-pub enum Register {
-    Accumulator,
-    B,
-    C,
-    D,
-    E,
-    H,
-    L,
-    AF,
-    BC,
-    DE,
-    HL,
-    HLIncrement,
-    HLDecrement
-}
-
-impl From<&str> for Register {
-    fn from(s: &str) -> Self {
-        match s {
-            "a" => Register::Accumulator,
-            "b" => Register::B,
-            "c" => Register::C,
-            "d" => Register::D,
-            "e" => Register::E,
-            "h" => Register::H,
-            "l" => Register::L,
-            "af" => Register::AF,
-            "bc" => Register::BC,
-            "de" => Register::DE,
-            "hl" => Register::HL,
-            "hli" => Register::HLIncrement,
-            "hld" => Register::HLDecrement,
-            r => unreachable!("Invalid Register: {}", r)
-        }
-    }
-}
 
 
 // Types ----------------------------------------------------------------------
@@ -1029,7 +968,8 @@ mod test {
             (Register::DE, "de"),
             (Register::HL, "hl"),
             (Register::HLIncrement, "hli"),
-            (Register::HLDecrement, "hld")
+            (Register::HLDecrement, "hld"),
+            (Register::SP, "sp")
         ];
         for (r, s) in registers {
             assert_eq!(tfv(s), vec![

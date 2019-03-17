@@ -5,15 +5,9 @@ use std::path::PathBuf;
 use std::io::{Error as IOError, Read};
 
 
-// Modules --------------------------------------------------------------------
-mod compiler;
-mod lexer;
-mod traits;
-
-
 // Internal Dependencies ------------------------------------------------------
-use compiler::Compiler;
-use traits::{FileError, FileReader};
+use gbasm::compiler::Compiler;
+use gbasm::traits::{FileError, FileReader};
 
 
 // CLI Interface --------------------------------------------------------------
