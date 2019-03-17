@@ -18,6 +18,7 @@ lexer_token!(IncludeToken, (Debug, Eq, PartialEq, Clone), {
     Reserved(()),
     Segment(()),
     Instruction(()),
+    MetaInstruction(()),
     Parameter(()),
     Offset(()),
     NumberLiteral(()),
@@ -238,12 +239,17 @@ impl IncludeStage {
                         "z" | "nz" | "nc" => {
                             Some(IncludeToken::Flag(name))
                         },
-                        // Instructions
+                        // LR35902 Instructions
                         "cp" | "di" | "ei" | "jp" | "jr" | "or" | "rl" | "rr" | "ld" |
-                        "adc" | "add" | "and" | "bit" | "ccf" | "cpl" | "daa" | "dec" | "inc" | "ldh" | "nop" | "pop" | "res" | "ret" | "rla" | "rlc" | "rra" | "rrc" | "rst" | "sbc" | "scf" | "set" | "sla" | "sra" | "srl" | "sub" | "xor" | "msg" | "brk" | "mul" | "div" |
-                        "incx" | "decx" | "addw" | "subw" | "ldxa" | "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "retx" | "swap" |
-                        "vsync" => {
+                        "adc" | "add" | "and" | "bit" | "ccf" | "cpl" | "daa" | "dec" | "inc" |
+                        "ldh" | "nop" | "pop" | "res" | "ret" | "rla" | "rlc" | "rra" | "rrc" |
+                        "rst" | "sbc" | "scf" | "set" | "sla" | "sra" | "srl" | "sub" | "xor" |
+                        "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "swap" => {
                             Some(IncludeToken::Instruction(name))
+                        },
+                        // gbasm "meta" Instructions
+                        "mul" | "div" | "msg" | "brk" | "incx" | "decx" | "addw" | "subw" | "ldxa" | "retx" | "vsync" => {
+                            Some(IncludeToken::MetaInstruction(name))
                         },
                         // All other names
                         _ => Some(IncludeToken::Name(name))
@@ -650,9 +656,13 @@ mod test {
     #[test]
     fn test_instructions() {
         token_types!(Instruction, "cp", "di", "ei", "jp", "jr", "or", "rl", "rr", "ld");
-        token_types!(Instruction, "adc", "add", "and", "bit", "ccf", "cpl", "daa", "dec", "inc", "ldh", "nop", "pop", "res", "ret", "rla", "rlc", "rra", "rrc", "rst", "sbc", "scf", "set", "sla", "sra", "srl", "sub", "xor", "msg", "brk", "mul", "div");
-        token_types!(Instruction, "incx", "decx", "addw", "subw", "ldxa", "halt", "push", "call", "reti", "ldhl", "rlca", "rrca", "stop", "retx", "swap");
-        token_types!(Instruction, "vsync");
+        token_types!(Instruction, "adc", "add", "and", "bit", "ccf", "cpl", "daa", "dec", "inc", "ldh", "nop", "pop", "res", "ret", "rla", "rlc", "rra", "rrc", "rst", "sbc", "scf", "set", "sla", "sra", "srl", "sub", "xor");
+        token_types!(Instruction, "halt", "push", "call", "reti", "ldhl", "rlca", "rrca", "stop", "swap");
+    }
+
+    #[test]
+    fn test_meta_instructions() {
+        token_types!(MetaInstruction, "msg", "brk", "mul", "div", "retx", "incx", "decx", "addw", "subw", "ldxa", "vsync");
     }
 
     #[test]

@@ -53,6 +53,7 @@ pub enum TokenType {
     Reserved,
     Segment,
     Instruction,
+    MetaInstruction,
     Parameter,
     NumberLiteral,
     StringLiteral,
@@ -90,6 +91,9 @@ pub enum TokenType {
 
     // Entry Tokens
     Data,
+    InstructionWithArg,
+    InstructionEx,
+    InstructionExWithArg,
     SectionDeclaration
 
 }

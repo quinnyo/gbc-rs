@@ -49,7 +49,13 @@ pub enum DataStorage {
 }
 
 // Entry Specific Tokens ------------------------------------------------------
-lexer_token!(EntryToken, (Debug, Eq, PartialEq), {}, {
+lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
+    Instruction((usize)),
+    InstructionWithArg((usize, DataExpression)),
+    InstructionEx((usize)),
+    InstructionExWithArg((usize, DataExpression))
+
+}, {
     GlobalLabelDef {
         name => String
     },
@@ -69,9 +75,6 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {}, {
         alignment => DataAlignment,
         endianess => DataEndianess,
         storage => DataStorage
-    },
-    Instruction {
-        mnemonic => Mnemonic // TODO put values directly into mnemonic enum
     },
     // SECTION EXPR[String]
     SectionDeclaration {
@@ -156,6 +159,11 @@ impl EntryStage {
 
                 // Instructions
                 ExpressionToken::Instruction(_) => {
+                    // TODO handle flag, register, comma, OpenBracket, CloseBracket
+                    continue;
+                },
+
+                ExpressionToken::MetaInstruction(_) => {
                     // TODO handle flag, register, comma, OpenBracket, CloseBracket
                     continue;
                 },
