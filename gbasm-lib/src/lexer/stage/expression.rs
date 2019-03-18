@@ -26,14 +26,11 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     OpenBracket(()),
     CloseBracket(()),
     Expression((usize, Expression)),
-    ConstExpression((usize, Expression))
+    ConstExpression((usize, Expression)),
+    GlobalLabelDef((usize)),
+    LocalLabelDef((usize))
+
 }, {
-    GlobalLabelDef {
-        name => String
-    },
-    LocalLabelDef {
-        name => String
-    },
     Register {
         name => Register
     },
@@ -53,14 +50,8 @@ impl ExpressionToken {
             ValueToken::Comma(inner) => Ok(ExpressionToken::Comma(inner)),
             ValueToken::OpenBracket(inner) => Ok(ExpressionToken::OpenBracket(inner)),
             ValueToken::CloseBracket(inner) => Ok(ExpressionToken::CloseBracket(inner)),
-            ValueToken::GlobalLabelDef { inner, name } => Ok(ExpressionToken::GlobalLabelDef {
-                inner,
-                name
-            }),
-            ValueToken::LocalLabelDef { inner, name } => Ok(ExpressionToken::LocalLabelDef {
-                inner,
-                name
-            }),
+            ValueToken::GlobalLabelDef(inner, id) => Ok(ExpressionToken::GlobalLabelDef(inner, id)),
+            ValueToken::LocalLabelDef(inner, id) => Ok(ExpressionToken::LocalLabelDef(inner, id)),
             ValueToken::Register { inner, name } => Ok(ExpressionToken::Register {
                 inner,
                 name
@@ -193,8 +184,8 @@ pub enum ExpressionValue {
     Float(OrderedFloat<f32>),
     String(String),
     OffsetAddress(InnerToken, i32),
-    GlobalLabelAddress(InnerToken, String),
-    LocalLabelAddress(InnerToken, String)
+    GlobalLabelAddress(InnerToken, usize),
+    LocalLabelAddress(InnerToken, usize)
 }
 
 impl ExpressionValue {
@@ -370,11 +361,11 @@ impl ExpressionParser {
                 Some(ValueToken::String { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::String(value)),
                 ),
-                Some(ValueToken::GlobalLabelRef { inner, name }) => Ok(
-                    Expression::Value(ExpressionValue::GlobalLabelAddress(inner, name)),
+                Some(ValueToken::GlobalLabelRef(inner, id)) => Ok(
+                    Expression::Value(ExpressionValue::GlobalLabelAddress(inner, id)),
                 ),
-                Some(ValueToken::LocalLabelRef { inner, name }) => Ok(
-                    Expression::Value(ExpressionValue::LocalLabelAddress(inner, name)),
+                Some(ValueToken::LocalLabelRef(inner, id)) => Ok(
+                    Expression::Value(ExpressionValue::LocalLabelAddress(inner, id)),
                 ),
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
                     let mut args = Vec::with_capacity(arguments.len());
@@ -573,10 +564,10 @@ mod test {
     #[test]
     fn test_expression_non_constant() {
         assert_eq!(tfe("global_label:\nfoo + global_label"), vec![
-            ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label"),
-                name: "global_label".to_string()
-            },
+            ExpressionToken::GlobalLabelDef(
+                itk!(0, 13, "global_label"),
+                1
+            ),
             ExpressionToken::Expression(
                 itk!(14, 17, "foo"),
                 0,
@@ -584,8 +575,7 @@ mod test {
                     inner: itk!(18, 19, "+"),
                     op: Operator::Plus,
                     right: Box::new(Expression::Value(ExpressionValue::GlobalLabelAddress(
-                        itk!(20, 32, "global_label"),
-                        "global_label".to_string()
+                        itk!(20, 32, "global_label"), 1
                     ))),
                     left: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(14, 17, "foo"), "foo".to_string())))
                 }
@@ -654,10 +644,10 @@ mod test {
     #[test]
     fn test_builtin_call_with_global_label() {
         assert_eq!(tfe("global_label:\nCEIL(global_label)"), vec![
-            ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label"),
-                name: "global_label".to_string()
-            },
+            ExpressionToken::GlobalLabelDef(
+                itk!(0, 13, "global_label"),
+                1
+            ),
             ExpressionToken::Expression(
                 itk!(14, 18, "CEIL"),
                 1,
@@ -666,8 +656,7 @@ mod test {
                     name: "CEIL".to_string(),
                     args: vec![
                         Expression::Value(ExpressionValue::GlobalLabelAddress(
-                            itk!(19, 31, "global_label"),
-                            "global_label".to_string()
+                            itk!(19, 31, "global_label"), 1
                         ))
                     ]
                 }
@@ -678,14 +667,14 @@ mod test {
     #[test]
     fn test_builtin_call_with_local_label() {
         assert_eq!(tfe("global_label:\n.local_label:\nCEIL(.local_label)"), vec![
-            ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label"),
-                name: "global_label".to_string()
-            },
-            ExpressionToken::LocalLabelDef {
-                inner: itk!(14, 27, "local_label"),
-                name: "local_label".to_string()
-            },
+            ExpressionToken::GlobalLabelDef(
+                itk!(0, 13, "global_label"),
+                1
+            ),
+            ExpressionToken::LocalLabelDef(
+                itk!(14, 27, "local_label"),
+                2
+            ),
             ExpressionToken::Expression(
                 itk!(28, 32, "CEIL"),
                 1,
@@ -694,8 +683,7 @@ mod test {
                     name: "CEIL".to_string(),
                     args: vec![
                         Expression::Value(ExpressionValue::LocalLabelAddress(
-                            itk!(33, 45, "local_label"),
-                            "local_label".to_string()
+                            itk!(33, 45, "local_label"), 2
                         ))
                     ]
                 }
@@ -717,16 +705,15 @@ mod test {
     #[test]
     fn test_label_global_ref() {
         assert_eq!(tfe("global_label:\nglobal_label"), vec![
-            ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label"),
-                name: "global_label".to_string()
-            },
+            ExpressionToken::GlobalLabelDef(
+                itk!(0, 13, "global_label"),
+                1
+            ),
             ExpressionToken::Expression(
                 itk!(14, 26, "global_label"),
                 0,
                 Expression::Value(ExpressionValue::GlobalLabelAddress (
-                    itk!(14, 26, "global_label"),
-                    "global_label".to_string()
+                    itk!(14, 26, "global_label"), 1
                 ))
             )
         ]);
@@ -735,20 +722,19 @@ mod test {
     #[test]
     fn test_label_local_ref() {
         assert_eq!(tfe("global_label:\n.local_label:\n.local_label"), vec![
-            ExpressionToken::GlobalLabelDef {
-                inner: itk!(0, 13, "global_label"),
-                name: "global_label".to_string()
-            },
-            ExpressionToken::LocalLabelDef {
-                inner: itk!(14, 27, "local_label"),
-                name: "local_label".to_string()
-            },
+            ExpressionToken::GlobalLabelDef(
+                itk!(0, 13, "global_label"),
+                1
+            ),
+            ExpressionToken::LocalLabelDef(
+                itk!(14, 27, "local_label"),
+                2
+            ),
             ExpressionToken::Expression(
                 itk!(28, 40, "local_label"),
                 0,
                 Expression::Value(ExpressionValue::LocalLabelAddress (
-                    itk!(28, 40, "local_label"),
-                    "local_label".to_string()
+                    itk!(28, 40, "local_label"), 2
                 ))
             )
         ]);

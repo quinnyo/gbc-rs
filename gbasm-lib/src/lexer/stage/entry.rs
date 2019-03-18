@@ -51,16 +51,11 @@ pub enum DataStorage {
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
     Instruction((usize)),
-    InstructionWithArg((usize, DataExpression))
+    InstructionWithArg((usize, DataExpression)),
+    GlobalLabelDef((usize)),
+    LocalLabelDef((usize))
 
 }, {
-    GlobalLabelDef {
-        name => String
-    },
-    LocalLabelDef {
-        name => String
-    },
-    //
     // Constant + EQU|EQUS + ConstExpression
     Constant {
         name => String,
@@ -117,14 +112,8 @@ impl EntryStage {
             let entry = match token {
 
                 // Passthrough Label Defs
-                ExpressionToken::GlobalLabelDef { inner, name } => EntryToken::GlobalLabelDef {
-                    inner,
-                    name
-                },
-                ExpressionToken::LocalLabelDef { inner, name } => EntryToken::LocalLabelDef {
-                    inner,
-                    name
-                },
+                ExpressionToken::GlobalLabelDef(inner, id) => EntryToken::GlobalLabelDef(inner, id),
+                ExpressionToken::LocalLabelDef(inner, id) => EntryToken::LocalLabelDef(inner, id),
 
                 // Constant Declarations
                 ExpressionToken::Constant(inner) => {
@@ -722,22 +711,22 @@ mod test {
 
     #[test]
     fn test_passthrough_global_label_def() {
-        assert_eq!(tfe("global_label:"), vec![EntryToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label"),
-            name: "global_label".to_string()
-        }]);
+        assert_eq!(tfe("global_label:"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 13, "global_label"),
+            1
+        )]);
     }
 
     #[test]
     fn test_passthrough_local_label_def() {
-        assert_eq!(tfe("global_label:\n.local_label:"), vec![EntryToken::GlobalLabelDef {
-            inner: itk!(0, 13, "global_label"),
-            name: "global_label".to_string()
+        assert_eq!(tfe("global_label:\n.local_label:"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 13, "global_label"),
+            1
 
-        }, EntryToken::LocalLabelDef {
-            inner: itk!(14, 27, "local_label"),
-            name: "local_label".to_string()
-        }]);
+        ), EntryToken::LocalLabelDef(
+            itk!(14, 27, "local_label"),
+            2
+        )]);
     }
 
     #[test]
