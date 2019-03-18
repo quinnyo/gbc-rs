@@ -377,40 +377,55 @@ impl ValueStage {
         }
 
         // Verify and build label references
-        Self::verify_local_label_refs(&value_tokens, None)?;
+        let mut global_label_map = HashMap::new();
+        Self::verify_local_label_refs(&value_tokens, &mut global_label_map, false)?;
         Ok(Self::convert_global_label_refs(&global_labels, value_tokens))
     }
 
     fn verify_local_label_refs<'a>(
         tokens: &'a [ValueToken],
-        mut global_label: Option<(&'a InnerToken, &'a String, Vec<&'a String>, Vec<(&'a InnerToken, &'a String)>)>
+        global_label_map: &mut HashMap<Option<usize>, Option<(&'a InnerToken, &'a String, Vec<&'a String>, Vec<(&'a InnerToken, &'a String)>)>>,
+        in_call: bool
 
     ) -> Result<(), LexerError> {
         for token in tokens {
             match token {
                 ValueToken::GlobalLabelDef { inner, name } => {
-                    Self::verify_local_label_refs_under_global(global_label.take())?;
-                    global_label = Some((inner, name, Vec::new(), Vec::new()));
+                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
+                    if !in_call {
+                        Self::verify_local_label_refs_under_global(global_label.take())?;
+                    }
+                    *global_label = Some((inner, name, Vec::new(), Vec::new()));
                 },
-                ValueToken::LocalLabelDef { name, .. } => {
+                ValueToken::LocalLabelDef { inner, name } => {
+                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(global_label) = global_label.as_mut() {
                         global_label.2.push(&name);
                     }
                 },
                 ValueToken::LocalLabelRef { inner, name } => {
+                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(global_label) = global_label.as_mut() {
                         global_label.3.push((&inner, &name));
                     }
                 },
                 ValueToken::BuiltinCall(_, arguments) => {
                     for tokens in arguments {
-                        Self::verify_local_label_refs(tokens, global_label.clone())?;
+                        Self::verify_local_label_refs(tokens, global_label_map, true)?;
                     }
                 },
                 _ => {}
             }
         }
-        Self::verify_local_label_refs_under_global(global_label.take())
+        if !in_call {
+            for (_, mut global_label) in global_label_map.drain() {
+                Self::verify_local_label_refs_under_global(global_label.take())?;
+            }
+            Ok(())
+
+        } else {
+            Ok(())
+        }
     }
 
     fn verify_local_label_refs_under_global(global_label: Option<(&InnerToken, &String, Vec<&String>, Vec<(&InnerToken, &String)>)>) -> Result<(), LexerError> {
@@ -882,7 +897,7 @@ mod test {
     }
 
     #[test]
-    fn test_local_label_ref() {
+    fn test_local_label_ref_backward() {
         assert_eq!(tfv("global_label:\n.local_label:\n.local_label"), vec![ValueToken::GlobalLabelDef {
             inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
@@ -895,6 +910,7 @@ mod test {
             inner: itk!(28, 40, "."),
             name: "local_label".to_string()
         }]);
+
         assert_eq!(tfv("global_label:\n.local_label:\nCEIL(.local_label)"), vec![ValueToken::GlobalLabelDef {
             inner: itk!(0, 13, "global_label"),
             name: "global_label".to_string()
@@ -914,7 +930,79 @@ mod test {
                 ]
             ]
         )]);
+    }
 
+    #[test]
+    fn test_local_label_ref_forward() {
+        assert_eq!(tfv("global_label:\n.local_label\n.local_label:"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::LocalLabelRef {
+            inner: itk!(14, 26, "."),
+            name: "local_label".to_string()
+
+        }, ValueToken::LocalLabelDef {
+            inner: itk!(27, 40, "."),
+            name: "local_label".to_string()
+        }]);
+
+        assert_eq!(tfv("global_label:\nCEIL(.local_label)\n.local_label:"), vec![ValueToken::GlobalLabelDef {
+            inner: itk!(0, 13, "global_label"),
+            name: "global_label".to_string()
+
+        }, ValueToken::BuiltinCall(
+            itk!(14, 18, "CEIL"),
+            vec![
+                vec![
+                    ValueToken::LocalLabelRef {
+                        inner: itf!(19, 31, ".", 0),
+                        name: "local_label".to_string()
+                    }
+                ]
+            ]
+        ), ValueToken::LocalLabelDef {
+            inner: itk!(33, 46, "."),
+            name: "local_label".to_string()
+        }]);
+
+    }
+
+    #[test]
+    fn test_local_label_ref_forward_macro_intercept() {
+        // TODO error test so show that locals do not leak out of macros
+        assert_eq!(
+            tfv("global_label:\n.local_label\nFOO()\n.local_label:\nMACRO FOO()\n_macro_label:\n.macro_local\n.macro_local:ENDMACRO"), vec![
+            ValueToken::GlobalLabelDef {
+                inner: itk!(0, 13, "global_label"),
+                name: "global_label".to_string()
+
+            }, ValueToken::LocalLabelRef {
+                inner: itk!(14, 26, "."),
+                name: "local_label".to_string()
+
+            }, ValueToken::GlobalLabelDef {
+                inner: itkm!(59, 72, "_macro_label", 0),
+                name: "_macro_label_from_macro_call_0_file_local_0".to_string()
+
+            }, ValueToken::LocalLabelRef {
+                inner: itkm!(73, 85, ".", 0),
+                name: "macro_local_from_macro_call_0".to_string()
+
+            }, ValueToken::LocalLabelDef {
+                inner: itkm!(86, 99, ".", 0),
+                name: "macro_local_from_macro_call_0".to_string()
+
+            }, ValueToken::LocalLabelDef {
+                inner: itk!(33, 46, "."),
+                name: "local_label".to_string()
+            }
+        ]);
+    }
+
+    #[test]
+    fn test_error_local_label_ref_no_macro_leak() {
+        assert_eq!(value_lexer_error("global_label:\n.local_label\nFOO()\nMACRO FOO()_macro_label:\n.local_label:\nENDMACRO"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown local label \"local_label\", not defined under the current global label \"global_label\".\n\n.local_label\n^--- Here\n\nDefinition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
     }
 
     #[test]

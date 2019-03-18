@@ -248,7 +248,7 @@ impl IncludeStage {
                             Some(IncludeToken::Instruction(name))
                         },
                         // gbasm "meta" Instructions
-                        "mul" | "div" | "msg" | "brk" | "incx" | "decx" | "addw" | "subw" | "ldxa" | "retx" | "vsync" => {
+                        "msg" | "brk" | "mul" | "div" | "incx" | "decx" | "addw" | "subw" | "ldxa" | "retx" | "vsync" => {
                             Some(IncludeToken::MetaInstruction(name))
                         },
                         // All other names

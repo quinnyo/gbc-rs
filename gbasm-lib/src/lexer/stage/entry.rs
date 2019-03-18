@@ -50,9 +50,6 @@ pub enum DataStorage {
 
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
-    // TODO use 256-511 indicies and dump all instructions into one huge array this keeps the
-    // internals easier
-    // TODO code-gen will later prepend the prefix from the InstructionData
     Instruction((usize)),
     InstructionWithArg((usize, DataExpression))
 
@@ -168,7 +165,8 @@ impl EntryStage {
                     Self::parse_instruction(&mut tokens, layouts, inner)?
                 },
 
-                ExpressionToken::MetaInstruction(_) => {
+                ExpressionToken::MetaInstruction(inner) => {
+                    //Self::parse_meta_instruction(&mut tokens, inner)?;
                     continue;
                 },
 
@@ -404,6 +402,154 @@ impl EntryStage {
             ))
         }
 
+    }
+
+    fn parse_meta_instruction(
+        tokens: &mut TokenIterator<ExpressionToken>,
+        inner: InnerToken
+
+    ) -> Result<EntryToken, LexerError> {
+        match inner.value.as_str() {
+
+            // BGB debugging support
+            // TODO allow to specify debug only instructions / data blocks
+            "msg" => {
+                /*
+                const arg = s.get('STRING');
+
+                // Only generate when `-d` flag is passed to compiler
+                if (this.debug) {
+
+                    if (arg.value.length > 128 - 4) {
+                        // TODO error
+                    }
+
+                    // TODO genrate data entry instead
+                    const opcodes = [
+                        0x52, // ld      d,d
+                        0x18, // jr @+4+LEN(message)
+                        4 + arg.value.length,
+                        0x64, // DW $6464
+                        0x64,
+                        0x00, // DW $0000
+                        0x00
+                    ];
+
+                    for(let i = 0, l = arg.value.length; i < l; i++) {
+                        opcodes.push(arg.value.charCodeAt(i));
+                    }
+                    this.instruction(4 + 12, opcodes);
+
+                }*/
+
+            },
+            "brk" => {
+                // this.instruction(4, [0x40]);
+            },
+
+            // Mulitply / Divide Shorthands
+            "mul" => {
+                // TODO enforce multiple of 2 arguments later on
+            },
+            "div" => {
+                // TODO enforce multiple of 2 arguments later on
+            },
+
+            // Increment Memory Address Shorthands
+            "incx" => {
+                // incx [someLabel]
+            },
+            "decx" => {
+                // decx [someLabel]
+            },
+
+            // 16 Bit Addition / Subtraction Shorthands
+            "addw" => {
+                // addw hl,a
+                // addw hl,b-l
+                // addw hl,$FF
+            },
+            "subw" => {
+                // subw hl,a
+                // subw hl,b-l
+                // subw hl,$FF
+            },
+
+            // Extended Memory Loads using the Accumulator as an intermediate
+            "ldxa" => {
+                // ldxa   [hli],b
+                // ldxa   [hli],c
+                // ldxa   [hli],d
+                // ldxa   [hli],e
+                // ldxa   [hli],h
+                // ldxa   [hli],l
+                // ldxa   [hld],b
+                // ldxa   [hld],c
+                // ldxa   [hld],d
+                // ldxa   [hld],e
+                // ldxa   [hld],h
+                // ldxa   [hld],l
+                // ldxa   [someLabel],hl (h = low + l = high)
+                // ldxa   [someLabel],de
+                // ldxa   [someLabel],bc
+                // ldxa   [someLabel],i8
+                // ldxa   [someLabel],b
+                // ldxa   [someLabel],c
+                // ldxa   [someLabel],d
+                // ldxa   [someLabel],e
+                // ldxa   [someLabel],h
+                // ldxa   [someLabel],l
+                // ldxa   [someLabel],[hli]
+                // ldxa   [someLabel],[hld]
+                // ldxa   [someLabel],[someLabel]
+
+            },
+
+            // Return Shorthands
+            "retx" => {
+                // retx a,[hl]
+                // retx a,[bc]
+                // retx a,[de]
+                // retx a,[someLabel]
+                // retx b
+                // retx c
+                // retx d
+                // retx e
+                // retx h
+                // retx l
+                // retx $ff
+            },
+
+            // VBlank Wait Shorthand
+            "vsync" => {
+                /*
+                // ld      a,[$FF41]
+                this._mnemonic = 'ld';
+                this.instruction(16, [0xFA], {
+                    type: 'NUMBER',
+                    value: 0xFF41
+                });
+
+                // and     %00000010
+                this._mnemonic = 'and';
+                this.instruction(8, [0xE6], {
+                    type: 'NUMBER',
+                    value: 2
+
+                }, true);
+
+                // jr      nz,@-4
+                this._mnemonic = 'jr';
+                this.instruction(12, [0x20], {
+                    type: 'OFFSET',
+                    value: -4,
+
+                }, true, true);
+                */
+            },
+            _ => unreachable!()
+        };
+        unreachable!();
     }
 
     fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, LexerError> {
