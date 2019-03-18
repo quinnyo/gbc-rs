@@ -58,7 +58,6 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
 }, {
     // Constant + EQU|EQUS + ConstExpression
     Constant {
-        name => String,
         is_string => bool,
         value => DataExpression
     },
@@ -121,7 +120,6 @@ impl EntryStage {
                         tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
                         if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
                             EntryToken::Constant {
-                                name: inner.value.clone(),
                                 inner,
                                 is_string: false,
                                 value: (id, expr)
@@ -135,7 +133,6 @@ impl EntryStage {
                         tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
                         if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
                             EntryToken::Constant {
-                                name: inner.value.clone(),
                                 inner,
                                 is_string: true,
                                 value: (id, expr)
@@ -154,7 +151,7 @@ impl EntryStage {
                     Self::parse_instruction(&mut tokens, layouts, inner)?
                 },
 
-                ExpressionToken::MetaInstruction(inner) => {
+                ExpressionToken::MetaInstruction(_inner) => {
                     //Self::parse_meta_instruction(&mut tokens, inner)?;
                     continue;
                 },
@@ -394,7 +391,7 @@ impl EntryStage {
     }
 
     fn parse_meta_instruction(
-        tokens: &mut TokenIterator<ExpressionToken>,
+        _tokens: &mut TokenIterator<ExpressionToken>,
         inner: InnerToken
 
     ) -> Result<EntryToken, LexerError> {
@@ -754,13 +751,11 @@ mod test {
     fn test_const_declaration_equ() {
         assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            name: "foo".to_string(),
             is_string: false,
             value: (0, Expression::Value(ExpressionValue::Integer(2)))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            name: "foo".to_string(),
             is_string: false,
             value: (0, Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
@@ -773,13 +768,11 @@ mod test {
     fn test_const_declaration_equs() {
         assert_eq!(tfe("foo EQUS 'test'"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            name: "foo".to_string(),
             is_string: true,
             value: (0, Expression::Value(ExpressionValue::String("test".to_string())))
         }]);
         assert_eq!(tfe("foo EQUS bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            name: "foo".to_string(),
             is_string: true,
             value: (0, Expression::Value(ExpressionValue::ConstantValue(
                 itk!(9, 12, "bar"),

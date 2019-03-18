@@ -499,7 +499,6 @@ impl ValueStage {
 
         }
         Ok(())
-
     }
 
     fn verify_local_label_refs_under_global(
