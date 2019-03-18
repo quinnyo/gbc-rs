@@ -735,7 +735,7 @@ mod test {
             name: "global_label".to_string()
 
         }, EntryToken::LocalLabelDef {
-            inner: itk!(14, 27, "."),
+            inner: itk!(14, 27, "local_label"),
             name: "local_label".to_string()
         }]);
     }

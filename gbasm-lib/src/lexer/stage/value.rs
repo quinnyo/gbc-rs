@@ -296,6 +296,7 @@ impl ValueStage {
 
                         } else {
                             inner.end_index = colon.end_index;
+                            inner.value = name.clone();
                             local_labels.insert(name.clone(), inner.clone());
 
                             ValueToken::LocalLabelDef {
@@ -311,6 +312,7 @@ impl ValueStage {
                         )));
 
                     } else {
+                        inner.value = name.clone();
                         inner.end_index = name_token.end_index;
                         ValueToken::LocalLabelRef {
                             inner,
@@ -863,11 +865,11 @@ mod test {
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 27, "."),
+            inner: itk!(14, 27, "local_label"),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(28, 47, "."),
+            inner: itk!(28, 47, "local_other_label"),
             name: "local_other_label".to_string()
         }]);
     }
@@ -879,7 +881,7 @@ mod test {
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 20, "."),
+            inner: itk!(14, 20, "stop"),
             name: "stop".to_string()
         }]);
     }
@@ -891,7 +893,7 @@ mod test {
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 18, "."),
+            inner: itk!(14, 18, "DS"),
             name: "DS".to_string()
         }]);
     }
@@ -903,11 +905,11 @@ mod test {
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 27, "."),
+            inner: itk!(14, 27, "local_label"),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelRef {
-            inner: itk!(28, 40, "."),
+            inner: itk!(28, 40, "local_label"),
             name: "local_label".to_string()
         }]);
 
@@ -916,7 +918,7 @@ mod test {
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(14, 27, "."),
+            inner: itk!(14, 27, "local_label"),
             name: "local_label".to_string()
 
         }, ValueToken::BuiltinCall(
@@ -924,7 +926,7 @@ mod test {
             vec![
                 vec![
                     ValueToken::LocalLabelRef {
-                        inner: itf!(33, 45, ".", 0),
+                        inner: itf!(33, 45, "local_label", 0),
                         name: "local_label".to_string()
                     }
                 ]
@@ -939,11 +941,11 @@ mod test {
             name: "global_label".to_string()
 
         }, ValueToken::LocalLabelRef {
-            inner: itk!(14, 26, "."),
+            inner: itk!(14, 26, "local_label"),
             name: "local_label".to_string()
 
         }, ValueToken::LocalLabelDef {
-            inner: itk!(27, 40, "."),
+            inner: itk!(27, 40, "local_label"),
             name: "local_label".to_string()
         }]);
 
@@ -956,13 +958,13 @@ mod test {
             vec![
                 vec![
                     ValueToken::LocalLabelRef {
-                        inner: itf!(19, 31, ".", 0),
+                        inner: itf!(19, 31, "local_label", 0),
                         name: "local_label".to_string()
                     }
                 ]
             ]
         ), ValueToken::LocalLabelDef {
-            inner: itk!(33, 46, "."),
+            inner: itk!(33, 46, "local_label"),
             name: "local_label".to_string()
         }]);
 
@@ -970,7 +972,6 @@ mod test {
 
     #[test]
     fn test_local_label_ref_forward_macro_intercept() {
-        // TODO error test so show that locals do not leak out of macros
         assert_eq!(
             tfv("global_label:\n.local_label\nFOO()\n.local_label:\nMACRO FOO()\n_macro_label:\n.macro_local\n.macro_local:ENDMACRO"), vec![
             ValueToken::GlobalLabelDef {
@@ -978,7 +979,7 @@ mod test {
                 name: "global_label".to_string()
 
             }, ValueToken::LocalLabelRef {
-                inner: itk!(14, 26, "."),
+                inner: itk!(14, 26, "local_label"),
                 name: "local_label".to_string()
 
             }, ValueToken::GlobalLabelDef {
@@ -986,15 +987,15 @@ mod test {
                 name: "_macro_label_from_macro_call_0_file_local_0".to_string()
 
             }, ValueToken::LocalLabelRef {
-                inner: itkm!(73, 85, ".", 0),
+                inner: itkm!(73, 85, "macro_local_from_macro_call_0", 0),
                 name: "macro_local_from_macro_call_0".to_string()
 
             }, ValueToken::LocalLabelDef {
-                inner: itkm!(86, 99, ".", 0),
+                inner: itkm!(86, 99, "macro_local_from_macro_call_0", 0),
                 name: "macro_local_from_macro_call_0".to_string()
 
             }, ValueToken::LocalLabelDef {
-                inner: itk!(33, 46, "."),
+                inner: itk!(33, 46, "local_label"),
                 name: "local_label".to_string()
             }
         ]);
@@ -1013,11 +1014,11 @@ mod test {
                 name: "macro_label_def_from_macro_call_0".to_string()
             },
             ValueToken::LocalLabelDef {
-                inner: itkm!(41, 64, ".", 0),
+                inner: itkm!(41, 64, "local_macro_label_def_from_macro_call_0", 0),
                 name: "local_macro_label_def_from_macro_call_0".to_string()
             },
             ValueToken::LocalLabelRef {
-                inner: itkm!(65, 87, ".", 0),
+                inner: itkm!(65, 87, "local_macro_label_def_from_macro_call_0", 0),
                 name: "local_macro_label_def_from_macro_call_0".to_string()
             },
             ValueToken::GlobalLabelDef {
@@ -1025,11 +1026,11 @@ mod test {
                 name: "macro_label_def_from_macro_call_1".to_string()
             },
             ValueToken::LocalLabelDef {
-                inner: itkm!(41, 64, ".", 1),
+                inner: itkm!(41, 64, "local_macro_label_def_from_macro_call_1", 1),
                 name: "local_macro_label_def_from_macro_call_1".to_string()
             },
             ValueToken::LocalLabelRef {
-                inner: itkm!(65, 87, ".", 1),
+                inner: itkm!(65, 87, "local_macro_label_def_from_macro_call_1", 1),
                 name: "local_macro_label_def_from_macro_call_1".to_string()
             }
         ]);

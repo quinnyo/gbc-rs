@@ -683,7 +683,7 @@ mod test {
                 name: "global_label".to_string()
             },
             ExpressionToken::LocalLabelDef {
-                inner: itk!(14, 27, "."),
+                inner: itk!(14, 27, "local_label"),
                 name: "local_label".to_string()
             },
             ExpressionToken::Expression(
@@ -694,7 +694,7 @@ mod test {
                     name: "CEIL".to_string(),
                     args: vec![
                         Expression::Value(ExpressionValue::LocalLabelAddress(
-                            itk!(33, 45, "."),
+                            itk!(33, 45, "local_label"),
                             "local_label".to_string()
                         ))
                     ]
@@ -740,14 +740,14 @@ mod test {
                 name: "global_label".to_string()
             },
             ExpressionToken::LocalLabelDef {
-                inner: itk!(14, 27, "."),
+                inner: itk!(14, 27, "local_label"),
                 name: "local_label".to_string()
             },
             ExpressionToken::Expression(
-                itk!(28, 40, "."),
+                itk!(28, 40, "local_label"),
                 0,
                 Expression::Value(ExpressionValue::LocalLabelAddress (
-                    itk!(28, 40, "."),
+                    itk!(28, 40, "local_label"),
                     "local_label".to_string()
                 ))
             )
