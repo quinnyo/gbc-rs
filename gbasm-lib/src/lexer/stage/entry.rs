@@ -375,7 +375,6 @@ impl EntryStage {
 
         } else if let Some(op_code) = layouts.get(&(inner.value.clone(), layout)) {
             if let Some(expression) = expression {
-                // TODO extended instruction when op_code > 255
                 Ok(EntryToken::InstructionWithArg(inner, *op_code, expression))
 
             } else {
@@ -1081,7 +1080,6 @@ mod test {
 
     #[test]
     fn test_instructions() {
-        // TODO re-adjust and verify RST instructions on code gen
         // RST base = 199
         assert_op!(0, "nop");
         assert_op!(1, "ld bc,$1234", 4660);
@@ -1344,7 +1342,6 @@ mod test {
 
     #[test]
     fn test_instructions_ex() {
-        // TODO re-adjust and verify BIT, SET, RES instructions on code gen
         assert_op!(256, "rlc b");
         assert_op!(257, "rlc c");
         assert_op!(258, "rlc d");

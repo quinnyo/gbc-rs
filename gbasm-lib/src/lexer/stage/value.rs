@@ -134,20 +134,6 @@ impl Operator {
 
 }
 
-#[derive(Debug, Clone)]
-enum LocalLabelRef {
-    Global {
-        index: usize,
-        target: usize
-    },
-    InsideCall {
-        index: usize,
-        arg_index: usize,
-        inner_index: usize,
-        target: usize
-    }
-}
-
 // Value Level Lexer Implementation -------------------------------------------
 pub struct ValueStage;
 impl LexerStage for ValueStage {
@@ -165,25 +151,13 @@ impl LexerStage for ValueStage {
         let mut global_labels: HashMap<(String, Option<usize>), (InnerToken, usize)> = HashMap::new();
         let mut global_labels_names: Vec<String> = Vec::new();
         let mut unique_label_id = 0;
-
-        let mut tokens = Self::parse_tokens(
+        Self::convert_local_labels_refs(Self::parse_tokens(
             &mut global_labels,
             &mut global_labels_names,
             &mut unique_label_id,
             false,
             tokens
-        )?;
-
-        // Verify and assign IDs to local label references
-        let mut global_label_map = HashMap::new();
-        let mut local_label_map = Vec::new();
-        Self::assign_and_verify_local_label_refs(
-            &mut tokens,
-            &mut global_label_map,
-            &mut local_label_map,
-            None
-        )?;
-        Ok(tokens)
+        )?)
     }
 
 }
@@ -275,95 +249,20 @@ impl ValueStage {
                         ValueToken::Name(inner)
                     }
                 },
-                MacroToken::Point(mut inner) => {
-
-                    // For local labels all kinds of names are allowed
-                    let name_token = if tokens.peek_is(TokenType::Instruction, None) {
-                        tokens.expect(TokenType::Instruction, None, "when parsing local label")?.into_inner()
-
-                    } else if tokens.peek_is(TokenType::Reserved, None) {
-                        tokens.expect(TokenType::Reserved, None, "when parsing local label")?.into_inner()
-
-                    } else {
-                        tokens.expect(TokenType::Name, None, "when parsing local label")?.into_inner()
-                    };
-
-                    // Postfix labels created by macros calls so they are unique
-                    let name = if let Some(call_id) = name_token.macro_call_id() {
-                        format!("{}_from_macro_call_{}", name_token.value, call_id)
-
-                    } else {
-                        name_token.value.to_string()
-                    };
-
-                    if tokens.peek_is(TokenType::Colon, None) {
-                        let colon = tokens.expect(TokenType::Colon, None, "when parsing local label definition")?.into_inner();
-                        if global_labels.is_empty() {
-                            return Err(inner.error(format!(
-                                "Unexpected definition of local label \"{}\" before any global label was defined.",
-                                name_token.value
-                            )));
-
-                        } else if let Some(previous) = local_labels.get(&name) {
-                            return Err(inner.error(format!(
-                                "Local label \"{}\" was already defined under the current global label \"{}\".",
-                                name,
-                                global_labels_names.last().unwrap()
-
-                            )).with_reference(previous, "Original definition of local label was"));
-
-                        } else if is_argument {
-                            return Err(inner.error("Local label cannot be defined inside an argument list".to_string()));
-
-                        } else {
-                            inner.end_index = colon.end_index;
-                            inner.value = name.clone();
-                            local_labels.insert(name.clone(), inner.clone());
-
-                            *unique_label_id += 1;
-                            ValueToken::LocalLabelDef(inner, *unique_label_id)
-                        }
-
-                    } else if global_labels.is_empty() {
-                        return Err(inner.error(format!(
-                            "Unexpected reference to local label \"{}\" before any global label was defined.",
-                            name_token.value
-                        )));
-
-                    } else {
-                        inner.value = name.clone();
-                        inner.end_index = name_token.end_index;
-                        ValueToken::LocalLabelRef(inner, 0)
-                    }
-                },
+                MacroToken::Point(inner) => Self::parse_local_label(
+                    &mut tokens,
+                    global_labels,
+                    global_labels_names,
+                    unique_label_id,
+                    is_argument,
+                    &mut local_labels,
+                    inner
+                )?,
                 MacroToken::Offset(inner) => ValueToken::Offset {
                     value: Self::parse_integer(&inner, 0, 10)?,
                     inner
                 },
-                MacroToken::NumberLiteral(inner) => {
-                    match inner.value.chars().next().unwrap() {
-                        '$' => ValueToken::Integer {
-                            value: Self::parse_integer(&inner, 1, 16)?,
-                            inner
-                        },
-                        '%' => ValueToken::Integer {
-                            value: Self::parse_integer(&inner, 1, 2)?,
-                            inner
-                        },
-                        _ => if inner.value.contains('.') {
-                            ValueToken::Float {
-                                value: OrderedFloat::from(Self::parse_float(&inner)?),
-                                inner
-                            }
-
-                        } else {
-                            ValueToken::Integer {
-                                value: Self::parse_integer(&inner, 0, 10)?,
-                                inner
-                            }
-                        }
-                    }
-                },
+                MacroToken::NumberLiteral(inner) => Self::parse_number_literal(inner)?,
                 MacroToken::StringLiteral(inner) => ValueToken::String {
                     value: inner.value.clone(),
                     inner
@@ -396,148 +295,6 @@ impl ValueStage {
 
         // Convert name tokens into corresponding global label references
         Ok(Self::convert_global_label_refs(&global_labels, value_tokens))
-    }
-
-    fn assign_and_verify_local_label_refs(
-        tokens: &mut [ValueToken],
-        global_label_map: &mut HashMap<
-            Option<usize>,
-            Option<(usize, Vec<(String, usize)>, Vec<(String, usize, Option<(usize, usize)>)>)>
-        >,
-        local_label_refs: &mut Vec<LocalLabelRef>,
-        call_parent: Option<(usize, usize)>
-
-    ) -> Result<(), LexerError> {
-        let mut error = None;
-        for (index, token) in tokens.iter_mut().enumerate() {
-            match token {
-                ValueToken::GlobalLabelDef(inner, _) if call_parent.is_none() => {
-                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
-                    if let Err(e) = Self::verify_local_label_refs_under_global(global_label.take(), local_label_refs) {
-                        error = Some(e);
-                        break;
-                    }
-                    *global_label = Some((index, Vec::new(), Vec::new()));
-                },
-                ValueToken::LocalLabelDef(inner, id) => {
-                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
-                    if let Some(global_label) = global_label.as_mut() {
-                        global_label.1.push((inner.value.clone(), *id));
-                    }
-                },
-                ValueToken::LocalLabelRef(inner, _) => {
-                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
-                    if let Some(global_label) = global_label.as_mut() {
-                        global_label.2.push((inner.value.clone(), index, call_parent));
-                    }
-                },
-                ValueToken::BuiltinCall(_, arguments) => {
-                    for (arg_index, arg_tokens) in arguments.iter_mut().enumerate() {
-                        Self::assign_and_verify_local_label_refs(
-                            arg_tokens,
-                            global_label_map,
-                            local_label_refs,
-                            Some((index, arg_index))
-                        )?;
-                    }
-                },
-                _ => {}
-            }
-        }
-
-        if call_parent.is_none() {
-
-            for (_, mut global_label) in global_label_map.drain() {
-                if let Err(e) = Self::verify_local_label_refs_under_global(global_label.take(), local_label_refs) {
-                    error = Some(e);
-                    break;
-                }
-            }
-
-            if let Some(error) = error {
-                let parent = tokens[error.1].inner();
-                let label = if let Some((index, arg_index)) = error.2 {
-                    if let Some(ValueToken::BuiltinCall(_, ref arguments)) = tokens.get(index) {
-                        arguments[arg_index][error.0].inner()
-
-                    } else {
-                        unreachable!();
-                    }
-
-                } else {
-                    tokens[error.0].inner()
-                };
-                return Err(label.error(format!(
-                    "Reference to unknown local label \"{}\", not defined under the current global label \"{}\".",
-                    label.value,
-                    parent.value
-
-                )).with_reference(parent, "Definition of global label was"));
-            }
-
-            for r in local_label_refs.drain(0..) {
-                match r {
-                    LocalLabelRef::Global { index, target } => {
-                        if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = tokens.get_mut(index) {
-                            *id = target;
-                            continue;
-                        }
-                    },
-                    LocalLabelRef::InsideCall { index, arg_index, inner_index, target} => {
-                        if let Some(ValueToken::BuiltinCall(_, ref mut arguments)) = tokens.get_mut(index) {
-                            if let Some(arg_tokens) = arguments.get_mut(arg_index) {
-                                if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = arg_tokens.get_mut(inner_index) {
-                                    *id = target;
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                }
-                unreachable!("Invalid local label ref generated: {:?}", r);
-            }
-
-        }
-        Ok(())
-    }
-
-    fn verify_local_label_refs_under_global(
-        global_label: Option<(usize, Vec<(String, usize)>, Vec<(String, usize, Option<(usize, usize)>)>)>,
-        local_label_refs: &mut Vec<LocalLabelRef>
-
-    ) -> Result<(), (usize, usize, Option<(usize, usize)>)> {
-
-        // Check local labels under previous label
-        if let Some((previous_index, local_defs, local_refs)) = global_label {
-            for (ref_name, token_index, call_parent) in &local_refs {
-                let mut label_exists = false;
-                for (def_name, label_id) in &local_defs {
-                    if def_name == ref_name {
-                        label_exists = true;
-                        if let Some((index, arg_index)) = call_parent {
-                            local_label_refs.push(LocalLabelRef::InsideCall {
-                                index: *index,
-                                arg_index: *arg_index,
-                                inner_index: *token_index,
-                                target: *label_id
-                            });
-
-                        } else {
-                            local_label_refs.push(LocalLabelRef::Global{
-                                index: *token_index,
-                                target: *label_id
-                            });
-                        }
-                        break;
-                    }
-                }
-                if !label_exists {
-                    return Err((*token_index, previous_index, *call_parent));
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn convert_global_label_refs(
@@ -586,6 +343,101 @@ impl ValueStage {
         } else {
             (name, None)
         }
+    }
+
+    fn parse_local_label(
+        tokens: &mut TokenIterator<MacroToken>,
+        global_labels: &mut HashMap<(String, Option<usize>), (InnerToken, usize)>,
+        global_labels_names: &mut Vec<String>,
+        unique_label_id: &mut usize,
+        is_argument: bool,
+        local_labels: &mut HashMap<String, InnerToken>,
+        mut inner: InnerToken
+
+    ) -> Result<ValueToken, LexerError> {
+        // For local labels all kinds of names are allowed
+        let name_token = if tokens.peek_is(TokenType::Instruction, None) {
+            tokens.expect(TokenType::Instruction, None, "when parsing local label")?.into_inner()
+
+        } else if tokens.peek_is(TokenType::Reserved, None) {
+            tokens.expect(TokenType::Reserved, None, "when parsing local label")?.into_inner()
+
+        } else {
+            tokens.expect(TokenType::Name, None, "when parsing local label")?.into_inner()
+        };
+
+        // Postfix labels created by macros calls so they are unique
+        let name = if let Some(call_id) = name_token.macro_call_id() {
+            format!("{}_from_macro_call_{}", name_token.value, call_id)
+
+        } else {
+            name_token.value.to_string()
+        };
+
+        if tokens.peek_is(TokenType::Colon, None) {
+            let colon = tokens.expect(TokenType::Colon, None, "when parsing local label definition")?.into_inner();
+            if global_labels.is_empty() {
+                Err(inner.error(format!(
+                    "Unexpected definition of local label \"{}\" before any global label was defined.",
+                    name_token.value
+                )))
+
+            } else if let Some(previous) = local_labels.get(&name) {
+                Err(inner.error(format!(
+                    "Local label \"{}\" was already defined under the current global label \"{}\".",
+                    name,
+                    global_labels_names.last().unwrap()
+
+                )).with_reference(previous, "Original definition of local label was"))
+
+            } else if is_argument {
+                Err(inner.error("Local label cannot be defined inside an argument list".to_string()))
+
+            } else {
+                inner.end_index = colon.end_index;
+                inner.value = name.clone();
+                local_labels.insert(name.clone(), inner.clone());
+
+                *unique_label_id += 1;
+                Ok(ValueToken::LocalLabelDef(inner, *unique_label_id))
+            }
+
+        } else if global_labels.is_empty() {
+            Err(inner.error(format!(
+                "Unexpected reference to local label \"{}\" before any global label was defined.",
+                name_token.value
+            )))
+
+        } else {
+            inner.value = name.clone();
+            inner.end_index = name_token.end_index;
+            Ok(ValueToken::LocalLabelRef(inner, 0))
+        }
+    }
+
+    fn parse_number_literal(inner: InnerToken) -> Result<ValueToken, LexerError> {
+        Ok(match inner.value.chars().next().unwrap() {
+            '$' => ValueToken::Integer {
+                value: Self::parse_integer(&inner, 1, 16)?,
+                inner
+            },
+            '%' => ValueToken::Integer {
+                value: Self::parse_integer(&inner, 1, 2)?,
+                inner
+            },
+            _ => if inner.value.contains('.') {
+                ValueToken::Float {
+                    value: OrderedFloat::from(Self::parse_float(&inner)?),
+                    inner
+                }
+
+            } else {
+                ValueToken::Integer {
+                    value: Self::parse_integer(&inner, 0, 10)?,
+                    inner
+                }
+            }
+        })
     }
 
     fn parse_integer(inner: &InnerToken, from: usize, radix: u32) -> Result<i32, LexerError> {
@@ -637,6 +489,177 @@ impl ValueStage {
         }
     }
 
+}
+
+
+// Local Label Reference Handling ---------------------------------------------
+#[derive(Debug, Clone)]
+enum LocalLabelRef {
+    Global {
+        index: usize,
+        target: usize
+    },
+    InsideCall {
+        index: usize,
+        arg_index: usize,
+        inner_index: usize,
+        target: usize
+    }
+}
+
+type GlobalLabelEntry = Option<(usize, Vec<(String, usize)>, Vec<(String, usize, LocalCallIndex)>)>;
+type LocalCallIndex = Option<(usize, usize)>;
+type LocalLabelError = (usize, usize, LocalCallIndex);
+
+impl ValueStage {
+    fn convert_local_labels_refs(mut tokens: Vec<ValueToken>) -> Result<Vec<ValueToken>, LexerError> {
+
+        let mut global_label_map = HashMap::new();
+        let mut local_label_refs = Vec::new();
+        let mut error = Self::inner_assign_and_verify_local_label_refs(
+            &mut tokens,
+            &mut global_label_map,
+            &mut local_label_refs,
+            None
+        );
+
+        // Verify any open global label scopes
+        for (_, mut global_label) in global_label_map.drain() {
+            if let Some(e) = Self::verify_local_label_refs_under_global(global_label.take(), &mut local_label_refs) {
+                error = Some(e);
+                break;
+            }
+        }
+
+        // Handle Errors
+        if let Some(error) = error {
+            let parent = tokens[error.1].inner();
+            let label = if let Some((index, arg_index)) = error.2 {
+                if let Some(ValueToken::BuiltinCall(_, ref arguments)) = tokens.get(index) {
+                    arguments[arg_index][error.0].inner()
+
+                } else {
+                    unreachable!();
+                }
+
+            } else {
+                tokens[error.0].inner()
+            };
+            return Err(label.error(format!(
+                "Reference to unknown local label \"{}\", not defined under the current global label \"{}\".",
+                label.value,
+                parent.value
+
+            )).with_reference(parent, "Definition of global label was"));
+        }
+
+        // Set target label ID of all local label references
+        for r in local_label_refs.drain(0..) {
+            match r {
+                LocalLabelRef::Global { index, target } => {
+                    if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = tokens.get_mut(index) {
+                        *id = target;
+                        continue;
+                    }
+                },
+                LocalLabelRef::InsideCall { index, arg_index, inner_index, target} => {
+                    if let Some(ValueToken::BuiltinCall(_, ref mut arguments)) = tokens.get_mut(index) {
+                        if let Some(arg_tokens) = arguments.get_mut(arg_index) {
+                            if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = arg_tokens.get_mut(inner_index) {
+                                *id = target;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            unreachable!("Invalid local label ref generated: {:?}", r);
+        }
+
+        Ok(tokens)
+    }
+
+    fn inner_assign_and_verify_local_label_refs(
+        tokens: &mut [ValueToken],
+        global_label_map: &mut HashMap<Option<usize>, GlobalLabelEntry>,
+        local_label_refs: &mut Vec<LocalLabelRef>,
+        call_parent: LocalCallIndex
+
+    ) -> Option<LocalLabelError> {
+        for (index, token) in tokens.iter_mut().enumerate() {
+            match token {
+                ValueToken::GlobalLabelDef(inner, _) if call_parent.is_none() => {
+                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
+                    if let Some(error) = Self::verify_local_label_refs_under_global(global_label.take(), local_label_refs) {
+                        return Some(error);
+                    }
+                    *global_label = Some((index, Vec::new(), Vec::new()));
+                },
+                ValueToken::LocalLabelDef(inner, id) => {
+                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
+                    if let Some(global_label) = global_label.as_mut() {
+                        global_label.1.push((inner.value.clone(), *id));
+                    }
+                },
+                ValueToken::LocalLabelRef(inner, _) => {
+                    let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
+                    if let Some(global_label) = global_label.as_mut() {
+                        global_label.2.push((inner.value.clone(), index, call_parent));
+                    }
+                },
+                ValueToken::BuiltinCall(_, arguments) => {
+                    for (arg_index, arg_tokens) in arguments.iter_mut().enumerate() {
+                        if let Some(error) = Self::inner_assign_and_verify_local_label_refs(
+                            arg_tokens,
+                            global_label_map,
+                            local_label_refs,
+                            Some((index, arg_index))
+                        ) {
+                            return Some(error);
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn verify_local_label_refs_under_global(
+        global_label: GlobalLabelEntry,
+        local_label_refs: &mut Vec<LocalLabelRef>
+
+    ) -> Option<LocalLabelError> {
+        if let Some((previous_index, local_defs, local_refs)) = global_label {
+            for (ref_name, token_index, call_parent) in &local_refs {
+                let mut label_exists = false;
+                for (def_name, label_id) in &local_defs {
+                    if def_name == ref_name {
+                        label_exists = true;
+                        if let Some((index, arg_index)) = call_parent {
+                            local_label_refs.push(LocalLabelRef::InsideCall {
+                                index: *index,
+                                arg_index: *arg_index,
+                                inner_index: *token_index,
+                                target: *label_id
+                            });
+
+                        } else {
+                            local_label_refs.push(LocalLabelRef::Global{
+                                index: *token_index,
+                                target: *label_id
+                            });
+                        }
+                        break;
+                    }
+                }
+                if !label_exists {
+                    return Some((*token_index, previous_index, *call_parent));
+                }
+            }
+        }
+        None
+    }
 }
 
 
