@@ -14,6 +14,10 @@ use super::value::{Operator, ValueToken};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
+// Constants
+pub const TEMPORARY_EXPRESSION_ID: usize = ::std::u32::MAX as usize;
+
+
 // Expression Specific Tokens -------------------------------------------------
 lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     Constant(()),
@@ -178,7 +182,7 @@ impl ExpressionStage {
 
 
 // Expression Abstraction -----------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ExpressionValue {
     ConstantValue(InnerToken, String),
     Integer(i32),
@@ -200,7 +204,7 @@ impl ExpressionValue {
 
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Expression {
     Binary {
         op: Operator,

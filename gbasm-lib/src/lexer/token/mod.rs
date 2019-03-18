@@ -92,6 +92,8 @@ pub enum TokenType {
     // Entry Tokens
     Data,
     InstructionWithArg,
+    DebugInstruction,
+    DebugInstructionWithArg,
     SectionDeclaration
 
 }

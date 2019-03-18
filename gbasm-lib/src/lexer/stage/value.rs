@@ -58,7 +58,7 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
 
 
 // Types ----------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Operator {
     ShiftRight,
     ShiftLeft,

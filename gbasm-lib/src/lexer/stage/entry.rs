@@ -5,7 +5,7 @@ use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ExpressionStage;
-use super::expression::{ExpressionToken, Expression};
+use super::expression::{ExpressionToken, Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
 
@@ -52,6 +52,8 @@ pub enum DataStorage {
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
     Instruction((usize)),
     InstructionWithArg((usize, DataExpression)),
+    DebugInstruction((usize)),
+    DebugInstructionWithArg((usize, DataExpression)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))
 
@@ -147,14 +149,11 @@ impl EntryStage {
                 },
 
                 // Instructions
-                ExpressionToken::Instruction(inner) => {
-                    Self::parse_instruction(&mut tokens, layouts, inner)?
-                },
-
-                ExpressionToken::MetaInstruction(_inner) => {
-                    //Self::parse_meta_instruction(&mut tokens, inner)?;
+                ExpressionToken::Instruction(inner) => Self::parse_instruction(&mut tokens, layouts, inner)?,
+                ExpressionToken::MetaInstruction(inner) => {
+                    entry_tokens.append(&mut Self::parse_meta_instruction(&mut tokens, inner)?);
                     continue;
-                },
+                }
 
                 // Binary Data Declarations
                 ExpressionToken::BinaryFile(inner, bytes) => {
@@ -390,15 +389,19 @@ impl EntryStage {
     }
 
     fn parse_meta_instruction(
-        _tokens: &mut TokenIterator<ExpressionToken>,
+        tokens: &mut TokenIterator<ExpressionToken>,
         inner: InnerToken
 
-    ) -> Result<EntryToken, LexerError> {
-        match inner.value.as_str() {
+    ) -> Result<Vec<EntryToken>, LexerError> {
+        Ok(match inner.value.as_str() {
 
             // BGB debugging support
-            // TODO allow to specify debug only instructions / data blocks
             "msg" => {
+                // TODO RomStage or something should drop debug instructions without -D flag
+                // TODO enforce string literal only expression directly?
+                vec![
+
+                ]
                 /*
                 const arg = s.get('STRING');
 
@@ -406,7 +409,7 @@ impl EntryStage {
                 if (this.debug) {
 
                     if (arg.value.length > 128 - 4) {
-                        // TODO error
+                        // TODO error for text that is too long
                     }
 
                     // TODO genrate data entry instead
@@ -426,38 +429,61 @@ impl EntryStage {
                     this.instruction(4 + 12, opcodes);
 
                 }*/
-
             },
             "brk" => {
-                // this.instruction(4, [0x40]);
+                // TODO RomStage or something should drop debug instructions without -D flag
+                // ld b,b
+                vec![EntryToken::DebugInstruction(inner, 0x40)]
             },
 
             // Mulitply / Divide Shorthands
             "mul" => {
-                // TODO enforce multiple of 2 arguments later on
+                // TODO enforce integer arg with power of 2 directly?
+                unreachable!();
             },
             "div" => {
-                // TODO enforce multiple of 2 arguments later on
+                // TODO enforce integer arg with power of 2 directly?
+                unreachable!();
             },
 
             // Increment Memory Address Shorthands
             "incx" => {
-                // incx [someLabel]
+                // decx [expr]
+                let expr = Self::parse_meta_bracket_label(tokens)?;
+                vec![
+                    // ld a,[someLabel]
+                    EntryToken::InstructionWithArg(inner.clone(), 0xFA, expr.clone()),
+                    // inc a
+                    EntryToken::Instruction(inner.clone(), 0x3C),
+                    // ld [someLabel],a
+                    EntryToken::InstructionWithArg(inner.clone(), 0xEA, expr),
+                ]
             },
             "decx" => {
-                // decx [someLabel]
+                // decx [expr]
+                let expr = Self::parse_meta_bracket_label(tokens)?;
+                vec![
+                    // ld a,[someLabel]
+                    EntryToken::InstructionWithArg(inner.clone(), 0xFA, expr.clone()),
+                    // dec a
+                    EntryToken::Instruction(inner.clone(), 0x3D),
+                    // ld [someLabel],a
+                    EntryToken::InstructionWithArg(inner.clone(), 0xEA, expr),
+                ]
             },
 
             // 16 Bit Addition / Subtraction Shorthands
             "addw" => {
-                // addw hl,a
-                // addw hl,b-l
-                // addw hl,$FF
+                // TODO bc, de, hl
+                // addw xx,a
+                // addw xx,$FF
+                unreachable!();
             },
             "subw" => {
-                // subw hl,a
-                // subw hl,b-l
-                // subw hl,$FF
+                // TODO bc, de, hl
+                // subw xx,a
+                // subw xx,$FF
+                unreachable!();
             },
 
             // Extended Memory Loads using the Accumulator as an intermediate
@@ -487,6 +513,7 @@ impl EntryStage {
                 // ldxa   [someLabel],[hli]
                 // ldxa   [someLabel],[hld]
                 // ldxa   [someLabel],[someLabel]
+                unreachable!();
 
             },
 
@@ -496,6 +523,7 @@ impl EntryStage {
                 // retx a,[bc]
                 // retx a,[de]
                 // retx a,[someLabel]
+                //
                 // retx b
                 // retx c
                 // retx d
@@ -503,38 +531,34 @@ impl EntryStage {
                 // retx h
                 // retx l
                 // retx $ff
+                unreachable!();
             },
 
             // VBlank Wait Shorthand
             "vsync" => {
-                /*
-                // ld      a,[$FF41]
-                this._mnemonic = 'ld';
-                this.instruction(16, [0xFA], {
-                    type: 'NUMBER',
-                    value: 0xFF41
-                });
-
-                // and     %00000010
-                this._mnemonic = 'and';
-                this.instruction(8, [0xE6], {
-                    type: 'NUMBER',
-                    value: 2
-
-                }, true);
-
-                // jr      nz,@-4
-                this._mnemonic = 'jr';
-                this.instruction(12, [0x20], {
-                    type: 'OFFSET',
-                    value: -4,
-
-                }, true, true);
-                */
+                vec![
+                    // ld      a,[$FF41]
+                    EntryToken::InstructionWithArg(inner.clone(), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0xFF41)))),
+                    // and     %00000010
+                    EntryToken::InstructionWithArg(inner.clone(), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
+                    // jr      nz,@-4
+                    EntryToken::InstructionWithArg(inner.clone(), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(inner, -4)))),
+                ]
             },
             _ => unreachable!()
-        };
-        unreachable!();
+        })
+    }
+
+    fn parse_meta_bracket_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, LexerError> {
+        tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction label argument")?;
+        let expr = tokens.get("Unexpected end of input while parsing instruction label argument.")?;
+        if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
+            tokens.expect(TokenType::CloseBracket, Some("]"), "while parsing instruction label argument")?;
+            Ok((id, expr))
+
+        } else {
+            Err(expr.error(format!("Unexpected \"{}\", expected a expression as the label argument instead.", expr.value())))
+        }
     }
 
     fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, LexerError> {
@@ -672,7 +696,7 @@ impl EntryStage {
 mod test {
     use crate::lexer::Lexer;
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage};
-    use super::super::expression::{Expression, ExpressionValue};
+    use super::super::expression::{Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
     use super::super::value::Operator;
     use super::super::mocks::{expr_lex, expr_lex_binary};
 
@@ -1080,7 +1104,6 @@ mod test {
 
     #[test]
     fn test_instructions() {
-        // RST base = 199
         assert_op!(0, "nop");
         assert_op!(1, "ld bc,$1234", 4660);
         assert_op!(2, "ld [bc],a");
@@ -1407,7 +1430,6 @@ mod test {
         assert_op!(318, "srl [hl]");
         assert_op!(319, "srl a");
 
-        // BIT base = 284
         assert_op!(320, "bit 0,b", 0);
         assert_op!(321, "bit 0,c", 0);
         assert_op!(322, "bit 0,d", 0);
@@ -1480,7 +1502,6 @@ mod test {
         assert_op!(326, "bit 7,[hl]", 7);
         assert_op!(327, "bit 7,a", 7);
 
-        // RES base = 284
         assert_op!(384, "res 0,b", 0);
         assert_op!(385, "res 0,c", 0);
         assert_op!(386, "res 0,d", 0);
@@ -1553,7 +1574,6 @@ mod test {
         assert_op!(390, "res 7,[hl]", 7);
         assert_op!(391, "res 7,a", 7);
 
-        // SET base = 448
         assert_op!(448, "set 0,b", 0);
         assert_op!(449, "set 0,c", 0);
         assert_op!(450, "set 0,d", 0);
@@ -1634,6 +1654,64 @@ mod test {
         assert_eq!(entry_lexer_error("ld 4,[3"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction memory argument, expected a \"CloseBracket\" token instead.\n\nld 4,[3\n      ^--- Here");
         assert_eq!(entry_lexer_error("stop 4"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"4\", expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
         assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma in \"ld\" instruction.\n\nld a,\n    ^--- Here");
+    }
+
+    // Meta Instructions ------------------------------------------------------
+    // #[test]
+    // fn test_meta_instruction_msg() {
+    //     assert_eq!(tfe("msg 'Hello World'"), vec![
+    //         EntryToken::DebugInstruction(itk!(0, 3, "brk"), 64)
+    //     ]);
+    // }
+
+    #[test]
+    fn test_meta_instruction_brk() {
+        assert_eq!(tfe("brk"), vec![
+            EntryToken::DebugInstruction(itk!(0, 3, "brk"), 64)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_incx() {
+        assert_eq!(tfe("incx [$1234]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "incx"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(0x1234)))),
+            EntryToken::Instruction(itk!(0, 4, "incx"), 0x3C),
+            EntryToken::InstructionWithArg(itk!(0, 4, "incx"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(0x1234))))
+        ]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_incx() {
+        assert_eq!(entry_lexer_error("incx"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction label argument, expected \"[\" instead.\n\nincx\n^--- Here");
+        assert_eq!(entry_lexer_error("incx ["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\nincx [\n     ^--- Here");
+        assert_eq!(entry_lexer_error("incx []"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"]\", expected a expression as the label argument instead.\n\nincx []\n      ^--- Here");
+        assert_eq!(entry_lexer_error("incx [$1234"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nincx [$1234\n      ^--- Here");
+    }
+
+    #[test]
+    fn test_meta_instruction_decx() {
+        assert_eq!(tfe("decx [$1234]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "decx"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(0x1234)))),
+            EntryToken::Instruction(itk!(0, 4, "decx"), 0x3D),
+            EntryToken::InstructionWithArg(itk!(0, 4, "decx"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(0x1234))))
+        ]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_decx() {
+        assert_eq!(entry_lexer_error("decx"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction label argument, expected \"[\" instead.\n\ndecx\n^--- Here");
+        assert_eq!(entry_lexer_error("decx ["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\ndecx [\n     ^--- Here");
+        assert_eq!(entry_lexer_error("decx []"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"]\", expected a expression as the label argument instead.\n\ndecx []\n      ^--- Here");
+        assert_eq!(entry_lexer_error("decx [$1234"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\ndecx [$1234\n      ^--- Here");
+    }
+
+    #[test]
+    fn test_meta_instruction_vsync() {
+        assert_eq!(tfe("vsync"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0xFF41)))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -4)))),
+        ]);
     }
 
 }
