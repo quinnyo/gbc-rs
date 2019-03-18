@@ -178,7 +178,7 @@ impl MacroStage {
 
                 // Verify Macro Name
                 let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
-                if let Some(_) = Self::get_macro_by_name(&builtin_macro_defs, name_token.value()) {
+                if Self::get_macro_by_name(&builtin_macro_defs, name_token.value()).is_some() {
                     return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.value())));
 
                 } else if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.value()) {
@@ -208,7 +208,7 @@ impl MacroStage {
                 while !tokens.peek_is(TokenType::Reserved, Some("ENDMACRO")) {
                     let token = tokens.get("Unexpected end of input while parsing macro body.")?;
                     if token.is(TokenType::Reserved) && token.has_value("MACRO") {
-                        return Err(token.error(format!("Invalid nested macro definition.")));
+                        return Err(token.error("Invalid nested macro definition.".to_string()));
 
                     } else {
                         body_tokens.push(token);
@@ -250,9 +250,9 @@ impl MacroStage {
                 )));
 
             } else if token.is(TokenType::TokenGroup) {
-                return Err(token.error(format!(
-                    "Unexpected token group outside of macro expansion."
-                )));
+                return Err(token.error(
+                    "Unexpected token group outside of macro expansion.".to_string()
+                ));
             }
         }
 

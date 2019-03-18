@@ -361,7 +361,7 @@ impl EntryStage {
             arg_count += 1;
 
             // Check for a single following comma between arguments
-            if tokens.peek_is(TokenType::Comma, None) && past_comma == false {
+            if tokens.peek_is(TokenType::Comma, None) && !past_comma {
                 let inner = tokens.expect(TokenType::Comma, None, "while parsing instruction register argument")?.into_inner();
                 past_comma = true;
                 trailing_comma = Some(inner);

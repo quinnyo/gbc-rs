@@ -15,9 +15,7 @@ pub fn instruction_layouts() -> InstructionLayouts {
     for (index, instr) in instructions::instructions().into_iter().enumerate() {
         let layout = instr.layout.into_iter().map(|a| a.into()).collect();
         let key: (String, Vec<LexerArgument>) = (instr.name, layout);
-        if !layouts.contains_key(&key) {
-            layouts.insert(key, index);
-        }
+        layouts.entry(key).or_insert(index);
     }
     layouts
 }

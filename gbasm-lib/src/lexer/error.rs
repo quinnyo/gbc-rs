@@ -64,7 +64,7 @@ impl LexerError {
         let file = &files[self.file_index];
 
         // Add file include stacktrace
-        let stack = if file.include_stack.len() > 0 {
+        let stack = if !file.include_stack.is_empty() {
             format!("\n\n{}", file.include_stack.iter().rev().map(|token| {
                 let file = &files[token.file_index];
                 let (line, col) = file.get_line_and_col(token.start_index);

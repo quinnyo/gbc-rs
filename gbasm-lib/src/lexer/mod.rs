@@ -225,6 +225,10 @@ impl<T: LexerStage> Lexer<T> {
         self.tokens.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+
     #[cfg(test)]
     pub fn macro_calls_count(&self) -> usize {
         self.macro_calls.len()

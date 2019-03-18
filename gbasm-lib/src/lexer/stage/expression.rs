@@ -93,10 +93,11 @@ impl ExpressionStage {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQU")) {
-                expression_tokens.push(ExpressionToken::Constant(token.into_inner()));
+            if token.is(TokenType::Name) && (
+                tokens.peek_is(TokenType::Reserved, Some("EQU")) ||
+                tokens.peek_is(TokenType::Reserved, Some("EQUS"))
 
-            } else if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
+            ) {
                 expression_tokens.push(ExpressionToken::Constant(token.into_inner()));
 
             } else {
@@ -141,7 +142,7 @@ impl ExpressionStage {
                 Ok(ExpressionToken::Expression(inner, id, expr))
             }
 
-        } else if is_argument == false {
+        } else if !is_argument {
 
             // Forward all non-expression tokens
             match ExpressionToken::try_from(token) {

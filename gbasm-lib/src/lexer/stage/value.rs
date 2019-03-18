@@ -350,7 +350,7 @@ impl ValueStage {
                             value: Self::parse_integer(&inner, 1, 2)?,
                             inner
                         },
-                        _ => if inner.value.contains(".") {
+                        _ => if inner.value.contains('.') {
                             ValueToken::Float {
                                 value: OrderedFloat::from(Self::parse_float(&inner)?),
                                 inner
@@ -398,7 +398,7 @@ impl ValueStage {
         Ok(Self::convert_global_label_refs(&global_labels, value_tokens))
     }
 
-    fn assign_and_verify_local_label_refs<'a>(
+    fn assign_and_verify_local_label_refs(
         tokens: &mut [ValueToken],
         global_label_map: &mut HashMap<
             Option<usize>,
@@ -532,7 +532,7 @@ impl ValueStage {
                     }
                 }
                 if !label_exists {
-                    return Err((*token_index, previous_index, call_parent.clone()));
+                    return Err((*token_index, previous_index, *call_parent));
                 }
             }
         }
@@ -579,7 +579,7 @@ impl ValueStage {
             inner.value.to_string()
         };
 
-        if name.starts_with("_") {
+        if name.starts_with('_') {
             // Handle file local global labels that are prefixed with _
             (format!("{}_file_local_{}", name, inner.file_index), Some(inner.file_index))
 
