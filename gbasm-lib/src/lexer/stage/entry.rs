@@ -38,7 +38,7 @@ pub enum DataStorage {
     /// DW
     Word,
     /// INCBIN "..."
-    File(Vec<u8>),
+    Array(Vec<u8>),
     /// DB 1[, 2, 3]
     Bytes(Vec<DataExpression>),
     /// DW 1[, 2, 3]
@@ -161,7 +161,7 @@ impl EntryStage {
                         inner,
                         alignment: DataAlignment::Byte,
                         endianess: DataEndianess::Little,
-                        storage: DataStorage::File(bytes)
+                        storage: DataStorage::Array(bytes)
                     }
                 },
 
@@ -398,39 +398,36 @@ impl EntryStage {
             // BGB debugging support
             "msg" => {
                 let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
-                if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::String(s))) = expr {
-                    // TODO RomStage or something should drop debug instructions without -D flag
-                    // TODO enforce string literal only expression directly?
-                    /*
-                    const arg = s.get('STRING');
+                if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::String(s))) = &expr {
 
-                    // Only generate when `-d` flag is passed to compiler
-                    if (this.debug) {
+                    let bytes = s.clone().into_bytes();
+                    if bytes.len() > 127 - 4 {
+                        return Err(expr.error(
+                            format!("Debug message strings literals may be at least 123 bytes long (found {} bytes).", bytes.len())
+                        ));
 
-                        if (arg.value.length > 128 - 4) {
-                            // TODO error for text that is too long
-                        }
+                    } else {
+                        // TODO RomStage or something should drop debug instructions without -D flag
+                        vec![
+                            // ld d,d
+                            EntryToken::DebugInstruction(inner.clone(), 0x52),
 
-                        // TODO genrate data entry instead
-                        const opcodes = [
-                            0x52, // ld      d,d
-                            0x18, // jr @+4+LEN(message)
-                            4 + arg.value.length,
-                            0x64, // DW $6464
-                            0x64,
-                            0x00, // DW $0000
-                            0x00
-                        ];
+                            // jr @+4+bytes.len()
+                            EntryToken::DebugInstructionWithArg(
+                                inner.clone(),
+                                0x18,
+                                (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(bytes.len() as i32)))
+                            ),
 
-                        for(let i = 0, l = arg.value.length; i < l; i++) {
-                            opcodes.push(arg.value.charCodeAt(i));
-                        }
-                        this.instruction(4 + 12, opcodes);
+                            // 0x6464
+                            EntryToken::DebugInstruction(inner.clone(), 0x64),
+                            EntryToken::DebugInstruction(inner.clone(), 0x64),
 
-                    }*/
-                    vec![
-
-                    ]
+                            // 0x0000
+                            EntryToken::DebugInstruction(inner.clone(), 0x00),
+                            EntryToken::DebugInstruction(inner, 0x00)
+                        ]
+                    }
 
                 } else {
                     return Err(expr.error(
@@ -445,8 +442,8 @@ impl EntryStage {
             },
 
             // Mulitply / Divide Shorthands
-            "mul" => Self::parse_meta_div_mul(tokens, 288)?, // sla b
-            "div" => Self::parse_meta_div_mul(tokens, 312)?, // srl b
+            "mul" => Self::parse_meta_div_mul(tokens, inner, 288)?, // sla b
+            "div" => Self::parse_meta_div_mul(tokens, inner, 312)?, // srl b
 
             // Increment Memory Address Shorthands
             "incx" => {
@@ -475,18 +472,8 @@ impl EntryStage {
             },
 
             // 16 Bit Addition / Subtraction Shorthands
-            "addw" => {
-                // TODO bc, de, hl
-                // addw xx,a
-                // addw xx,$FF
-                unreachable!();
-            },
-            "subw" => {
-                // TODO bc, de, hl
-                // subw xx,a
-                // subw xx,$FF
-                unreachable!();
-            },
+            "addw" => Self::parse_meta_addw_subw(tokens, inner, true)?,
+            "subw" => Self::parse_meta_addw_subw(tokens, inner, false)?,
 
             // Extended Memory Loads using the Accumulator as an intermediate
             "ldxa" => {
@@ -553,16 +540,99 @@ impl EntryStage {
         })
     }
 
-    fn parse_meta_div_mul(tokens: &mut TokenIterator<ExpressionToken>, op_base: usize) -> Result<Vec<EntryToken>, LexerError> {
-        let reg = Self::parse_byte_register(tokens)?;
+    fn parse_meta_addw_subw(
+        tokens: &mut TokenIterator<ExpressionToken>,
+        inner: InnerToken,
+        addw: bool
+
+    ) -> Result<Vec<EntryToken>, LexerError> {
+        let double = Self::parse_meta_word_register(tokens)?;
+        tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
+
+        let (high, low) = double.to_pair();
+        let mut instructions = Vec::new();
+
+        // addw hl|de|bc,a|b|c|d|e|h|l|$ff
+        if addw {
+            if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                // ld a,expr
+                instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0x3E, expr));
+
+            } else {
+                let reg = Self::parse_meta_byte_register(tokens)?;
+                if reg != Register::Accumulator {
+                    // ld a,reg
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()));
+                }
+            }
+
+            // add a,low
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x80 + low.instruction_offset()));
+            // ld low,a
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x4F + double.instruction_offset()));
+            // adc a,high
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x88 + high.instruction_offset()));
+            // sub low
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + low.instruction_offset()));
+            // ld high,a
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x47 + double.instruction_offset()));
+
+        // subw hl|de|bc,a|b|c|d|e|h|l|$ff
+        } else {
+            // ld a,low
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + low.instruction_offset()));
+
+            if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                // sub expr
+                instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0xD6, expr));
+
+            } else {
+                let reg = Self::parse_meta_byte_register(tokens)?;
+                if reg != Register::Accumulator {
+                    // sub reg
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + reg.instruction_offset()));
+                }
+            }
+
+            // ld low,a
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x4F + double.instruction_offset()));
+
+            // ld a,high
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + high.instruction_offset()));
+
+            // sbc 0
+            instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))));
+
+            // ld high,a
+            instructions.push(EntryToken::Instruction(inner.clone(), 0x47 + double.instruction_offset()));
+
+        }
+
+        Ok(instructions)
+    }
+
+    fn parse_meta_div_mul(tokens: &mut TokenIterator<ExpressionToken>, inner: InnerToken, op_base: usize) -> Result<Vec<EntryToken>, LexerError> {
+        let reg = Self::parse_meta_byte_register(tokens)?;
         tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
         let expr = tokens.get("Unexpected end of input while parsing instruction arguments.")?;
         if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::Integer(i))) = expr {
-            if i > 0 && (i as u32).is_power_of_two() && i < 128 {
-                // TODO generate extended instruction
+            if i > 0 && (i as u32).is_power_of_two() && i <= 128 {
                 let op = op_base + reg.instruction_offset();
-                // TODO generate mulitple instructions based on power of two above
-                Ok(vec![])
+                let shifts = match i {
+                    128 => 7,
+                    64 => 6,
+                    32 => 5,
+                    16 => 4,
+                    8 => 3,
+                    4 => 2,
+                    2 => 1,
+                    _ => unreachable!()
+                };
+                let mut instructions = Vec::new();
+                for _ in 0..shifts {
+                    instructions.push(EntryToken::Instruction(inner.clone(), op));
+                }
+                Ok(instructions)
 
             } else {
                 Err(expr.error(
@@ -577,7 +647,7 @@ impl EntryStage {
         }
     }
 
-    fn parse_byte_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, LexerError> {
+    fn parse_meta_byte_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, LexerError> {
         let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
             if name.width() == 1 {
@@ -591,6 +661,38 @@ impl EntryStage {
 
         } else {
             unreachable!();
+        }
+    }
+
+    fn parse_meta_word_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, LexerError> {
+        let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
+        if let ExpressionToken::Register { inner, name } = reg {
+            if name == Register::BC || name == Register::DE || name == Register::HL {
+                Ok(name)
+
+            } else {
+                Err(inner.error(
+                    format!("Unexpected \"{}\", expected one of the following registers: bc, de, hl.", inner.value)
+                ))
+            }
+
+        } else {
+            unreachable!();
+        }
+    }
+
+    fn parse_meta_optional_expression(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<DataExpression>, LexerError> {
+        if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
+            let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
+            if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
+                Ok(Some((id, expr)))
+
+            } else {
+                Ok(None)
+            }
+
+        } else {
+            Ok(None)
         }
     }
 
@@ -1033,7 +1135,7 @@ mod test {
             inner: itk!(7, 18, "child.bin"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::File(vec![1, 2, 3])
+            storage: DataStorage::Array(vec![1, 2, 3])
         }]);
     }
 
@@ -1704,13 +1806,21 @@ mod test {
     // Meta Instructions ------------------------------------------------------
     #[test]
     fn test_meta_instruction_msg() {
-        assert_eq!(tfe("msg 'Hello World'"), vec![]);
+        assert_eq!(tfe("msg 'Hello World'"), vec![
+            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x52),
+            EntryToken::DebugInstructionWithArg(itk!(0, 3, "msg"), 0x18, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(11)))),
+            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
+            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
+            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00),
+            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00)
+        ]);
     }
 
     #[test]
     fn test_error_meta_instruction_msg() {
         assert_eq!(entry_lexer_error("msg"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction argument.\n\nmsg\n^--- Here");
         assert_eq!(entry_lexer_error("msg 4"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"4\", expected a string literal argument.\n\nmsg 4\n    ^--- Here");
+        assert_eq!(entry_lexer_error("msg '12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345'"), "In file \"main.gb.s\" on line 1, column 5: Debug message strings literals may be at least 123 bytes long (found 125 bytes).\n\nmsg \'12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\'\n    ^--- Here");
     }
 
     #[test]
@@ -1722,13 +1832,52 @@ mod test {
 
     #[test]
     fn test_meta_instruction_mul() {
-        assert_eq!(tfe("mul a,2"), vec![]);
-        assert_eq!(tfe("mul b,2"), vec![]);
-        assert_eq!(tfe("mul c,2"), vec![]);
-        assert_eq!(tfe("mul d,2"), vec![]);
-        assert_eq!(tfe("mul e,2"), vec![]);
-        assert_eq!(tfe("mul h,2"), vec![]);
-        assert_eq!(tfe("mul l,2"), vec![]);
+        assert_eq!(tfe("mul a,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 295)]);
+        assert_eq!(tfe("mul b,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 288)]);
+        assert_eq!(tfe("mul c,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 289)]);
+        assert_eq!(tfe("mul d,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 290)]);
+        assert_eq!(tfe("mul e,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 291)]);
+        assert_eq!(tfe("mul h,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 292)]);
+        assert_eq!(tfe("mul l,2"), vec![EntryToken::Instruction(itk!(0, 3, "mul"), 293)]);
+        assert_eq!(tfe("mul a,4"), vec![
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+        ]);
+        assert_eq!(tfe("mul a,8"), vec![
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+        ]);
+        assert_eq!(tfe("mul a,16"), vec![
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+        ]);
+        assert_eq!(tfe("mul a,32"), vec![
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+        ]);
+        assert_eq!(tfe("mul a,64"), vec![
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+        ]);
+        assert_eq!(tfe("mul a,128"), vec![
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+        ]);
     }
 
     #[test]
@@ -1745,14 +1894,13 @@ mod test {
 
     #[test]
     fn test_meta_instruction_div() {
-        assert_eq!(tfe("div a,2"), vec![]);
-        assert_eq!(tfe("div a,2"), vec![]);
-        assert_eq!(tfe("div b,2"), vec![]);
-        assert_eq!(tfe("div c,2"), vec![]);
-        assert_eq!(tfe("div d,2"), vec![]);
-        assert_eq!(tfe("div e,2"), vec![]);
-        assert_eq!(tfe("div h,2"), vec![]);
-        assert_eq!(tfe("div l,2"), vec![]);
+        assert_eq!(tfe("div a,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 319)]);
+        assert_eq!(tfe("div b,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 312)]);
+        assert_eq!(tfe("div c,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 313)]);
+        assert_eq!(tfe("div d,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 314)]);
+        assert_eq!(tfe("div e,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 315)]);
+        assert_eq!(tfe("div h,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 316)]);
+        assert_eq!(tfe("div l,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 317)]);
     }
 
     #[test]
@@ -1808,6 +1956,104 @@ mod test {
             EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
             EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -4)))),
         ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_addw() {
+        assert_eq!(tfe("addw hl,a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x80 + 5),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x88 + 4),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x90 + 5),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x47 + 32)
+        ]);
+        assert_eq!(tfe("addw bc,a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x80 + 1),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x4F + 0),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x88 + 0),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x90 + 1),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x47 + 0)
+        ]);
+        assert_eq!(tfe("addw de,a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x80 + 3),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x4F + 16),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x88 + 2),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x90 + 3),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x47 + 16)
+        ]);
+        assert_eq!(tfe("addw hl,4"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "addw"), 0x3E, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x80 + 5),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x88 + 4),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x90 + 5),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x47 + 32)
+        ]);
+        assert_eq!(tfe("addw hl,b"), vec![
+            EntryToken::Instruction(itk!(0, 4, "addw"), 120),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x80 + 5),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x88 + 4),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x90 + 5),
+            EntryToken::Instruction(itk!(0, 4, "addw"), 0x47 + 32)
+        ]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_addw() {
+        assert_eq!(entry_lexer_error("addw a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\naddw a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("addw af"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\naddw af\n     ^--- Here");
+        assert_eq!(entry_lexer_error("addw hl,"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\naddw hl,\n       ^--- Here");
+        assert_eq!(entry_lexer_error("addw hl,bc"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\naddw hl,bc\n        ^--- Here");
+    }
+
+    #[test]
+    fn test_meta_instruction_subw() {
+        assert_eq!(tfe("subw hl,a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
+        ]);
+        assert_eq!(tfe("subw bc,a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 1),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 0),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 0),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 0)
+        ]);
+        assert_eq!(tfe("subw de,a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 3),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 16),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 2),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 16)
+        ]);
+        assert_eq!(tfe("subw hl,4"), vec![
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xD6, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
+        ]);
+        assert_eq!(tfe("subw hl,b"), vec![
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x90 + 0),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
+        ]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_subw() {
+        assert_eq!(entry_lexer_error("subw a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nsubw a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("subw af"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nsubw af\n     ^--- Here");
+        assert_eq!(entry_lexer_error("subw hl,"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nsubw hl,\n       ^--- Here");
+        assert_eq!(entry_lexer_error("subw hl,bc"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nsubw hl,bc\n        ^--- Here");
     }
 
 }

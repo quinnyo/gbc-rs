@@ -118,6 +118,25 @@ pub enum Register {
 }
 
 impl Register {
+    pub fn to_pair(&self) -> (Register, Register) {
+        match self {
+            Register::Accumulator => (Register::Accumulator, Register::Accumulator),
+            Register::B => (Register::B, Register::B),
+            Register::C => (Register::C, Register::C),
+            Register::D => (Register::D, Register::D),
+            Register::E => (Register::E, Register::E),
+            Register::H => (Register::H, Register::H),
+            Register::L => (Register::L, Register::L),
+            Register::AF => (Register::Accumulator, Register::Accumulator),
+            Register::BC => (Register::B, Register::C),
+            Register::DE => (Register::D, Register::E),
+            Register::HL => (Register::H, Register::L),
+            Register::HLIncrement => (Register::H, Register::L),
+            Register::HLDecrement => (Register::H, Register::L),
+            Register::SP => (Register::Accumulator, Register::Accumulator)
+        }
+    }
+
     pub fn width(&self) -> usize {
         match self {
             Register::Accumulator => 1,
