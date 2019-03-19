@@ -64,6 +64,9 @@ impl<T: LexerToken> TokenIterator<T> {
                         Ok(token)
                     }
 
+                } else if let Some(value) = value {
+                    Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), value)))
+
                 } else {
                     Err(token.error(format!("Unexpected token \"{:?}\" {}, expected a \"{:?}\" token instead.", token.typ(), message.into(), typ)))
                 }

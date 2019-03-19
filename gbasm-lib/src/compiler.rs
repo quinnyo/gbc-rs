@@ -37,8 +37,9 @@ impl Compiler {
 
         // Resolve Constants
         // Resolve Sizes
+        // Create a mapping of all labels defs to their rom location/offsets
         // Resolve all other expressions
-            // When looking for local labels search backwards through the rom entry list
+            // Resolve labels via reference id
             // Also match macro_call_id of tokens
         // Optimize
         Ok(())

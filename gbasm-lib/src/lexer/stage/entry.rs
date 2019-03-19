@@ -44,7 +44,9 @@ pub enum DataStorage {
     /// DW 1[, 2, 3]
     Words(Vec<DataExpression>),
     /// DS 1
-    ByteRange(DataExpression)
+    ByteRange(DataExpression),
+    /// DS 1 expr
+    ByteData(DataExpression, DataExpression)
 }
 
 
@@ -406,7 +408,6 @@ impl EntryStage {
                         ));
 
                     } else {
-                        // TODO RomStage or something should drop debug instructions without -D flag
                         vec![
                             // ld d,d
                             EntryToken::DebugInstruction(inner.clone(), 0x52),
@@ -435,7 +436,6 @@ impl EntryStage {
                 }
             },
             "brk" => {
-                // TODO RomStage or something should drop debug instructions without -D flag
                 // ld b,b
                 vec![EntryToken::DebugInstruction(inner, 0x40)]
             },
@@ -478,33 +478,78 @@ impl EntryStage {
 
             // Extended Memory Loads using the Accumulator as an intermediate
             "ldxa" => {
-                // TODO
+                tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction argument")?;
+
+                let target = Self::parse_meta_bracket_label(tokens)?;
+                tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
+
+                // ldxa [someLabel],[someLabel]
+                if tokens.peek_is(TokenType::OpenBracket, None) {
+                    tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction argument")?;
+                    let source = Self::parse_meta_bracket_label(tokens)?;
+                    vec![
+                        EntryToken::InstructionWithArg(inner.clone(), 0xFA, source),
+                        EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                    ]
+
+                // ldxa [someLabel],expr
+                } else if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                    vec![
+                        EntryToken::InstructionWithArg(inner.clone(), 0x3E, expr),
+                        EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                    ]
+
+                } else {
+                    let reg = Self::parse_meta_byte_register(tokens)?;
+                    // ldxa [someLabel],b
+                    // ldxa [someLabel],c
+                    // ldxa [someLabel],d
+                    // ldxa [someLabel],e
+                    // ldxa [someLabel],h
+                    // ldxa [someLabel],l
+                    if reg != Register::Accumulator {
+                        vec![
+                            EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()),
+                            EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                        ]
+
+                    // ldxa [someLabel],a
+                    } else {
+                        vec![
+                            EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                        ]
+                    }
+                }
+
+                // Target
+                // TODO [hli|hld|label]
+
+                // Source
+                // TODO reg,expr,[hli|hld|label]
+
+                //
+
+                // TODO check if these are actually used by any game
                 // ldxa   [hli],b
                 // ldxa   [hli],c
                 // ldxa   [hli],d
                 // ldxa   [hli],e
                 // ldxa   [hli],h
                 // ldxa   [hli],l
+                //
                 // ldxa   [hld],b
                 // ldxa   [hld],c
                 // ldxa   [hld],d
                 // ldxa   [hld],e
                 // ldxa   [hld],h
                 // ldxa   [hld],l
+
                 // ldxa   [someLabel],hl (h = low + l = high)
                 // ldxa   [someLabel],de
                 // ldxa   [someLabel],bc
-                // ldxa   [someLabel],i8
-                // ldxa   [someLabel],b
-                // ldxa   [someLabel],c
-                // ldxa   [someLabel],d
-                // ldxa   [someLabel],e
-                // ldxa   [someLabel],h
-                // ldxa   [someLabel],l
+
                 // ldxa   [someLabel],[hli]
                 // ldxa   [someLabel],[hld]
-                // ldxa   [someLabel],[someLabel]
-                unreachable!();
 
             },
 
@@ -850,12 +895,28 @@ impl EntryStage {
     ) -> Result<EntryToken, LexerError> {
         let token = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
         if let ExpressionToken::ConstExpression(_, id, expr) = token {
-            Ok(EntryToken::Data {
-                inner,
-                alignment,
-                endianess: DataEndianess::Little,
-                storage: DataStorage::ByteRange((id, expr))
-            })
+            if tokens.peek_is(TokenType::ConstExpression, None) {
+                let data = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
+                if let ExpressionToken::ConstExpression(_, data_id, data_expr) = data {
+                    Ok(EntryToken::Data {
+                        inner,
+                        alignment,
+                        endianess: DataEndianess::Little,
+                        storage: DataStorage::ByteData((id, expr), (data_id, data_expr))
+                    })
+
+                } else {
+                    unreachable!();
+                }
+
+            } else {
+                Ok(EntryToken::Data {
+                    inner,
+                    alignment,
+                    endianess: DataEndianess::Little,
+                    storage: DataStorage::ByteRange((id, expr))
+                })
+            }
         } else {
             unreachable!();
         }
@@ -963,7 +1024,6 @@ mod test {
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("ROMX"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ROMX\", expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
-        assert_eq!(entry_lexer_error("DS 1 1"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"1\", expected either a constant declaration, directive or instruction instead.\n\nDS 1 1\n     ^--- Here");
     }
 
     // Constant Declarations --------------------------------------------------
@@ -1145,6 +1205,19 @@ mod test {
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
             }))
+        }]);
+    }
+
+    #[test]
+    fn test_data_ds_with_arg() {
+        assert_eq!(tfe("DS 2 'Hello World'"), vec![EntryToken::Data {
+            inner: itk!(0, 2, "DS"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::ByteData(
+                (0, Expression::Value(ExpressionValue::Integer(2))),
+                (1, Expression::Value(ExpressionValue::String("Hello World".to_string())))
+            )
         }]);
     }
 
@@ -2165,6 +2238,56 @@ mod test {
         assert_eq!(entry_lexer_error("retx [af"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nretx [af\n      ^--- Here");
         assert_eq!(entry_lexer_error("retx [a"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nretx [a\n      ^--- Here");
         assert_eq!(entry_lexer_error("retx [4"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nretx [4\n      ^--- Here");
+    }
+
+    #[test]
+    fn test_meta_instruction_ldxa() {
+        assert_eq!(tfe("ldxa [4],a"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],b"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],c"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 1),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],d"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 2),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],e"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 3),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],h"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 4),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],l"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 5),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],4"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0x3E, (1, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa [4],[8]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (1, Expression::Value(ExpressionValue::Integer(8)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_ldxa() {
+        assert_eq!(entry_lexer_error("ldxa"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction argument, expected \"[\" instead.\n\nldxa\n^--- Here");
+        assert_eq!(entry_lexer_error("ldxa a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Register\" while parsing instruction argument, expected \"[\" instead.\n\nldxa a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa bc"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Register\" while parsing instruction argument, expected \"[\" instead.\n\nldxa bc\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4]"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa [4]\n       ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4],"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa [4],\n        ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4],["), "In file \"main.gb.s\" on line 1, column 10: Unexpected end of input while parsing instruction label argument.\n\nldxa [4],[\n         ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4],bc"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nldxa [4],bc\n         ^--- Here");
     }
 
 }
