@@ -399,7 +399,6 @@ impl EntryStage {
             "msg" => {
                 let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
                 if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::String(s))) = &expr {
-
                     let bytes = s.clone().into_bytes();
                     if bytes.len() > 127 - 4 {
                         return Err(expr.error(
@@ -448,6 +447,7 @@ impl EntryStage {
             // Increment Memory Address Shorthands
             "incx" => {
                 // decx [expr]
+                tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
                 vec![
                     // ld a,[someLabel]
@@ -460,6 +460,7 @@ impl EntryStage {
             },
             "decx" => {
                 // decx [expr]
+                tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
                 vec![
                     // ld a,[someLabel]
@@ -509,20 +510,70 @@ impl EntryStage {
 
             // Return Shorthands
             "retx" => {
-                // TODO
-                // retx a,[hl]
-                // retx a,[bc]
-                // retx a,[de]
-                // retx a,[someLabel]
-                //
+                if tokens.peek_is(TokenType::OpenBracket, None) {
+                    tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction argument")?;
+
+                    // retx [hl]
+                    // retx [bc]
+                    // retx [de]
+                    if tokens.peek_is(TokenType::Register, None) {
+                        let double = Self::parse_meta_word_register(tokens)?;
+                        tokens.expect(TokenType::CloseBracket, Some("]"), "while parsing instruction label argument")?;
+                        vec![
+                            // ld a,[bc|de|hl]
+                            EntryToken::Instruction(inner.clone(), match double {
+                                Register::BC => 0x0A,
+                                Register::DE => 0x1A,
+                                Register::HL => 0x7E,
+                                _ => unreachable!()
+                            }),
+                            // ret
+                            EntryToken::Instruction(inner, 0xC9)
+                        ]
+
+                    // retx [someLabel]
+                    } else {
+                        let expr = Self::parse_meta_bracket_label(tokens)?;
+                        vec![
+                            // ld a,[expr]
+                            EntryToken::InstructionWithArg(inner.clone(), 0xFA, expr),
+                            // ret
+                            EntryToken::Instruction(inner, 0xC9)
+                        ]
+                    }
+
+                // retx $ff
+                } else if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                    vec![
+                        // ld a,expr
+                        EntryToken::InstructionWithArg(inner.clone(), 0x3E, expr),
+                        // ret
+                        EntryToken::Instruction(inner, 0xC9)
+                    ]
+
+                // retx a
                 // retx b
                 // retx c
                 // retx d
                 // retx e
                 // retx h
                 // retx l
-                // retx $ff
-                unreachable!();
+                } else {
+                    let reg = Self::parse_meta_byte_register(tokens)?;
+                    if reg != Register::Accumulator {
+                        vec![
+                            // ld a,reg
+                            EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()),
+                            // ret
+                            EntryToken::Instruction(inner, 0xC9)
+                        ]
+                    } else {
+                        vec![
+                            // ret
+                            EntryToken::Instruction(inner, 0xC9)
+                        ]
+                    }
+                }
             },
 
             // VBlank Wait Shorthand
@@ -697,7 +748,6 @@ impl EntryStage {
     }
 
     fn parse_meta_bracket_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, LexerError> {
-        tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction label argument")?;
         let expr = tokens.get("Unexpected end of input while parsing instruction label argument.")?;
         if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
             tokens.expect(TokenType::CloseBracket, Some("]"), "while parsing instruction label argument")?;
@@ -2054,6 +2104,67 @@ mod test {
         assert_eq!(entry_lexer_error("subw af"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nsubw af\n     ^--- Here");
         assert_eq!(entry_lexer_error("subw hl,"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nsubw hl,\n       ^--- Here");
         assert_eq!(entry_lexer_error("subw hl,bc"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nsubw hl,bc\n        ^--- Here");
+    }
+
+    #[test]
+    fn test_meta_instruction_retx() {
+        assert_eq!(tfe("retx a"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx b"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x78),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx c"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x78 + 1),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx d"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x78 + 2),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx e"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x78 + 3),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx h"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x78 + 4),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx l"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x78 + 5),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx 4"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "retx"), 0x3E, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx [4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "retx"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx [hl]"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x7E),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx [bc]"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x0A),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+        assert_eq!(tfe("retx [de]"), vec![
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0x1A),
+            EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
+        ]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_retx() {
+        assert_eq!(entry_lexer_error("retx"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nretx\n^--- Here");
+        assert_eq!(entry_lexer_error("retx bc"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nretx bc\n     ^--- Here");
+        assert_eq!(entry_lexer_error("retx ["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\nretx [\n     ^--- Here");
+        assert_eq!(entry_lexer_error("retx [af"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nretx [af\n      ^--- Here");
+        assert_eq!(entry_lexer_error("retx [a"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nretx [a\n      ^--- Here");
+        assert_eq!(entry_lexer_error("retx [4"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nretx [4\n      ^--- Here");
     }
 
 }
