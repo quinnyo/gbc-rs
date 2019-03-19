@@ -117,6 +117,46 @@ pub enum Register {
     SP
 }
 
+impl Register {
+    pub fn width(&self) -> usize {
+        match self {
+            Register::Accumulator => 1,
+            Register::B => 1,
+            Register::C => 1,
+            Register::D => 1,
+            Register::E => 1,
+            Register::H => 1,
+            Register::L => 1,
+            Register::AF => 2,
+            Register::BC => 2,
+            Register::DE => 2,
+            Register::HL => 2,
+            Register::HLIncrement => 2,
+            Register::HLDecrement => 2,
+            Register::SP => 2,
+        }
+    }
+
+    pub fn instruction_offset(&self) -> usize {
+        match self {
+            Register::Accumulator => 7,
+            Register::B => 0,
+            Register::C => 1,
+            Register::D => 2,
+            Register::E => 3,
+            Register::H => 4,
+            Register::L => 5,
+            Register::AF => 48,
+            Register::BC => 0,
+            Register::DE => 16,
+            Register::HL => 32,
+            Register::HLIncrement => 0,
+            Register::HLDecrement => 0,
+            Register::SP => 0,
+        }
+    }
+}
+
 impl From<&str> for Register {
     fn from(s: &str) -> Self {
         match s {

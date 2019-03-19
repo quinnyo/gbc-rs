@@ -397,38 +397,46 @@ impl EntryStage {
 
             // BGB debugging support
             "msg" => {
-                // TODO RomStage or something should drop debug instructions without -D flag
-                // TODO enforce string literal only expression directly?
-                vec![
+                let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
+                if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::String(s))) = expr {
+                    // TODO RomStage or something should drop debug instructions without -D flag
+                    // TODO enforce string literal only expression directly?
+                    /*
+                    const arg = s.get('STRING');
 
-                ]
-                /*
-                const arg = s.get('STRING');
+                    // Only generate when `-d` flag is passed to compiler
+                    if (this.debug) {
 
-                // Only generate when `-d` flag is passed to compiler
-                if (this.debug) {
+                        if (arg.value.length > 128 - 4) {
+                            // TODO error for text that is too long
+                        }
 
-                    if (arg.value.length > 128 - 4) {
-                        // TODO error for text that is too long
-                    }
+                        // TODO genrate data entry instead
+                        const opcodes = [
+                            0x52, // ld      d,d
+                            0x18, // jr @+4+LEN(message)
+                            4 + arg.value.length,
+                            0x64, // DW $6464
+                            0x64,
+                            0x00, // DW $0000
+                            0x00
+                        ];
 
-                    // TODO genrate data entry instead
-                    const opcodes = [
-                        0x52, // ld      d,d
-                        0x18, // jr @+4+LEN(message)
-                        4 + arg.value.length,
-                        0x64, // DW $6464
-                        0x64,
-                        0x00, // DW $0000
-                        0x00
-                    ];
+                        for(let i = 0, l = arg.value.length; i < l; i++) {
+                            opcodes.push(arg.value.charCodeAt(i));
+                        }
+                        this.instruction(4 + 12, opcodes);
 
-                    for(let i = 0, l = arg.value.length; i < l; i++) {
-                        opcodes.push(arg.value.charCodeAt(i));
-                    }
-                    this.instruction(4 + 12, opcodes);
+                    }*/
+                    vec![
 
-                }*/
+                    ]
+
+                } else {
+                    return Err(expr.error(
+                        format!("Unexpected \"{}\", expected a string literal argument.", expr.value())
+                    ));
+                }
             },
             "brk" => {
                 // TODO RomStage or something should drop debug instructions without -D flag
@@ -437,14 +445,8 @@ impl EntryStage {
             },
 
             // Mulitply / Divide Shorthands
-            "mul" => {
-                // TODO enforce integer arg with power of 2 directly?
-                unreachable!();
-            },
-            "div" => {
-                // TODO enforce integer arg with power of 2 directly?
-                unreachable!();
-            },
+            "mul" => Self::parse_meta_div_mul(tokens, 288)?, // sla b
+            "div" => Self::parse_meta_div_mul(tokens, 312)?, // srl b
 
             // Increment Memory Address Shorthands
             "incx" => {
@@ -488,6 +490,7 @@ impl EntryStage {
 
             // Extended Memory Loads using the Accumulator as an intermediate
             "ldxa" => {
+                // TODO
                 // ldxa   [hli],b
                 // ldxa   [hli],c
                 // ldxa   [hli],d
@@ -519,6 +522,7 @@ impl EntryStage {
 
             // Return Shorthands
             "retx" => {
+                // TODO
                 // retx a,[hl]
                 // retx a,[bc]
                 // retx a,[de]
@@ -547,6 +551,47 @@ impl EntryStage {
             },
             _ => unreachable!()
         })
+    }
+
+    fn parse_meta_div_mul(tokens: &mut TokenIterator<ExpressionToken>, op_base: usize) -> Result<Vec<EntryToken>, LexerError> {
+        let reg = Self::parse_byte_register(tokens)?;
+        tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
+        let expr = tokens.get("Unexpected end of input while parsing instruction arguments.")?;
+        if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::Integer(i))) = expr {
+            if i > 0 && (i as u32).is_power_of_two() && i < 128 {
+                // TODO generate extended instruction
+                let op = op_base + reg.instruction_offset();
+                // TODO generate mulitple instructions based on power of two above
+                Ok(vec![])
+
+            } else {
+                Err(expr.error(
+                    format!("Unexpected \"{}\", expected a integer argument that is a power 2 and <= 128.", expr.value())
+                ))
+            }
+
+        } else {
+            Err(expr.error(
+                format!("Unexpected \"{}\", expected a integer argument that is a power 2 and <= 128.", expr.value())
+            ))
+        }
+    }
+
+    fn parse_byte_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, LexerError> {
+        let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
+        if let ExpressionToken::Register { inner, name } = reg {
+            if name.width() == 1 {
+                Ok(name)
+
+            } else {
+                Err(inner.error(
+                    format!("Unexpected \"{}\", expected one of the following registers: a, b, c, d, e, h, l.", inner.value)
+                ))
+            }
+
+        } else {
+            unreachable!();
+        }
     }
 
     fn parse_meta_bracket_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, LexerError> {
@@ -1657,18 +1702,69 @@ mod test {
     }
 
     // Meta Instructions ------------------------------------------------------
-    // #[test]
-    // fn test_meta_instruction_msg() {
-    //     assert_eq!(tfe("msg 'Hello World'"), vec![
-    //         EntryToken::DebugInstruction(itk!(0, 3, "brk"), 64)
-    //     ]);
-    // }
+    #[test]
+    fn test_meta_instruction_msg() {
+        assert_eq!(tfe("msg 'Hello World'"), vec![]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_msg() {
+        assert_eq!(entry_lexer_error("msg"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction argument.\n\nmsg\n^--- Here");
+        assert_eq!(entry_lexer_error("msg 4"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"4\", expected a string literal argument.\n\nmsg 4\n    ^--- Here");
+    }
 
     #[test]
     fn test_meta_instruction_brk() {
         assert_eq!(tfe("brk"), vec![
             EntryToken::DebugInstruction(itk!(0, 3, "brk"), 64)
         ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_mul() {
+        assert_eq!(tfe("mul a,2"), vec![]);
+        assert_eq!(tfe("mul b,2"), vec![]);
+        assert_eq!(tfe("mul c,2"), vec![]);
+        assert_eq!(tfe("mul d,2"), vec![]);
+        assert_eq!(tfe("mul e,2"), vec![]);
+        assert_eq!(tfe("mul h,2"), vec![]);
+        assert_eq!(tfe("mul l,2"), vec![]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_mul() {
+        assert_eq!(entry_lexer_error("mul"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nmul\n^--- Here");
+        assert_eq!(entry_lexer_error("mul hl"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"hl\", expected one of the following registers: a, b, c, d, e, h, l.\n\nmul hl\n    ^--- Here");
+        assert_eq!(entry_lexer_error("mul a"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nmul a\n    ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 'Foo'"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"Foo\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, \'Foo\'\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, -2"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"-2\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, -2\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 3"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"3\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 3\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 0"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"0\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 0\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 256"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"256\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 256\n       ^--- Here");
+    }
+
+    #[test]
+    fn test_meta_instruction_div() {
+        assert_eq!(tfe("div a,2"), vec![]);
+        assert_eq!(tfe("div a,2"), vec![]);
+        assert_eq!(tfe("div b,2"), vec![]);
+        assert_eq!(tfe("div c,2"), vec![]);
+        assert_eq!(tfe("div d,2"), vec![]);
+        assert_eq!(tfe("div e,2"), vec![]);
+        assert_eq!(tfe("div h,2"), vec![]);
+        assert_eq!(tfe("div l,2"), vec![]);
+    }
+
+    #[test]
+    fn test_error_meta_instruction_div() {
+        assert_eq!(entry_lexer_error("div"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\ndiv\n^--- Here");
+        assert_eq!(entry_lexer_error("div hl"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"hl\", expected one of the following registers: a, b, c, d, e, h, l.\n\ndiv hl\n    ^--- Here");
+        assert_eq!(entry_lexer_error("div a"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\ndiv a\n    ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 'Foo'"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"Foo\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, \'Foo\'\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, -2"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"-2\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, -2\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 3"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"3\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 3\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 0"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"0\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 0\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 256"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"256\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 256\n       ^--- Here");
     }
 
     #[test]
