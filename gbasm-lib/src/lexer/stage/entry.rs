@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::collections::HashMap;
+
+
 // External Dependencies ------------------------------------------------------
 use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 
@@ -109,6 +113,8 @@ impl EntryStage {
         layouts: &InstructionLayouts
 
     ) -> Result<Vec<EntryToken>, LexerError> {
+
+        let mut constants = HashMap::new();
         let mut entry_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
@@ -121,29 +127,10 @@ impl EntryStage {
                 // Constant Declarations
                 ExpressionToken::Constant(inner) => {
                     if tokens.peek_is(TokenType::Reserved, Some("EQU")) {
-                        tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
-                        if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
-                            EntryToken::Constant {
-                                inner,
-                                is_string: false,
-                                value: (id, expr)
-                            }
-
-                        } else {
-                            unreachable!();
-                        }
+                        Self::parse_constant_declaration(&mut tokens, &mut constants, inner, false)?
 
                     } else if tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
-                        tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
-                        if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
-                            EntryToken::Constant {
-                                inner,
-                                is_string: true,
-                                value: (id, expr)
-                            }
-                        } else {
-                            unreachable!();
-                        }
+                        Self::parse_constant_declaration(&mut tokens, &mut constants, inner, true)?
 
                     } else {
                         unreachable!("Expression lexer failed to return \"Constant\" token only if followed by EQU / EQUS");
@@ -261,6 +248,35 @@ impl EntryStage {
             entry_tokens.push(entry);
         }
         Ok(entry_tokens)
+    }
+
+    fn parse_constant_declaration(
+        tokens: &mut TokenIterator<ExpressionToken>,
+        constants: &mut HashMap<String, InnerToken>,
+        inner: InnerToken,
+        is_string: bool
+
+    ) -> Result<EntryToken, LexerError> {
+        tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
+        if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
+            if let Some(constant_def) = constants.get(&inner.value) {
+                Err(inner.error(
+                    format!("Re-definition of previously declared constant \"{}\".", inner.value)
+
+                ).with_reference(&constant_def, "Original definition was"))
+
+            } else {
+                constants.insert(inner.value.clone(), inner.clone());
+                Ok(EntryToken::Constant {
+                    inner,
+                    is_string,
+                    value: (id, expr)
+                })
+            }
+
+        } else {
+            unreachable!();
+        }
     }
 
     fn parse_instruction(
@@ -1389,6 +1405,11 @@ mod test {
                 "bar".to_string()
             )))
         }]);
+    }
+
+    #[test]
+    fn test_error_const_redeclaration() {
+        assert_eq!(entry_lexer_error("foo EQU 2 foo EQU 2"), "In file \"main.gb.s\" on line 1, column 11: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 2 foo EQU 2\n          ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo EQU 2 foo EQU 2\n^--- Here");
     }
 
     #[test]

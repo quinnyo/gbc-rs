@@ -182,6 +182,7 @@ impl ExpressionStage {
 
 
 // Expression Abstraction -----------------------------------------------------
+// TODO move into dedicated file
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ExpressionValue {
     ConstantValue(InnerToken, String),
