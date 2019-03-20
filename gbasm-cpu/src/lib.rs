@@ -174,6 +174,27 @@ impl Register {
             Register::SP => 0,
         }
     }
+
+    pub fn instruction_offset_into_a(&self) -> usize {
+        match self {
+            Register::Accumulator => 0,
+            Register::B => 0,
+            Register::C => 8,
+            Register::D => 16,
+            Register::E => 24,
+            Register::H => 32,
+            Register::L => 40,
+            Register::AF => 0,
+            Register::BC => 0,
+            Register::DE => 0,
+            Register::HL => 0,
+            Register::HLIncrement => 0,
+            Register::HLDecrement => 0,
+            Register::SP => 0,
+        }
+
+    }
+
 }
 
 impl From<&str> for Register {
