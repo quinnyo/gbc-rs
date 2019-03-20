@@ -49,6 +49,11 @@ pub enum DataStorage {
     ByteData(DataExpression, DataExpression)
 }
 
+enum MetaLDXAArgument {
+    Register(Register),
+    Expression(DataExpression),
+    MemoryLookup(DataExpression)
+}
 
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
@@ -478,79 +483,93 @@ impl EntryStage {
 
             // Extended Memory Loads using the Accumulator as an intermediate
             "ldxa" => {
-                tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction argument")?;
-
-                let target = Self::parse_meta_bracket_label(tokens)?;
+                let target = Self::parse_meta_ldxa_side(tokens, false)?;
                 tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
 
-                // ldxa [someLabel],[someLabel]
-                if tokens.peek_is(TokenType::OpenBracket, None) {
-                    tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction argument")?;
-                    let source = Self::parse_meta_bracket_label(tokens)?;
-                    vec![
-                        EntryToken::InstructionWithArg(inner.clone(), 0xFA, source),
-                        EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
-                    ]
+                let source = Self::parse_meta_ldxa_side(tokens, true)?;
+                match (target, source) {
 
-                // ldxa [someLabel],expr
-                } else if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
-                    vec![
-                        EntryToken::InstructionWithArg(inner.clone(), 0x3E, expr),
-                        EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
-                    ]
-
-                } else {
-                    let reg = Self::parse_meta_byte_register(tokens)?;
-                    // ldxa [someLabel],b
-                    // ldxa [someLabel],c
-                    // ldxa [someLabel],d
-                    // ldxa [someLabel],e
-                    // ldxa [someLabel],h
-                    // ldxa [someLabel],l
-                    if reg != Register::Accumulator {
+                    // ldxa [someLabel],[someLabel]
+                    (MetaLDXAArgument::MemoryLookup(target), MetaLDXAArgument::MemoryLookup(source)) => {
                         vec![
-                            EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()),
+                            EntryToken::InstructionWithArg(inner.clone(), 0xFA, source),
                             EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
                         ]
-
-                    // ldxa [someLabel],a
-                    } else {
+                    },
+                    // ldxa [someLabel],expr
+                    (MetaLDXAArgument::MemoryLookup(target), MetaLDXAArgument::Expression(expr)) => {
                         vec![
+                            EntryToken::InstructionWithArg(inner.clone(), 0x3E, expr),
                             EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
                         ]
-                    }
+                    },
+                    // ldxa [someLabel],reg
+                    (MetaLDXAArgument::MemoryLookup(target), MetaLDXAArgument::Register(reg)) => {
+                        // ldxa [someLabel],b
+                        // ldxa [someLabel],c
+                        // ldxa [someLabel],d
+                        // ldxa [someLabel],e
+                        // ldxa [someLabel],h
+                        // ldxa [someLabel],l
+                        if reg != Register::Accumulator {
+                            vec![
+                                EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()),
+                                EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                            ]
+
+                        // ldxa [someLabel],a
+                        } else {
+                            vec![
+                                EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                            ]
+                        }
+                    },
+                    // reg,[someLabel]
+                    (MetaLDXAArgument::Register(reg), MetaLDXAArgument::MemoryLookup(target)) => {
+                        // ldxa b,[someLabel]
+                        // ldxa c,[someLabel]
+                        // ldxa d,[someLabel]
+                        // ldxa e,[someLabel]
+                        // ldxa h,[someLabel]
+                        // ldxa l,[someLabel]
+                        if reg != Register::Accumulator {
+                            let op = match reg {
+                                // ld b,a
+                                Register::B => 0x47,
+                                // ld c,a
+                                Register::C => 0x4F,
+                                // ld d,a
+                                Register::D => 0x57,
+                                // ld e,a
+                                Register::E => 0x5F,
+                                // ld h,a
+                                Register::H => 0x67,
+                                // ld l,a
+                                Register::L => 0x6F,
+                                _ => unreachable!()
+                            };
+                            vec![
+                                EntryToken::InstructionWithArg(inner.clone(), 0xFA, target),
+                                EntryToken::Instruction(inner.clone(), op)
+                            ]
+
+                        // ldxa a,[someLabel]
+                        } else {
+                            vec![
+                                EntryToken::InstructionWithArg(inner.clone(), 0xFA, target)
+                            ]
+                        }
+                    },
+
+                    // TODO forward to ld x,$ff
+                    (MetaLDXAArgument::Register(_), MetaLDXAArgument::Expression(_)) => unreachable!(),
+
+                    // TODO forward to ld reg,ref
+                    (MetaLDXAArgument::Register(_), MetaLDXAArgument::Register(_)) => unreachable!(),
+
+                    // Unsupported
+                    (MetaLDXAArgument::Expression(_), _) => unreachable!()
                 }
-
-                // Target
-                // TODO [hli|hld|label]
-
-                // Source
-                // TODO reg,expr,[hli|hld|label]
-
-                //
-
-                // TODO check if these are actually used by any game
-                // ldxa   [hli],b
-                // ldxa   [hli],c
-                // ldxa   [hli],d
-                // ldxa   [hli],e
-                // ldxa   [hli],h
-                // ldxa   [hli],l
-                //
-                // ldxa   [hld],b
-                // ldxa   [hld],c
-                // ldxa   [hld],d
-                // ldxa   [hld],e
-                // ldxa   [hld],h
-                // ldxa   [hld],l
-
-                // ldxa   [someLabel],hl (h = low + l = high)
-                // ldxa   [someLabel],de
-                // ldxa   [someLabel],bc
-
-                // ldxa   [someLabel],[hli]
-                // ldxa   [someLabel],[hld]
-
             },
 
             // Return Shorthands
@@ -634,6 +653,32 @@ impl EntryStage {
             },
             _ => unreachable!()
         })
+    }
+
+    fn parse_meta_ldxa_side(
+        tokens: &mut TokenIterator<ExpressionToken>,
+        allow_expr: bool
+
+    ) -> Result<MetaLDXAArgument, LexerError> {
+        // [someLabel]
+        if tokens.peek_is(TokenType::OpenBracket, None) {
+            tokens.expect(TokenType::OpenBracket, Some("["), "while parsing instruction argument")?;
+            Ok(MetaLDXAArgument::MemoryLookup(Self::parse_meta_bracket_label(tokens)?))
+
+        // TODO inc / dec registers
+        } else if allow_expr {
+            // expr
+            if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                Ok(MetaLDXAArgument::Expression(expr))
+
+            } else {
+                Ok(MetaLDXAArgument::Register(Self::parse_meta_byte_register(tokens)?))
+            }
+
+        } else {
+            Ok(MetaLDXAArgument::Register(Self::parse_meta_byte_register(tokens)?))
+        }
+
     }
 
     fn parse_meta_addw_subw(
@@ -2277,17 +2322,46 @@ mod test {
             EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (1, Expression::Value(ExpressionValue::Integer(8)))),
             EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
         ]);
+
+        assert_eq!(tfe("ldxa a,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+        ]);
+        assert_eq!(tfe("ldxa b,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47)
+        ]);
+        assert_eq!(tfe("ldxa c,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x4F),
+        ]);
+        assert_eq!(tfe("ldxa d,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x57),
+        ]);
+        assert_eq!(tfe("ldxa e,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x5F),
+        ]);
+        assert_eq!(tfe("ldxa h,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x67),
+        ]);
+        assert_eq!(tfe("ldxa l,[4]"), vec![
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x6F),
+        ]);
     }
 
     #[test]
     fn test_error_meta_instruction_ldxa() {
-        assert_eq!(entry_lexer_error("ldxa"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction argument, expected \"[\" instead.\n\nldxa\n^--- Here");
-        assert_eq!(entry_lexer_error("ldxa a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Register\" while parsing instruction argument, expected \"[\" instead.\n\nldxa a\n     ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa bc"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Register\" while parsing instruction argument, expected \"[\" instead.\n\nldxa bc\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa\n^--- Here");
+        assert_eq!(entry_lexer_error("ldxa a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa bc"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nldxa bc\n     ^--- Here");
         assert_eq!(entry_lexer_error("ldxa [4]"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa [4]\n       ^--- Here");
         assert_eq!(entry_lexer_error("ldxa [4],"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa [4],\n        ^--- Here");
         assert_eq!(entry_lexer_error("ldxa [4],["), "In file \"main.gb.s\" on line 1, column 10: Unexpected end of input while parsing instruction label argument.\n\nldxa [4],[\n         ^--- Here");
         assert_eq!(entry_lexer_error("ldxa [4],bc"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nldxa [4],bc\n         ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa 4,a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"ConstExpression\" while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa 4,a\n     ^--- Here");
     }
 
 }
