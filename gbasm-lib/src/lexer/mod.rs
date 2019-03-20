@@ -165,13 +165,13 @@ macro_rules! lexer_token {
 mod error;
 mod file;
 mod stage;
-use self::error::LexerError;
+pub use self::error::LexerError;
 use self::file::LexerFile;
 
 
 // Re-Exports --------------------------------------------------------------------
 use self::stage::LexerStage;
-pub use self::stage::entry::EntryStage;
+pub use self::stage::entry::{EntryStage, EntryToken};
 pub use self::stage::expression::ExpressionStage;
 pub use self::stage::include::IncludeStage;
 pub use self::stage::macros::MacroStage;

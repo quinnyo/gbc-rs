@@ -9,6 +9,7 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::MacroStage;
+use crate::expression::Operator;
 use super::macros::{MacroCall, MacroToken};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
@@ -56,83 +57,6 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     }
 });
 
-
-// Types ----------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Operator {
-    ShiftRight,
-    ShiftLeft,
-    LogicalAnd,
-    LogicalOr,
-    Equals,
-    Unequals,
-    GreaterThanEqual,
-    LessThanEqual,
-    Pow,
-    DivInt,
-    LessThan,
-    GreaterThan,
-    LogicalNot,
-    Plus,
-    Minus,
-    Mul,
-    Div,
-    Modulo,
-    BitAnd,
-    BitOr,
-    BitNegate,
-    BitXor,
-}
-
-impl Operator {
-
-    pub fn len(&self) -> usize {
-        match self {
-            Operator::ShiftRight | Operator::ShiftLeft | Operator::LogicalAnd | Operator::LogicalOr |
-            Operator::Equals | Operator::Unequals | Operator::GreaterThanEqual | Operator::LessThanEqual |
-            Operator::Pow | Operator::DivInt => 2,
-            _ => 1
-        }
-    }
-
-    pub fn associativity(&self) -> usize {
-        match self {
-            Operator::Pow | Operator::BitXor => 0,
-            _ => 1
-        }
-    }
-
-    pub fn precedence(&self) -> usize {
-        match self {
-            Operator::LogicalOr => 1,
-            Operator::LogicalAnd => 2,
-            Operator::BitOr => 3,
-            Operator::BitXor => 4,
-            Operator::BitAnd => 5,
-            Operator::Equals | Operator::Unequals => 6,
-            Operator::GreaterThanEqual | Operator::LessThanEqual | Operator::LessThan | Operator::GreaterThan => 7,
-            Operator::ShiftRight | Operator::ShiftLeft => 8,
-            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => 9,
-            Operator::Mul | Operator::Div | Operator::Modulo | Operator::DivInt => 11,
-            Operator::Pow => 12,
-        }
-    }
-
-    pub fn is_unary(&self) -> bool {
-        match self {
-            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => true,
-            _ => false
-        }
-    }
-
-    pub fn is_unary_exclusive(&self) -> bool {
-        match self {
-            Operator::LogicalNot | Operator::BitNegate => true,
-            _ => false
-        }
-    }
-
-}
 
 // Value Level Lexer Implementation -------------------------------------------
 pub struct ValueStage;

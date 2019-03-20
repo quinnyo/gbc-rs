@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::IncludeStage;
+use crate::expression::{ExpressionReturnType, ExpressionArgumenType};
 use super::include::IncludeToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, LexerError, TokenType};
 
@@ -78,34 +79,16 @@ impl From<IncludeToken> for MacroToken {
 
 // Macro Definitions ----------------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
-enum MacroArgumenType {
-    Any,
-    Tokens,
-    String,
-    Number,
-    Integer
-}
-
-#[derive(Debug, Eq, PartialEq)]
-enum MacroReturnType {
-    None,
-    String,
-    Number,
-    Float,
-    Integer,
-}
-
-#[derive(Debug, Eq, PartialEq)]
 pub struct MacroDefinition {
     name: InnerToken,
-    parameters: Vec<(MacroArgumenType, InnerToken)>,
-    return_type: MacroReturnType,
+    parameters: Vec<(ExpressionArgumenType, InnerToken)>,
+    return_type: ExpressionReturnType,
     body: Vec<IncludeToken>,
     builtin: bool
 }
 
 impl MacroDefinition {
-    fn builtin(name: &str, parameters: Vec<(MacroArgumenType, &str)>, return_type: MacroReturnType) -> Self {
+    fn builtin(name: &str, parameters: Vec<(ExpressionArgumenType, &str)>, return_type: ExpressionReturnType) -> Self {
         Self {
             name: InnerToken::new(0, 0, 0, name.into()),
             parameters: parameters.into_iter().map(|(typ, name)| {
@@ -190,7 +173,7 @@ impl MacroStage {
 
                 // Parse Macro Parameter list
                 let param_tokens = Self::parse_macro_def_arguments(&mut tokens)?;
-                let parameters: Vec<(MacroArgumenType, InnerToken)> = param_tokens.into_iter().map(|t| (MacroArgumenType::Any, t.into_inner())).collect();
+                let parameters: Vec<(ExpressionArgumenType, InnerToken)> = param_tokens.into_iter().map(|t| (ExpressionArgumenType::Any, t.into_inner())).collect();
 
                 // Check against duplicate names
                 let mut param_names: HashSet<String> = HashSet::new();
@@ -221,7 +204,7 @@ impl MacroStage {
                     name: name_token.into_inner(),
                     parameters,
                     body: body_tokens,
-                    return_type: MacroReturnType::None,
+                    return_type: ExpressionReturnType::None,
                     builtin: false
                 });
 
@@ -550,40 +533,40 @@ impl MacroStage {
     fn builtin_macro_defs() -> Vec<MacroDefinition> {
         vec![
             // Noop
-            MacroDefinition::builtin("DBG", vec![], MacroReturnType::None),
+            MacroDefinition::builtin("DBG", vec![], ExpressionReturnType::None),
 
             // String Operations
-            MacroDefinition::builtin("STRUPR", vec![(MacroArgumenType::String, "text")], MacroReturnType::String),
-            MacroDefinition::builtin("STRLWR", vec![(MacroArgumenType::String, "text")], MacroReturnType::String),
-            MacroDefinition::builtin("STRSUB", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::Integer, "index"), (MacroArgumenType::Integer, "length")], MacroReturnType::String),
-            MacroDefinition::builtin("STRIN", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "search")], MacroReturnType::String),
-            MacroDefinition::builtin("STRPADR", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Integer, "length")], MacroReturnType::String),
-            MacroDefinition::builtin("STRPADL", vec![(MacroArgumenType::String, "text"), (MacroArgumenType::String, "padding"), (MacroArgumenType::Integer, "length")], MacroReturnType::String),
+            MacroDefinition::builtin("STRUPR", vec![(ExpressionArgumenType::String, "text")], ExpressionReturnType::String),
+            MacroDefinition::builtin("STRLWR", vec![(ExpressionArgumenType::String, "text")], ExpressionReturnType::String),
+            MacroDefinition::builtin("STRSUB", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::Integer, "index"), (ExpressionArgumenType::Integer, "length")], ExpressionReturnType::String),
+            MacroDefinition::builtin("STRIN", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "search")], ExpressionReturnType::String),
+            MacroDefinition::builtin("STRPADR", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")], ExpressionReturnType::String),
+            MacroDefinition::builtin("STRPADL", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")], ExpressionReturnType::String),
 
             // Geometry
-            MacroDefinition::builtin("SIN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
-            MacroDefinition::builtin("COS", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
-            MacroDefinition::builtin("TAN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
-            MacroDefinition::builtin("ASIN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
-            MacroDefinition::builtin("ACOS", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
-            MacroDefinition::builtin("ATAN", vec![(MacroArgumenType::Number, "radians")], MacroReturnType::Float),
-            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "y"), (MacroArgumenType::Number, "x")], MacroReturnType::Float),
+            MacroDefinition::builtin("SIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("COS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("TAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("ATAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")], ExpressionReturnType::Float),
 
             // Math
-            MacroDefinition::builtin("LOG", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Float),
-            MacroDefinition::builtin("EXP", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Float),
-            MacroDefinition::builtin("FLOOR", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Integer),
-            MacroDefinition::builtin("CEIL", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Integer),
-            MacroDefinition::builtin("ROUND", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Integer),
-            MacroDefinition::builtin("SQRT", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Float),
-            MacroDefinition::builtin("ABS", vec![(MacroArgumenType::Number, "value")], MacroReturnType::Number),
-            MacroDefinition::builtin("MAX", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")], MacroReturnType::Number),
-            MacroDefinition::builtin("MIN", vec![(MacroArgumenType::Number, "a"), (MacroArgumenType::Number, "b")], MacroReturnType::Number),
-            MacroDefinition::builtin("ATAN2", vec![(MacroArgumenType::Number, "from"), (MacroArgumenType::Number, "to")], MacroReturnType::Float),
+            MacroDefinition::builtin("LOG", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("EXP", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("FLOOR", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Integer),
+            MacroDefinition::builtin("CEIL", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Integer),
+            MacroDefinition::builtin("ROUND", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Integer),
+            MacroDefinition::builtin("SQRT", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Float),
+            MacroDefinition::builtin("ABS", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Number),
+            MacroDefinition::builtin("MAX", vec![(ExpressionArgumenType::Number, "a"), (ExpressionArgumenType::Number, "b")], ExpressionReturnType::Number),
+            MacroDefinition::builtin("MIN", vec![(ExpressionArgumenType::Number, "a"), (ExpressionArgumenType::Number, "b")], ExpressionReturnType::Number),
+            MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "from"), (ExpressionArgumenType::Number, "to")], ExpressionReturnType::Float),
 
             // Code
-            MacroDefinition::builtin("BYTESIZE", vec![(MacroArgumenType::Tokens, "tokens")], MacroReturnType::Integer),
-            MacroDefinition::builtin("CYCLES", vec![(MacroArgumenType::Tokens, "tokens")], MacroReturnType::Integer),
+            MacroDefinition::builtin("BYTESIZE", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
+            MacroDefinition::builtin("CYCLES", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
         ]
     }
 
@@ -594,7 +577,8 @@ impl MacroStage {
 #[cfg(test)]
 mod test {
     use crate::lexer::Lexer;
-    use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, MacroArgumenType, MacroReturnType};
+    use crate::expression::{ExpressionReturnType, ExpressionArgumenType};
+    use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken};
     use super::super::mocks::include_lex;
 
     fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
@@ -615,7 +599,7 @@ mod test {
                 name: $name,
                 parameters: $args,
                 body: $body,
-                return_type: MacroReturnType::None,
+                return_type: ExpressionReturnType::None,
                 builtin: false
             }
         }
@@ -708,7 +692,7 @@ mod test {
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![
-                (MacroArgumenType::Any, itk!(10, 12, "a"))
+                (ExpressionArgumenType::Any, itk!(10, 12, "a"))
 
             ], vec![])
         ]);
@@ -720,9 +704,9 @@ mod test {
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![
-                (MacroArgumenType::Any, itk!(10, 12, "a")),
-                (MacroArgumenType::Any, itk!(14, 16, "b")),
-                (MacroArgumenType::Any, itk!(18, 20, "c"))
+                (ExpressionArgumenType::Any, itk!(10, 12, "a")),
+                (ExpressionArgumenType::Any, itk!(14, 16, "b")),
+                (ExpressionArgumenType::Any, itk!(18, 20, "c"))
 
             ], vec![])
         ]);

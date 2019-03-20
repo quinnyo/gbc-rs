@@ -9,50 +9,11 @@ use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ExpressionStage;
-use super::expression::{ExpressionToken, Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
-use super::value::Operator;
+use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
+use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
+use super::expression::ExpressionToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
 
-
-// Types ----------------------------------------------------------------------
-type DataExpression = (usize, Expression);
-type OptionalDataExpression = Option<DataExpression>;
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum DataEndianess {
-    /// LL HH
-    Little,
-    /// HH LL
-    Big
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum DataAlignment {
-    /// Anywhere
-    Byte,
-    /// Low byte must be 00
-    Word,
-    /// May not cross a word boundary
-    WithinWord
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum DataStorage {
-    /// DB
-    Byte,
-    /// DW
-    Word,
-    /// INCBIN "..."
-    Array(Vec<u8>),
-    /// DB 1[, 2, 3]
-    Bytes(Vec<DataExpression>),
-    /// DW 1[, 2, 3]
-    Words(Vec<DataExpression>),
-    /// DS 1
-    ByteRange(DataExpression),
-    /// DS 1 expr
-    ByteData(DataExpression, DataExpression)
-}
 
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
@@ -1300,8 +1261,7 @@ impl EntryStage {
 mod test {
     use crate::lexer::Lexer;
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage};
-    use super::super::expression::{Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
-    use super::super::value::Operator;
+    use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
     use super::super::mocks::{expr_lex, expr_lex_binary};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {

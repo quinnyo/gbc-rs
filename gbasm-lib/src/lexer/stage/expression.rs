@@ -4,18 +4,14 @@ use std::mem;
 
 // External Dependencies ------------------------------------------------------
 use gbasm_cpu::{Flag, Register};
-use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ValueStage;
-use super::value::{Operator, ValueToken};
+use crate::expression::{Expression, ExpressionValue};
+use super::value::ValueToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
-
-
-// Constants
-pub const TEMPORARY_EXPRESSION_ID: usize = ::std::u32::MAX as usize;
 
 
 // Expression Specific Tokens -------------------------------------------------
@@ -136,7 +132,7 @@ impl ExpressionStage {
             }
 
             // Try to build an expression tree from the tokens
-            let expr = Expression::from_tokens(value_tokens, expression_id)?;
+            let expr = ExpressionParser::parse_tokens(value_tokens, expression_id)?;
             let id = *expression_id;
             *expression_id += 1;
             if expr.is_constant() {
@@ -181,67 +177,8 @@ impl ExpressionStage {
 }
 
 
-// Expression Abstraction -----------------------------------------------------
-// TODO move into dedicated file
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum ExpressionValue {
-    ConstantValue(InnerToken, String),
-    Integer(i32),
-    Float(OrderedFloat<f32>),
-    String(String),
-    OffsetAddress(InnerToken, i32),
-    GlobalLabelAddress(InnerToken, usize),
-    LocalLabelAddress(InnerToken, usize)
-}
-
-impl ExpressionValue {
-
-    fn is_constant(&self) -> bool {
-        match self {
-            ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
-            ExpressionValue::OffsetAddress(_, _) | ExpressionValue::GlobalLabelAddress(_, _) | ExpressionValue::LocalLabelAddress(_, _) => false
-        }
-    }
-
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Expression {
-    Binary {
-        op: Operator,
-        inner: InnerToken,
-        left: Box<Expression>,
-        right: Box<Expression>
-    },
-    Unary {
-        op: Operator,
-        inner: InnerToken,
-        right: Box<Expression>
-    },
-    Value(ExpressionValue),
-    BuiltinCall {
-        inner: InnerToken,
-        name: String,
-        args: Vec<Expression>
-    }
-}
-
-impl Expression {
-    fn from_tokens(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
-        ExpressionParser::new(tokens)?.parse_binary(expression_id, 0)
-    }
-
-    fn is_constant(&self) -> bool {
-        match self {
-            Expression::Binary { left, right, .. } => right.is_constant() && left.is_constant(),
-            Expression::Unary { right, .. } => right.is_constant(),
-            Expression::Value(value) => value.is_constant(),
-            Expression::BuiltinCall { args, .. } => args.iter().all(|arg| arg.is_constant())
-        }
-    }
-}
-
-pub struct ExpressionParser {
+// Expression Parsing ---------------------------------------------------------
+struct ExpressionParser {
     token: Option<ValueToken>,
     tokens: TokenIterator<ValueToken>,
     last_file_index: usize,
@@ -249,6 +186,10 @@ pub struct ExpressionParser {
 }
 
 impl ExpressionParser {
+
+    fn parse_tokens(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
+        ExpressionParser::new(tokens)?.parse_binary(expression_id, 0)
+    }
 
     fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, LexerError> {
         let mut tokens = TokenIterator::new(tokens);
@@ -374,10 +315,12 @@ impl ExpressionParser {
                     Expression::Value(ExpressionValue::LocalLabelAddress(inner, id)),
                 ),
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
+                    // TODO handle TokenGroups and forward tokens to EntryStage so they
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
                         args.push(ExpressionStage::parse_expression_argument(tokens, expression_id)?);
                     }
+                    // TODO need a second typ here so EntryStage can parse the instructions
                     Ok(Expression::BuiltinCall {
                         name: inner.value.clone(),
                         inner,
@@ -461,7 +404,8 @@ impl ExpressionParser {
 mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::Lexer;
-    use super::{ExpressionStage, ExpressionToken, InnerToken, Expression, ExpressionValue, Operator, Register, Flag};
+    use crate::expression::{Expression, ExpressionValue, Operator};
+    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag};
     use super::super::mocks::value_lex;
 
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
