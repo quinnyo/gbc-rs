@@ -8,6 +8,7 @@ use crate::lexer::InnerToken;
 
 // Modules --------------------------------------------------------------------
 pub mod data;
+pub mod evaluator;
 
 
 // Constants ------------------------------------------------------------------
@@ -74,7 +75,7 @@ impl ExpressionValue {
 
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ExpressionResult {
     Integer(i32),
     Float(OrderedFloat<f32>),
