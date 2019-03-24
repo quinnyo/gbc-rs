@@ -82,6 +82,16 @@ pub enum ExpressionResult {
     String(String)
 }
 
+impl ExpressionResult {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ExpressionResult::Integer(_) => "Integer",
+            ExpressionResult::Float(_) => "Float",
+            ExpressionResult::String(_) => "String"
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum ExpressionArgumenType {
     Any,
@@ -128,6 +138,33 @@ pub enum Operator {
 }
 
 impl Operator {
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Operator::ShiftRight => ">>",
+            Operator::ShiftLeft => "<<",
+            Operator::LogicalAnd => "&&",
+            Operator::LogicalOr => "||",
+            Operator::Equals => "==",
+            Operator::Unequals => "!=",
+            Operator::GreaterThanEqual => ">=",
+            Operator::LessThanEqual => "<=",
+            Operator::Pow => "**",
+            Operator::DivInt => "//",
+            Operator::LessThan => "<",
+            Operator::GreaterThan => ">",
+            Operator::LogicalNot => "!",
+            Operator::Plus => "+",
+            Operator::Minus => "-",
+            Operator::Mul => "*",
+            Operator::Div => "/",
+            Operator::Modulo => "%",
+            Operator::BitAnd => "&",
+            Operator::BitOr => "|",
+            Operator::BitNegate => "~",
+            Operator::BitXor => "^"
+        }
+    }
 
     pub fn len(&self) -> usize {
         match self {

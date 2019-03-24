@@ -44,7 +44,7 @@ pub trait LexerStage {
 
 // Test Mocks -----------------------------------------------------------------
 #[cfg(test)]
-mod mocks {
+pub mod mocks {
     // STD Dependencies -------------------------------------------------------
     use std::path::PathBuf;
     use std::collections::HashMap;
@@ -52,7 +52,7 @@ mod mocks {
 
     // Internal Dependencies --------------------------------------------------
     use crate::traits::{FileReader, FileError};
-    use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage};
+    use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 
     #[derive(Default)]
     pub struct MockFileReader {
@@ -126,6 +126,11 @@ mod mocks {
     pub fn expr_lex<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
         let lexer = value_lex(s);
         Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
+    }
+
+    pub fn entry_lex<S: Into<String>>(s: S) -> Lexer<EntryStage> {
+        let lexer = expr_lex(s);
+        Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
     }
 
     pub fn expr_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<ExpressionStage> {
