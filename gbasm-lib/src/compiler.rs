@@ -31,7 +31,7 @@ impl Compiler {
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
-        let linker = Linker::from_lexer(entry_lexer);
+        let linker = Linker::from_lexer(entry_lexer).map_err(|e| CompilerError::new("LINKER", e))?;
 
         // Go through all Entry Tokens
             // Extract Constants

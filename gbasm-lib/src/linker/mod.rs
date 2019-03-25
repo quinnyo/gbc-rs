@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::error::Error;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::{InnerToken, Lexer, LexerError, EntryStage, EntryToken};
 use crate::expression::{OptionalDataExpression, ExpressionResult};
@@ -12,28 +16,86 @@ struct LinkerSection {
     inner: InnerToken,
     base: usize,
     offset: usize,
-    size: usize
+    calculated_size: usize,
+    max_size: usize,
+    entries: Vec<SectionEntry>
+}
+
+impl LinkerSection {
+    fn add_entry(&mut self, context: &mut EvaluatorContext, token: EntryToken) -> Result<(), LexerError> {
+        let size = match token {
+            EntryToken::Instruction(_, _) => {
+                // TODO get instr size
+                0
+            },
+            EntryToken::InstructionWithArg(_, _, _) => {
+                // TODO get instr size
+                0
+            },
+            EntryToken::DebugInstruction(_, _) => {
+                // TODO get instr size
+                // TODO handle debug mode
+                0
+            },
+            EntryToken::DebugInstructionWithArg(_, _, _) => {
+                // TODO handle debug mode
+                // TODO get instr size
+                0
+            },
+            EntryToken::GlobalLabelDef(_, _) => {
+                // TODO record labels with offset
+                0
+            },
+            EntryToken::LocalLabelDef(_, _) => {
+                // TODO record labels with offset
+                0
+            },
+            EntryToken::Data { .. } => {
+                // TODO data arguments are always const and can be resolved here
+                // TODO resolve expressions / sizes of data values
+                // TODO verify data alignment, argument value size etc.
+                0
+            },
+            _ => unreachable!()
+        };
+        self.offset += size;
+        // TODO check if section exceeds max size
+        Ok(())
+    }
+
+    fn update_offsets(&mut self)  {
+        // TODO go through all entries
+        // TODO use Fixed Offsets as starting points
+        // TODO update Dynamic Offsets
+        // TODO update label offsets in self.context
+        // TODO when label is inside bank subtract ROM bank offset
+            // TODO e.g. label is in bank 1 at 0, so ROM is 4000 but label offset is still 0
+    }
+
+    fn resolve_arguments(&mut self) {
+        // TODO resolve all instruction arguments
+            // TODO check argument types
+    }
+
+    fn optimize(&mut self) {
+        // TODO run entries through optimizer
+        // TODO update_offsets()
+        // TODO resolve_arguments()
+    }
+
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct LinkerEntry {
+struct SectionEntry {
     inner: InnerToken,
     section_id: usize,
-    offset: RomOffset,
+    offset: usize,
     size: usize,
-    data: LinkerData
+    data: EntryData
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum RomOffset {
-    /// An offset that may shift around based on optimizations of entries that come before it
-    Dynamic(usize),
-    /// An offset that will not be shifted around by any optimizations performed on the rom
-    Fixed(usize)
-}
-
-#[derive(Debug, Eq, PartialEq)]
-enum LinkerData {
+enum EntryData {
     Data {
         alignment: DataAlignment,
         endianess: DataEndianess,
@@ -55,18 +117,17 @@ enum LinkerData {
 // Linker Implementation ------------------------------------------------------
 pub struct Linker {
     context: EvaluatorContext,
-    sections: Vec<LinkerSection>,
-    entries: Vec<LinkerEntry>
+    sections: Vec<LinkerSection>
 }
 
 impl Linker {
 
-    pub fn from_lexer(lexer: Lexer<EntryStage>) -> Result<Self, LexerError> {
+    pub fn from_lexer(lexer: Lexer<EntryStage>) -> Result<Self, Box<dyn Error>> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        Self::new(lexer.tokens).map_err(|err| {
+        Ok(Self::new(lexer.tokens).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
-        })
+        })?)
     }
 
     fn new(tokens: Vec<EntryToken>) -> Result<Self, LexerError> {
@@ -89,43 +150,27 @@ impl Linker {
         }
         context.resolve_constants()?;
 
-        // TODO go through remaining stuff and create LinkerEntries
-        let mut sections = Vec::new();
-        let mut entries = Vec::new();
-        let mut offset = 0;
+        // Map entries to sections
+        let mut sections: Vec<LinkerSection> = Vec::new();
         for token in entry_tokens {
-            // TODO if the current section name != previous section or current section offset != None
-                // TODO push a new section definition onto the stack and use it's offset going
-                // forward
+            if let EntryToken::SectionDeclaration { .. } = token {
+                // TODO if the current section name != previous section or current section offset != None
+                    // TODO push a new section definition onto the stack and use it's offset going
+                    // forward
 
+            } else if let Some(section) = sections.last_mut() {
+                section.add_entry(&mut context, token)?;
 
-            // TODO resolve sizes of data values
-            // TODO resolve sizes of instructions
-            // TODO record labels with offset
-            // TODO update current section offset / size
-            // TODO resolve all Expression
-            // TODO resolve constant sizes for EntryToken::Data's so all offsets (i.e. label addresses) can be calculated in
-            // one sweep instead of having to do multiple passes
-
+            } else {
+                // TODO error entry outside of section / before any section
+            }
         }
 
         // TODO check for overlappings in the section list
-        // TODO store section list for later use and reference in entries
-
-        // TODO offsets can still change after this due to optimizations
         Ok(Self {
             context,
-            sections,
-            entries
+            sections
         })
-    }
-
-    fn resolve_arguments(&mut self) {
-        // TODO resolve all data values / arguments
-            // TODO check value / argument types
-
-        // TODO resolve all instruction arguments
-            // TODO check argument types
     }
 
 }
@@ -189,9 +234,35 @@ mod test {
         assert_eq!(linker_error("A EQU B\nB EQU C\nC EQU D"), "In file \"main.gb.s\" on line 3, column 7: Reference to undeclared constant \"D\".\n\nC EQU D\n      ^--- Here");
     }
 
-    // TODO test constant evaluation and errors
-    // TODO test the type evaluation etc.
-        // TODO move those tests into the Evaluator module?
+    // Section Mapping --------------------------------------------------------
+    #[test]
+    fn test_error_entry_before_any_section() {
+
+    }
+
+    // TODO handle banks when computing offsets
+
+    #[test]
+    fn test_section_initial() {
+        // TODO ROM0[$0000]
+    }
+
+    #[test]
+    fn test_section_initial_with_default_base() {
+        // TODO ROM0
+    }
+
+    #[test]
+    fn test_section_follow_up_append() {
+        // TODO ROM0[$0000]
+        // TODO ROM0
+    }
+
+    #[test]
+    fn test_section_follow_up_initial() {
+        // TODO ROM0[$0000]
+        // TODO ROM0[$2000]
+    }
 
     // TODO test entry conversion
     // TODO test data size resolution and data value resolution

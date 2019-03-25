@@ -1,17 +1,70 @@
 // STD Dependencies -----------------------------------------------------------
 use std::mem;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+// External Dependencies ------------------------------------------------------
+use lazy_static::lazy_static;
 
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::IncludeStage;
-use crate::expression::{ExpressionReturnType, ExpressionArgumenType};
+use crate::expression::ExpressionArgumenType;
 use super::include::IncludeToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, LexerError, TokenType};
 
 
 // Statics --------------------------------------------------------------------
 const MAX_EXPANSION_DEPTH: usize = 8;
+
+lazy_static! {
+    pub static ref BUILTIN_MACRO_DEFS: Vec<MacroDefinition> = vec![
+        // Noop
+        MacroDefinition::builtin("DBG", vec![]),
+
+        // Math
+        MacroDefinition::builtin("MAX", vec![(ExpressionArgumenType::Number, "a"), (ExpressionArgumenType::Number, "b")]),
+        MacroDefinition::builtin("MIN", vec![(ExpressionArgumenType::Number, "a"), (ExpressionArgumenType::Number, "b")]),
+        MacroDefinition::builtin("FLOOR", vec![(ExpressionArgumenType::Number, "value")]),
+        MacroDefinition::builtin("CEIL", vec![(ExpressionArgumenType::Number, "value")]),
+        MacroDefinition::builtin("ROUND", vec![(ExpressionArgumenType::Number, "value")]),
+
+        MacroDefinition::builtin("LOG", vec![(ExpressionArgumenType::Number, "value")]),
+        MacroDefinition::builtin("EXP", vec![(ExpressionArgumenType::Number, "value")]),
+        MacroDefinition::builtin("SQRT", vec![(ExpressionArgumenType::Number, "value")]),
+        MacroDefinition::builtin("ABS", vec![(ExpressionArgumenType::Number, "value")]),
+        MacroDefinition::builtin("RAND", vec![(ExpressionArgumenType::Number, "from"), (ExpressionArgumenType::Number, "to")]),
+
+        // String Operations
+        MacroDefinition::builtin("STRUPR", vec![(ExpressionArgumenType::String, "text")]),
+        MacroDefinition::builtin("STRLWR", vec![(ExpressionArgumenType::String, "text")]),
+        MacroDefinition::builtin("STRLEN", vec![(ExpressionArgumenType::String, "text")]),
+        MacroDefinition::builtin("STRSUB", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::Integer, "index"), (ExpressionArgumenType::Integer, "length")]),
+        MacroDefinition::builtin("STRIN", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "search")]),
+        MacroDefinition::builtin("STRPADR", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")]),
+        MacroDefinition::builtin("STRPADL", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")]),
+
+        // Geometry
+        // MacroDefinition::builtin("SIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        // MacroDefinition::builtin("COS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        // MacroDefinition::builtin("TAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        // MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        // MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        // MacroDefinition::builtin("ATAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        // MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")], ExpressionReturnType::Float),
+
+        // Code
+        // MacroDefinition::builtin("BYTESIZE", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
+        // MacroDefinition::builtin("CYCLES", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
+    ];
+    pub static ref BUILTIN_MACRO_INDEX: HashMap<String, usize> = {
+        let mut map = HashMap::new();
+        for (index, def) in BUILTIN_MACRO_DEFS.iter().enumerate() {
+            map.insert(def.name.value.clone(), index);
+        }
+        map
+    };
+
+}
 
 
 // Macro Specific Tokens ------------------------------------------------------
@@ -81,21 +134,19 @@ impl From<IncludeToken> for MacroToken {
 #[derive(Debug, Eq, PartialEq)]
 pub struct MacroDefinition {
     name: InnerToken,
-    parameters: Vec<(ExpressionArgumenType, InnerToken)>,
-    return_type: ExpressionReturnType,
+    pub parameters: Vec<(ExpressionArgumenType, InnerToken)>,
     body: Vec<IncludeToken>,
     builtin: bool
 }
 
 impl MacroDefinition {
-    fn builtin(name: &str, parameters: Vec<(ExpressionArgumenType, &str)>, return_type: ExpressionReturnType) -> Self {
+    fn builtin(name: &str, parameters: Vec<(ExpressionArgumenType, &str)>) -> Self {
         Self {
             name: InnerToken::new(0, 0, 0, name.into()),
             parameters: parameters.into_iter().map(|(typ, name)| {
                 (typ, InnerToken::new(0, 0, 0, name.into()))
 
             }).collect(),
-            return_type,
             body: Vec::new(),
             builtin: true
         }
@@ -145,7 +196,6 @@ impl MacroStage {
 
     ) -> Result<(Vec<MacroDefinition>, Vec<MacroToken>), LexerError> {
 
-        let builtin_macro_defs = Self::builtin_macro_defs();
         let mut user_macro_defs = Vec::new();
         let mut tokens_without_macro_defs = Vec::with_capacity(tokens.len());
 
@@ -161,7 +211,7 @@ impl MacroStage {
 
                 // Verify Macro Name
                 let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
-                if Self::get_macro_by_name(&builtin_macro_defs, name_token.value()).is_some() {
+                if Self::get_macro_by_name(&BUILTIN_MACRO_DEFS, name_token.value()).is_some() {
                     return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.value())));
 
                 } else if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.value()) {
@@ -204,7 +254,6 @@ impl MacroStage {
                     name: name_token.into_inner(),
                     parameters,
                     body: body_tokens,
-                    return_type: ExpressionReturnType::None,
                     builtin: false
                 });
 
@@ -220,7 +269,7 @@ impl MacroStage {
             &mut macro_call_id,
             0,
             macro_calls,
-            &builtin_macro_defs,
+            &BUILTIN_MACRO_DEFS,
             &user_macro_defs
         )?;
 
@@ -530,46 +579,6 @@ impl MacroStage {
 
     }
 
-    fn builtin_macro_defs() -> Vec<MacroDefinition> {
-        vec![
-            // Noop
-            MacroDefinition::builtin("DBG", vec![], ExpressionReturnType::None),
-
-            // String Operations
-            MacroDefinition::builtin("STRUPR", vec![(ExpressionArgumenType::String, "text")], ExpressionReturnType::String),
-            MacroDefinition::builtin("STRLWR", vec![(ExpressionArgumenType::String, "text")], ExpressionReturnType::String),
-            MacroDefinition::builtin("STRSUB", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::Integer, "index"), (ExpressionArgumenType::Integer, "length")], ExpressionReturnType::String),
-            MacroDefinition::builtin("STRIN", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "search")], ExpressionReturnType::String),
-            MacroDefinition::builtin("STRPADR", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")], ExpressionReturnType::String),
-            MacroDefinition::builtin("STRPADL", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")], ExpressionReturnType::String),
-
-            // Geometry
-            MacroDefinition::builtin("SIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("COS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("TAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("ATAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")], ExpressionReturnType::Float),
-
-            // Math
-            MacroDefinition::builtin("LOG", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("EXP", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("FLOOR", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Integer),
-            MacroDefinition::builtin("CEIL", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Integer),
-            MacroDefinition::builtin("ROUND", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Integer),
-            MacroDefinition::builtin("SQRT", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Float),
-            MacroDefinition::builtin("ABS", vec![(ExpressionArgumenType::Number, "value")], ExpressionReturnType::Number),
-            MacroDefinition::builtin("MAX", vec![(ExpressionArgumenType::Number, "a"), (ExpressionArgumenType::Number, "b")], ExpressionReturnType::Number),
-            MacroDefinition::builtin("MIN", vec![(ExpressionArgumenType::Number, "a"), (ExpressionArgumenType::Number, "b")], ExpressionReturnType::Number),
-            MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "from"), (ExpressionArgumenType::Number, "to")], ExpressionReturnType::Float),
-
-            // Code
-            MacroDefinition::builtin("BYTESIZE", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
-            MacroDefinition::builtin("CYCLES", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
-        ]
-    }
-
 }
 
 
@@ -577,7 +586,7 @@ impl MacroStage {
 #[cfg(test)]
 mod test {
     use crate::lexer::Lexer;
-    use crate::expression::{ExpressionReturnType, ExpressionArgumenType};
+    use crate::expression::ExpressionArgumenType;
     use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken};
     use super::super::mocks::include_lex;
 
@@ -599,7 +608,6 @@ mod test {
                 name: $name,
                 parameters: $args,
                 body: $body,
-                return_type: ExpressionReturnType::None,
                 builtin: false
             }
         }
@@ -960,6 +968,22 @@ mod test {
         assert_eq!(lexer.macro_calls_count(), 3);
     }
 
+    #[test]
+    fn test_error_macro_call_too_few_parameters() {
+        assert_eq!(
+            macro_lexer_error("MAX(1)"),
+            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"MAX\", expected 2 parameter(s) but got 1.\n\nMAX(1)\n^--- Here"
+        );
+    }
+
+    #[test]
+    fn test_error_macro_call_too_many_parameters() {
+        assert_eq!(
+            macro_lexer_error("MAX(1, 2, 3)"),
+            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"MAX\", expected 2 parameter(s) but got 3.\n\nMAX(1, 2, 3)\n^--- Here"
+        );
+    }
+
     // User Macro Calls -------------------------------------------------------
 
     #[test]
@@ -1125,6 +1149,22 @@ mod test {
         assert_eq!(
             macro_lexer("FOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\n MACRO FOO() ENDMACRO").macro_calls_count(),
             9
+        );
+    }
+
+    #[test]
+    fn test_error_macro_user_too_few_parameters() {
+        assert_eq!(
+            macro_lexer_error("FOO() MACRO FOO(@b) b ENDMACRO"),
+            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"FOO\", expected 1 parameter(s) but got 0.\n\nFOO() MACRO FOO(@b) b ENDMACRO\n^--- Here"
+        );
+    }
+
+    #[test]
+    fn test_error_macro_user_too_many_parameters() {
+        assert_eq!(
+            macro_lexer_error("FOO(1, 2) MACRO FOO(@b) b ENDMACRO"),
+            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"FOO\", expected 1 parameter(s) but got 2.\n\nFOO(1, 2) MACRO FOO(@b) b ENDMACRO\n^--- Here"
         );
     }
 

@@ -174,7 +174,7 @@ use self::stage::LexerStage;
 pub use self::stage::entry::{EntryStage, EntryToken};
 pub use self::stage::expression::{ExpressionStage, ExpressionToken};
 pub use self::stage::include::IncludeStage;
-pub use self::stage::macros::MacroStage;
+pub use self::stage::macros::{MacroStage, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
 pub use self::stage::value::ValueStage;
 use self::stage::macros::MacroCall;
 

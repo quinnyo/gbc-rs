@@ -90,6 +90,34 @@ impl ExpressionResult {
             ExpressionResult::String(_) => "String"
         }
     }
+
+    pub fn is_argument_type(&self, typ: &ExpressionArgumenType) -> bool {
+        match self {
+            ExpressionResult::Integer(_) => match typ {
+                ExpressionArgumenType::Any => true,
+                ExpressionArgumenType::Tokens => false,
+                ExpressionArgumenType::String => false,
+                ExpressionArgumenType::Number => true,
+                ExpressionArgumenType::Integer => true
+            },
+            ExpressionResult::Float(_) => match typ {
+                ExpressionArgumenType::Any => true,
+                ExpressionArgumenType::Tokens => false,
+                ExpressionArgumenType::String => false,
+                ExpressionArgumenType::Number => true,
+                ExpressionArgumenType::Integer => false
+            },
+            ExpressionResult::String(_) => match typ {
+                ExpressionArgumenType::Any => true,
+                ExpressionArgumenType::Tokens => false,
+                ExpressionArgumenType::String => true,
+                ExpressionArgumenType::Number => false,
+                ExpressionArgumenType::Integer => false
+            }
+        }
+
+    }
+
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -101,14 +129,18 @@ pub enum ExpressionArgumenType {
     Integer
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum ExpressionReturnType {
-    None,
-    String,
-    Number,
-    Float,
-    Integer,
+impl ExpressionArgumenType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ExpressionArgumenType::Any => "Any",
+            ExpressionArgumenType::Tokens => "Tokens",
+            ExpressionArgumenType::String => "String",
+            ExpressionArgumenType::Number => "Number",
+            ExpressionArgumenType::Integer => "Integer"
+        }
+    }
 }
+
 
 // Operators ------------------------------------------------------------------
 #[derive(Debug, Eq, PartialEq, Clone)]
