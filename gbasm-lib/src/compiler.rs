@@ -31,19 +31,12 @@ impl Compiler {
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
-        let linker = Linker::from_lexer(entry_lexer).map_err(|e| CompilerError::new("LINKER", e))?;
+        let _linker = Linker::from_lexer(entry_lexer).map_err(|e| CompilerError::new("LINKER", e))?;
 
-        // Go through all Entry Tokens
-            // Extract Constants
-            // Add Remaining Tokens to Layout
+        // TODO optimize if flags are passed
 
-        // Resolve Constants
-        // Resolve Sizes
-        // Create a mapping of all labels defs to their rom location/offsets
-        // Resolve all other expressions
-            // Resolve labels via reference id
-            // Also match macro_call_id of tokens
-        // Optimize
+        // TODO figure out required rom size and generate
+
         Ok(())
     }
 }

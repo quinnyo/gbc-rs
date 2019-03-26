@@ -9,7 +9,7 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::{InnerToken, LexerError, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
-use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionResult, Operator};
+use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionResult, OptionalDataExpression, Operator};
 
 
 // Expression Evaluator -------------------------------------------------------
@@ -47,7 +47,7 @@ impl EvaluatorContext {
         for name in names {
             let constant = self.raw_constants.get(&name).unwrap().clone();
             let stack = vec![constant.expression.0];
-            let c = self.resolve_expression(
+            let c = self.resolve_expression_inner(
                 &stack,
                 constant.expression.1
             )?;
@@ -77,7 +77,7 @@ impl EvaluatorContext {
             } else {
                 let mut child_stack = constant_stack.to_vec();
                 child_stack.push(id);
-                self.resolve_expression(
+                self.resolve_expression_inner(
                     &child_stack,
                     value
                 )
@@ -88,7 +88,21 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn resolve_expression(
+    pub fn resolve_optional_expression(
+        &mut self,
+        expression: OptionalDataExpression
+
+    ) -> Result<Option<ExpressionResult>, LexerError> {
+        if let Some((_, expr)) = expression {
+            let stack = Vec::new();
+            Ok(Some(self.resolve_expression_inner(&stack, expr)?))
+
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn resolve_expression_inner(
         &mut self,
         constant_stack: &[usize],
         expression: Expression
@@ -96,18 +110,18 @@ impl EvaluatorContext {
     ) -> Result<ExpressionResult, LexerError> {
         Ok(match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.resolve_expression(
+                let left = self.resolve_expression_inner(
                     constant_stack,
                     *left
                 )?;
-                let right = self.resolve_expression(
+                let right = self.resolve_expression_inner(
                     constant_stack,
                     *right
                 )?;
                 Self::apply_binary_operator(&inner, op.clone(), left, right)?
             },
             Expression::Unary { inner, op, right  } => {
-                let right = self.resolve_expression(
+                let right = self.resolve_expression_inner(
                     constant_stack,
                     *right
                 )?;
@@ -144,7 +158,7 @@ impl EvaluatorContext {
             Expression::BuiltinCall { inner, name, args } => {
                 let mut arguments = Vec::new();
                 for arg in args {
-                    arguments.push(self.resolve_expression(
+                    arguments.push(self.resolve_expression_inner(
                         constant_stack,
                         arg
                     )?);
@@ -223,6 +237,94 @@ impl EvaluatorContext {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().round() as i32),
                 _ => unreachable!("Invalid ROUND arguments")
+            },
+
+            "LOG" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).log(::std::f32::consts::LOG2_E))),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.log(::std::f32::consts::LOG2_E))),
+                _ => unreachable!("Invalid LOG arguments")
+            },
+            "EXP" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).exp())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.exp())),
+                _ => unreachable!("Invalid EXP arguments")
+            },
+            "SQRT" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).sqrt())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.sqrt())),
+                _ => unreachable!("Invalid EXP arguments")
+            },
+            "ABS" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Integer(i.abs()),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.abs())),
+                _ => unreachable!("Invalid EXP arguments")
+            },
+
+
+            // String
+            "STRUPR" => match &args[0] {
+                ExpressionResult::String(s) => ExpressionResult::String(s.to_ascii_uppercase()),
+                _ => unreachable!("Invalid STRUPR arguments")
+            },
+            "STRLWR" => match &args[0] {
+                ExpressionResult::String(s) => ExpressionResult::String(s.to_ascii_lowercase()),
+                _ => unreachable!("Invalid STRLWR arguments")
+            },
+            "STRLEN" => match &args[0] {
+                ExpressionResult::String(s) => ExpressionResult::Integer(s.len() as i32),
+                _ => unreachable!("Invalid STRLEN arguments")
+            },
+            "STRSUB" => match (&args[0], &args[1], &args[2]) {
+                (ExpressionResult::String(s), ExpressionResult::Integer(index), ExpressionResult::Integer(len)) => {
+                    if *index < 0  {
+                        return Err(inner.error("Parameter #1 (\"index\") of builtin macro \"STRSUB\" must be positive.".to_string()));
+
+                    } else if *len < 0 {
+                        return Err(inner.error("Parameter #2 (\"length\") of builtin macro \"STRSUB\" must be positive.".to_string()));
+
+                    } else {
+                        let from = cmp::max(*index, 0) as usize;
+                        let to = cmp::min(from + *len as usize, s.len());
+                        ExpressionResult::String(s[from..to].to_string())
+                    }
+                },
+                _ => unreachable!("Invalid STRSUB arguments")
+            },
+            "STRIN" => match (&args[0], &args[1]) {
+                (ExpressionResult::String(s), ExpressionResult::String(i)) => {
+                    ExpressionResult::Integer(b2i(s.contains(i)))
+                },
+                _ => unreachable!("Invalid STRIN arguments")
+            },
+            "STRPADR" => match (&args[0], &args[1], &args[2]) {
+                (ExpressionResult::String(s), ExpressionResult::String(padding), ExpressionResult::Integer(len)) => {
+                    if padding.len() != 1  {
+                        return Err(inner.error("Parameter #1 (\"padding\") of builtin macro \"STRPADR\" must of length 1.".to_string()));
+
+                    } else if *len < 0 {
+                        return Err(inner.error("Parameter #2 (\"length\") of builtin macro \"STRPADR\" must be positive.".to_string()));
+
+                    } else {
+                        let extension = cmp::max(cmp::max(*len, 0) as usize, s.len()) - s.len();
+                        ExpressionResult::String(format!("{}{}", s, padding.repeat(extension)))
+                    }
+                },
+                _ => unreachable!("Invalid STRPADR arguments")
+            },
+            "STRPADL" => match (&args[0], &args[1], &args[2]) {
+                (ExpressionResult::String(s), ExpressionResult::String(padding), ExpressionResult::Integer(len)) => {
+                    if padding.len() != 1  {
+                        return Err(inner.error("Parameter #1 (\"padding\") of builtin macro \"STRPADL\" must of length 1.".to_string()));
+
+                    } else if *len < 0 {
+                        return Err(inner.error("Parameter #2 (\"length\") of builtin macro \"STRPADL\" must be positive.".to_string()));
+
+                    } else {
+                        let extension = cmp::max(cmp::max(*len, 0) as usize, s.len()) - s.len();
+                        ExpressionResult::String(format!("{}{}", padding.repeat(extension), s))
+                    }
+                },
+                _ => unreachable!("Invalid STRPADL arguments")
             },
             _ => unimplemented!("Unimplemented macro call: {}", name)
 
@@ -535,7 +637,7 @@ mod test {
         if let ExpressionToken::ConstExpression(_, _, expr) = token {
             let mut context = EvaluatorContext::new();
             let stack = Vec::new();
-            context.resolve_expression(&stack, expr)
+            context.resolve_expression_inner(&stack, expr)
 
         } else {
             panic!("Not a constant expression");
@@ -759,7 +861,6 @@ mod test {
         assert_eq!(const_expression("ROUND(1.5)"), ExpressionResult::Integer(2));
         assert_eq!(const_expression("ROUND(1.6)"), ExpressionResult::Integer(2));
 
-        // TODO implement
         assert_eq!(const_expression("STRUPR('hello')"), ExpressionResult::String("HELLO".to_string()));
         assert_eq!(const_expression("STRLWR('HELLO')"), ExpressionResult::String("hello".to_string()));
         assert_eq!(const_expression("STRLEN('HELLO')"), ExpressionResult::Integer(5));
@@ -767,16 +868,34 @@ mod test {
         assert_eq!(const_expression("STRSUB('A', 0, 2)"), ExpressionResult::String("A".to_string()));
         assert_eq!(const_expression("STRSUB('A', 0, 0)"), ExpressionResult::String("".to_string()));
         assert_eq!(const_expression("STRSUB('A', 1, 1)"), ExpressionResult::String("".to_string()));
-        assert_eq!(const_expression_error("STRSUB('A', -1, 1)"), "");
-        assert_eq!(const_expression_error("STRSUB('A', 1, -1)"), "");
-        assert_eq!(const_expression("STRIN('ABCDE', 'BCD)"), ExpressionResult::Integer(1));
-        assert_eq!(const_expression("STRIN('ABCDE', 'ACD)"), ExpressionResult::Integer(0));
+        assert_eq!(const_expression_error("STRSUB('A', -1, 1)"), "Parameter #1 (\"index\") of builtin macro \"STRSUB\" must be positive.");
+        assert_eq!(const_expression_error("STRSUB('A', 1, -1)"), "Parameter #2 (\"length\") of builtin macro \"STRSUB\" must be positive.");
+        assert_eq!(const_expression("STRIN('ABCDE', 'BCD')"), ExpressionResult::Integer(1));
+        assert_eq!(const_expression("STRIN('ABCDE', 'ACD')"), ExpressionResult::Integer(0));
+        assert_eq!(const_expression_error("STRPADR('A', '', 4)"), "Parameter #1 (\"padding\") of builtin macro \"STRPADR\" must of length 1.");
+        assert_eq!(const_expression_error("STRPADR('A', 'AB', 4)"), "Parameter #1 (\"padding\") of builtin macro \"STRPADR\" must of length 1.");
+        assert_eq!(const_expression_error("STRPADR('A', 'A', -1)"), "Parameter #2 (\"length\") of builtin macro \"STRPADR\" must be positive.");
         assert_eq!(const_expression("STRPADR('A', 'B', 4)"), ExpressionResult::String("ABBB".to_string()));
+        assert_eq!(const_expression_error("STRPADL('A', '', 4)"), "Parameter #1 (\"padding\") of builtin macro \"STRPADL\" must of length 1.");
+        assert_eq!(const_expression_error("STRPADL('A', 'AB', 4)"), "Parameter #1 (\"padding\") of builtin macro \"STRPADL\" must of length 1.");
+        assert_eq!(const_expression_error("STRPADL('A', 'A', -1)"), "Parameter #2 (\"length\") of builtin macro \"STRPADL\" must be positive.");
         assert_eq!(const_expression("STRPADL('A', 'B', 4)"), ExpressionResult::String("BBBA".to_string()));
 
-        // TODO test / implement remaining macros required to run tuff/vectroid/sprite
+        assert_eq!(const_expression("LOG(2)"), ExpressionResult::Float(OrderedFloat(1.8911946)));
+        assert_eq!(const_expression("LOG(2.5)"), ExpressionResult::Float(OrderedFloat(2.5000234)));
+        assert_eq!(const_expression("EXP(1)"), ExpressionResult::Float(OrderedFloat(2.7182817)));
+        assert_eq!(const_expression("EXP(1.5)"), ExpressionResult::Float(OrderedFloat(4.481689)));
+        assert_eq!(const_expression("SQRT(9)"), ExpressionResult::Float(OrderedFloat(3.0)));
+        assert_eq!(const_expression("SQRT(9.0)"), ExpressionResult::Float(OrderedFloat(3.0)));
+        assert_eq!(const_expression("ABS(1)"), ExpressionResult::Integer(1));
+        assert_eq!(const_expression("ABS(1.5)"), ExpressionResult::Float(OrderedFloat(1.5)));
+        assert_eq!(const_expression("ABS(-1)"), ExpressionResult::Integer(1));
+        assert_eq!(const_expression("ABS(-1.5)"), ExpressionResult::Float(OrderedFloat(1.5)));
+
+        // TODO
+        // assert_eq!(const_expression("RAND(0, 10)"), ExpressionResult::Integer(3));
+        // assert_eq!(const_expression("RAND(0.0, 1.0)"), ExpressionResult::Float(OrderedFloat(3.0)));
 
     }
 
 }
-
