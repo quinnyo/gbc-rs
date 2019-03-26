@@ -1,4 +1,5 @@
 // STD Dependencies -----------------------------------------------------------
+use std::cmp;
 use std::fmt;
 use std::error::Error;
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use lazy_static::lazy_static;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{InnerToken, Lexer, LexerError, EntryStage, EntryToken};
+use crate::lexer::{InnerToken, Lexer, LexerError, LexerToken, EntryStage, EntryToken};
 use crate::expression::{OptionalDataExpression, ExpressionResult};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
@@ -86,7 +87,7 @@ struct SectionDefault {
 #[derive(Debug, Eq, PartialEq)]
 struct LinkerSection {
     id: usize,
-    hash: String,
+    name: String,
     segment: String,
     inner: InnerToken,
 
@@ -101,7 +102,7 @@ struct LinkerSection {
 
 impl fmt::Display for LinkerSection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{: >2}] {: >5}[{:0>4x}-{:0>4x} +{:0>4x}][{}]", self.id, self.hash, self.start_address, self.end_address, self.bank_offset, self.bank)
+        write!(f, "[{: >2}][{: >16}] {: >5}[{:0>4x}-{:0>4x} +{:0>4x}][{}]", self.id, self.name, self.segment, self.start_address, self.end_address, self.bank_offset, self.bank)
     }
 }
 
@@ -109,20 +110,20 @@ impl LinkerSection {
     fn add_entry(&mut self, _context: &mut EvaluatorContext, token: EntryToken) -> Result<(), LexerError> {
         match token {
             EntryToken::Instruction(_, _) => {
-                // TODO error if ram section
+                // TODO error if rom section
                 // TODO get instr size
             },
             EntryToken::InstructionWithArg(_, _, _) => {
-                // TODO error if ram section
+                // TODO error if rom section
                 // TODO get instr size
             },
             EntryToken::DebugInstruction(_, _) => {
-                // TODO error if ram section
+                // TODO error if rom section
                 // TODO get instr size
                 // TODO handle debug mode
             },
             EntryToken::DebugInstructionWithArg(_, _, _) => {
-                // TODO error if ram section
+                // TODO error if rom section
                 // TODO handle debug mode
                 // TODO get instr size
             },
@@ -133,6 +134,7 @@ impl LinkerSection {
                 // TODO record labels with offset into context
             },
             EntryToken::Data { .. } => {
+                // TODO check if rom section
                 // TODO data arguments are always const and can be resolved here
                 // TODO resolve expressions / sizes of data values
                 // TODO verify data alignment, argument value size etc.
@@ -140,6 +142,10 @@ impl LinkerSection {
             _ => unreachable!()
         }
         Ok(())
+    }
+
+    fn add_sub_section(&mut self, inner: InnerToken, name: Option<String>) {
+        // TODO push related entry
     }
 
     fn resolve_addresses(&mut self, _context: &mut EvaluatorContext)  {
@@ -210,6 +216,9 @@ enum EntryData {
         argument: OptionalDataExpression,
         value: Option<ExpressionResult>,
         is_debug: bool
+    },
+    SubSection {
+        name: String
     }
 }
 
@@ -257,43 +266,40 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                // TODO test error not string
-                let name = opt_string(&inner, context.resolve_optional_expression(name)?)?;
-                // TODO test error not positive offset
-                let segment_offset = opt_integer(&inner, context.resolve_optional_expression(segment_offset)?)?;
-                // TODO test error not positive size
-                let segment_size = opt_integer(&inner, context.resolve_optional_expression(segment_size)?)?;
-                // TODO test error not positive index
-                let bank_index = opt_integer(&inner, context.resolve_optional_expression(bank_index)?)?;
-
-                // Section Hash
-                let hash = if let Some(bank) = bank_index {
-                    format!("{}-{}", segment_name, bank)
-
-                } else {
-                    segment_name.clone()
-                };
+                let name = opt_string(&inner, context.resolve_optional_expression(name)?, "Invalid section name")?;
+                let segment_offset = opt_integer(&inner, context.resolve_optional_expression(segment_offset)?, "Invalid section offset")?;
+                let segment_size = opt_integer(&inner, context.resolve_optional_expression(segment_size)?, "Invalid section size")?;
+                let bank_index = opt_integer(&inner, context.resolve_optional_expression(bank_index)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
-                //let bank = bank_index.map(|i| i).or(defaults.min_bank).unwrap_or(0);
                 if let Some(offset) = segment_offset {
                     let id = sections.len();
-                    sections.push(Self::create_section(id, segment_name, hash, inner, Some(offset), segment_size, bank_index)?);
+                    sections.push(Self::create_section(id, segment_name, name, inner, Some(offset), segment_size, bank_index)?);
                     section_index = id;
 
                 // If no offset is specified, search from the end for a matching NAME-BANK hash
-                } else if let Some(id) = sections.iter().rev().find(|s| s.hash == hash).map(|s| s.id) {
-                    section_index = id;
-
-                // If no section is found create a new section
                 } else {
-                    let id = sections.len();
-                    sections.push(Self::create_section(id, segment_name, hash, inner, None, segment_size, bank_index)?);
-                    section_index = id;
+
+                    // Section Hash
+                    let defaults = SECTION_DEFAULTS.get(segment_name.as_str()).expect("Invalid segment name");
+                    let hash = (&segment_name, bank_index.or(defaults.min_bank).unwrap_or(0));
+
+                    if let Some(id) = sections.iter().rev().find(|s| (&s.segment, s.bank) == hash).map(|s| s.id) {
+                        section_index = id;
+                        if let Some(section) = sections.get_mut(section_index) {
+                            section.add_sub_section(inner, name);
+                        }
+
+                    // If no section is found create a new section
+                    } else {
+                        let id = sections.len();
+                        sections.push(Self::create_section(id, segment_name, name, inner, None, segment_size, bank_index)?);
+                        section_index = id;
+                    }
                 }
 
             } else if sections.is_empty() {
-                // TODO error entry outside of section / before any section
+                return Err(token.error("Unexpected ROM entry before any section declaration".to_string()))
 
             } else if let Some(section) = sections.get_mut(section_index) {
                 section.add_entry(&mut context, token)?;
@@ -302,7 +308,12 @@ impl Linker {
 
         // Sort sections by base address
         sections.sort_by(|a, b| {
-            a.start_address.cmp(&b.start_address)
+            if a.start_address == b.start_address {
+                a.bank.cmp(&b.bank)
+
+            } else {
+                a.start_address.cmp(&b.start_address)
+            }
         });
 
         // Limit end_address of sections to next section start_address - 1
@@ -311,10 +322,11 @@ impl Linker {
 
         }).collect();
 
-        // TODO test
         for (section, (next_start, next_segment)) in sections.iter_mut().zip(section_starts.into_iter()) {
             if section.segment == next_segment {
-                section.end_address = next_start - 1;
+                if section.end_address >= next_start {
+                    section.end_address = next_start - 1;
+                }
             }
         }
 
@@ -322,9 +334,6 @@ impl Linker {
         for s in &mut sections {
             s.resolve_addresses(&mut context);
         }
-
-        // TODO check for overlappings in the section list must only be done once since later on
-        // sections can only get smaller
 
         for s in &mut sections {
             s.resolve_instruction_arguments(&mut context);
@@ -368,7 +377,7 @@ impl Linker {
     fn create_section(
         id: usize,
         segment: String,
-        hash: String,
+        name: Option<String>,
         inner: InnerToken,
         segment_offset: Option<usize>,
         segment_size: Option<usize>,
@@ -382,62 +391,71 @@ impl Linker {
         let bank = if segment_bank.is_none() && defaults.min_bank.is_some() {
             defaults.min_bank.unwrap_or(0)
 
+        } else if let Some(bank) = segment_bank {
+            let min = defaults.min_bank.unwrap_or(0);
+            let max = defaults.max_bank.unwrap_or(0);
+            if defaults.min_bank.is_none() {
+                return Err(inner.error(format!("Invalid section bank index of {}, section does not support banking.", bank)))
+
+            } else if bank < min || bank > max {
+                return Err(inner.error(format!("Invalid section bank index of {}, must lie between {} and {}.", bank, min ,max)))
+
+            } else {
+                bank
+            }
+
         } else {
-            segment_bank.unwrap_or(0)
+            0
         };
 
-        // TODO Check if the segment is banked
-        // TODO Check for negative bank indicies
-        // TODO Check for max bank
-
-        // Size
-        let mut size = segment_size.unwrap_or(defaults.size);
-        if size == 0 {
-            // Fix old workaround from gbasm-js
-            size = defaults.size;
-        }
-
         // For sections with specified offsets we still need to correct for banking
-        let (start_address, end_address, bank_offset) = if let Some(offset) = segment_offset {
-            // TODO test
+        let (start, default_end) = (defaults.base_address, defaults.base_address + defaults.size);
+        let (start_address, bank_offset) = if let Some(offset) = segment_offset {
             if bank == 0 {
-                (
-                    offset,
-                    defaults.base_address + size,
-                    0
-                )
+                (offset, 0)
 
-            // TODO test
             } else {
-                (
-                    offset,
-                    defaults.base_address + size,
-                    (bank - 1) * defaults.size
-                )
+                (offset, (bank - 1) * defaults.size)
             }
 
         // Set default offset if not specified
         } else if bank == 0 {
-            // TODO test
-            (
-                defaults.base_address,
-                defaults.base_address + size,
-                0
-            )
+            (start, 0)
 
         } else {
-            // TODO test
-            (
-                defaults.base_address,
-                defaults.base_address + size,
-                (bank - 1) * defaults.size
-            )
+            (start, (bank - 1) * defaults.size)
         };
 
-        // TODO check if start_address is inside base_address - base_address + size range
+        // Calculate section size
+        let end_address = if let Some(size) = segment_size {
+            // Workaround incorrect gbasm-js behaviour
+            if size == 0  {
+                // consume rest of available section
+                cmp::min(start_address + defaults.size, default_end)
+
+            } else {
+                start_address + size
+            }
+
+        } else {
+            // consume rest of available section
+            cmp::min(start_address + defaults.size, default_end)
+        };
+
+        // Validate that start_address is in range of section bounds
+        if start_address < start || start_address >= default_end {
+            return Err(inner.error(format!("Invalid section offset of ${:0>4x}, must lie between >=${:0>4x} and <=${:0>4x}", start_address, start, default_end - 1)));
+
+        // Validate that section does not exceed size bounds
+        } else if end_address > default_end {
+            let size = end_address - start_address;
+            let exceed = end_address - default_end;
+            return Err(inner.error(format!("Invalid section size of ${:0>4x}, may not exceeed upper section bound at ${:0>4x}. Exceeds bound by {} bytes(s).", size, default_end, exceed)));
+        }
+
         Ok(LinkerSection {
             id,
-            hash,
+            name: name.unwrap_or_else(|| "".to_string()),
             segment,
             inner,
             start_address,
@@ -454,7 +472,8 @@ impl Linker {
 
 fn opt_string(
     inner: &InnerToken,
-    result: Option<ExpressionResult>
+    result: Option<ExpressionResult>,
+    msg: &'static str
 
 ) -> Result<Option<String>, LexerError> {
     match result {
@@ -463,14 +482,15 @@ fn opt_string(
         },
         None => Ok(None),
         _ => {
-            Err(inner.error("Expected a string value instead.".to_string()))
+            Err(inner.error(format!("{}, expected a string value instead.", msg)))
         }
     }
 }
 
 fn opt_integer(
     inner: &InnerToken,
-    result: Option<ExpressionResult>
+    result: Option<ExpressionResult>,
+    msg: &'static str
 
 ) -> Result<Option<usize>, LexerError> {
     match result {
@@ -479,12 +499,12 @@ fn opt_integer(
                 Ok(Some(i as usize))
 
             } else {
-                Err(inner.error("Expected a positive integer value instead.".to_string()))
+                Err(inner.error(format!("{}, expected a positive integer value instead.", msg)))
             }
         },
         None => Ok(None),
         _ => {
-            Err(inner.error("Expected a positive integer value instead.".to_string()))
+            Err(inner.error(format!("{}, expected a positive integer value instead.", msg)))
         }
     }
 }
@@ -515,6 +535,13 @@ mod test {
             a.0.cmp(&b.0)
         });
         constants
+    }
+
+    fn linker_sections(linker: Linker) -> Vec<String> {
+        linker.sections.iter().map(|s| {
+            format!("{}", s)
+
+        }).collect()
     }
 
     // Constant Evaluation ----------------------------------------------------
@@ -551,42 +578,112 @@ mod test {
     // Section Mapping --------------------------------------------------------
     #[test]
     fn test_error_entry_before_any_section() {
-
+        assert_eq!(linker_error("ld a,a"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here");
     }
 
-    // TODO handle banks when computing offsets
+    #[test]
+    fn test_error_section_declaration() {
+        assert_eq!(linker_error("SECTION 4,ROM0"), "In file \"main.gb.s\" on line 1, column 1: Invalid section name, expected a string value instead.\n\nSECTION 4,ROM0\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0['foo']"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset, expected a positive integer value instead.\n\nSECTION ROM0[\'foo\']\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[-1]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset, expected a positive integer value instead.\n\nSECTION ROM0[-1]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000],BANK['Foo']"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index, expected a positive integer value instead.\n\nSECTION ROM0[$0000],BANK[\'Foo\']\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000],BANK[-1]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index, expected a positive integer value instead.\n\nSECTION ROM0[$0000],BANK[-1]\n^--- Here");
+    }
 
     #[test]
     fn test_section_initial() {
-        let l = linker("SECTION 'A',ROMX[$4000]");
-        // TODO ROM0[$0000]
+        assert_eq!(linker_sections(linker("SECTION 'A',ROM0")), vec![
+            "[ 0][               A]  ROM0[0000-3fff +0000][0]".to_string()
+        ]);
     }
 
     #[test]
-    fn test_section_initial_with_default_base() {
-        // TODO ROM0
+    fn test_section_initial_with_offset() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROM0[$1000]")), vec![
+            "[ 0][               A]  ROM0[1000-3fff +0000][0]".to_string()
+        ]);
     }
 
     #[test]
-    fn test_section_follow_up_append() {
-        // TODO ROM0[$0000]
-        // TODO ROM0
+    fn test_section_initial_banked() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX")), vec![
+            "[ 0][               A]  ROMX[4000-7fff +0000][1]".to_string()
+        ]);
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX,BANK[1]")), vec![
+            "[ 0][               A]  ROMX[4000-7fff +0000][1]".to_string()
+        ]);
     }
 
     #[test]
-    fn test_section_follow_up_initial() {
-        // TODO ROM0[$0000]
-        // TODO ROM0[$2000]
+    fn test_section_initial_banked_with_offset() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX[$5000]")), vec![
+            "[ 0][               A]  ROMX[5000-7fff +0000][1]".to_string()
+        ]);
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX[$5000],BANK[1]")), vec![
+            "[ 0][               A]  ROMX[5000-7fff +0000][1]".to_string()
+        ]);
     }
 
-    // TODO test entry conversion
-    // TODO test data size resolution and data value resolution
-        // TODO test if expression results fit into data width etc. ?
-        // TODO TODO perform this in a second validation step or inline with entry_token
-        // conversion?
+    #[test]
+    fn test_section_merge_banked() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX[$5000]\nSECTION 'B',ROMX,BANK[1]\n")), vec![
+            "[ 0][               A]  ROMX[5000-7fff +0000][1]".to_string()
+        ]);
+    }
 
-    // TODO test section list / stack logic
-    // TODO test section overlap detection
+    #[test]
+    fn test_section_append_banked() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX\nSECTION 'B',ROMX,BANK[2]\n")), vec![
+            "[ 0][               A]  ROMX[4000-3fff +0000][1]".to_string(),
+            "[ 1][               B]  ROMX[4000-7fff +4000][2]".to_string()
+        ]);
+        assert_eq!(linker_sections(linker("SECTION 'A',ROMX,BANK[1]\nSECTION 'B',ROMX,BANK[2]\n")), vec![
+            "[ 0][               A]  ROMX[4000-3fff +0000][1]".to_string(),
+            "[ 1][               B]  ROMX[4000-7fff +4000][2]".to_string()
+        ]);
+    }
+
+    #[test]
+    fn test_section_multiple() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROM0[$0100]\nSECTION 'B',ROMX[$4000]\nSECTION 'C',HRAM")), vec![
+            "[ 0][               A]  ROM0[0100-3fff +0000][0]".to_string(),
+            "[ 1][               B]  ROMX[4000-7fff +0000][1]".to_string(),
+            "[ 2][               C]  HRAM[ff80-ffff +0000][0]".to_string()
+        ]);
+    }
+
+    #[test]
+    fn test_section_multiple_cutoff() {
+        assert_eq!(linker_sections(linker("SECTION 'A',ROM0[$0100]\nSECTION 'B',ROM0[$0200]\nSECTION 'C',ROM0[$1000]")), vec![
+            "[ 0][               A]  ROM0[0100-01ff +0000][0]".to_string(),
+            "[ 1][               B]  ROM0[0200-0fff +0000][0]".to_string(),
+            "[ 2][               C]  ROM0[1000-3fff +0000][0]".to_string()
+        ]);
+    }
+
+    #[test]
+    fn test_error_section_bank() {
+        assert_eq!(linker_error("SECTION ROM0,BANK[1]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index of 1, section does not support banking.\n\nSECTION ROM0,BANK[1]\n^--- Here");
+        assert_eq!(linker_error("SECTION RAMX,BANK[8]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index of 8, must lie between 0 and 7.\n\nSECTION RAMX,BANK[8]\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_section_offset_in_range() {
+        linker("SECTION ROM0[$3FFF]");
+        assert_eq!(linker_error("SECTION ROM0[$4000]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset of $4000, must lie between >=$0000 and <=$3fff\n\nSECTION ROM0[$4000]\n^--- Here");
+        linker("SECTION ROMX[$4000]");
+        assert_eq!(linker_error("SECTION ROMX[$3FFF]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset of $3fff, must lie between >=$4000 and <=$7fff\n\nSECTION ROMX[$3FFF]\n^--- Here");
+        linker("SECTION ROMX[$7FFF]");
+        assert_eq!(linker_error("SECTION ROMX[$8000]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset of $8000, must lie between >=$4000 and <=$7fff\n\nSECTION ROMX[$8000]\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_section_size_in_range() {
+        linker("SECTION ROM0[$0000][$4000]");
+        assert_eq!(linker_error("SECTION ROM0[$0000][$4001]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section size of $4001, may not exceeed upper section bound at $4000. Exceeds bound by 1 bytes(s).\n\nSECTION ROM0[$0000][$4001]\n^--- Here");
+        linker("SECTION ROMX[$4000][$4000]");
+        assert_eq!(linker_error("SECTION ROMX[$6000][$2001]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section size of $2001, may not exceeed upper section bound at $8000. Exceeds bound by 1 bytes(s).\n\nSECTION ROMX[$6000][$2001]\n^--- Here");
+    }
 
 }
 
