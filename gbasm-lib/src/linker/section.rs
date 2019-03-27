@@ -1,6 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
 use std::fmt;
+use std::iter;
 use std::collections::HashMap;
 
 
@@ -97,7 +98,7 @@ pub enum EntryData {
         alignment: DataAlignment,
         endianess: DataEndianess,
         expressions: Option<Vec<DataExpression>>,
-        bytes: Option<Vec<usize>>
+        bytes: Option<Vec<u8>>
     },
     Instruction {
         op: usize,
@@ -111,8 +112,8 @@ pub enum EntryData {
 pub struct SectionEntry {
     inner: InnerToken,
     section_id: usize,
-    offset: usize,
-    size: usize,
+    pub offset: usize,
+    pub size: usize,
     pub data: EntryData
 }
 
@@ -145,6 +146,7 @@ impl SectionEntry {
     fn generate(&self, _buffer: &mut [u8]) {
         // TODO write to buffer using the computed data and instruction values
         // TODO if data entry has no bytes it needs to insert a padding of 0 bytes with it's size
+        // TODO for instructions check if > 255 and generate $CB, opCode % 256 bytes
     }
 
 }
@@ -178,14 +180,14 @@ impl SectionList {
         }
     }
 
-    pub fn resolve(sections: &mut Vec<Section>, context: &mut EvaluatorContext) {
+    pub fn resolve(sections: &mut Vec<Section>, context: &mut EvaluatorContext) -> Result<(), LexerError> {
         for s in sections.iter_mut() {
-            s.resolve_addresses(context);
+            s.resolve_addresses(context)?;
         }
-
         for s in sections.iter_mut() {
-            s.resolve_arguments(context);
+            s.resolve_arguments(context)?;
         }
+        Ok(())
     }
 
     pub fn optimize_instructions(sections: &mut Vec<Section>, context: &mut EvaluatorContext) -> bool {
@@ -384,10 +386,13 @@ impl Section {
                             // DS 15 "FOO"
                             (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
                                 self.check_rom(&inner, "Data Declaration")?;
-                                // TODO test negative
                                 let size = util::positive_integer(&inner, size, "Invalid storage capacity")?;
-                                let bytes = s.into_bytes();
-                                // TODO validate string length to be < size and test
+                                let mut bytes = s.into_bytes();
+                                if bytes.len() > size {
+                                    return Err(inner.error("Invalid storage capacity, specified capacity must be >= length of stored string data.".to_string()));
+                                }
+                                let mut padding = iter::repeat(0u8).take(size - bytes.len()).collect();
+                                bytes.append(&mut padding);
                                 (size, Some(bytes), None)
                             },
                             // DS "Foo"
@@ -398,9 +403,14 @@ impl Section {
                             },
                             // DS 15
                             (ExpressionResult::Integer(size), None) => {
-                                // TODO test negative
                                 let size = util::positive_integer(&inner, size, "Invalid storage capacity")?;
-                                (size, None, None)
+                                if self.is_rom {
+                                    let buffer = iter::repeat(0u8).take(size).collect();
+                                    (size, Some(buffer), None)
+
+                                } else {
+                                    (size, None, None)
+                                }
                             },
                             _ => {
                                 return Err(inner.error("invalid Data Declaration format.".to_string()))
@@ -409,8 +419,17 @@ impl Section {
                     }
                 };
 
-                // TODO create entry
-                // println!("{:?}", bytes)
+                self.entries.push(SectionEntry::new_with_size(
+                    self.id,
+                    inner,
+                    size,
+                    EntryData::Data {
+                        alignment,
+                        endianess,
+                        expressions,
+                        bytes
+                    }
+                ));
 
             },
             _ => unreachable!()
@@ -422,26 +441,40 @@ impl Section {
         // TODO push marker entry with size 0
     }
 
-    pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext)  {
+    pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), LexerError> {
         let mut offset = 0;
         for e in &mut self.entries {
 
+            // Update offset of entry
+            e.offset = self.start_address + offset;
+
             // Update label addresses
             if let EntryData::Label { ref id, ..} = e.data {
-                context.label_addresses.insert(*id, offset);
-            }
+                context.label_addresses.insert(*id, e.offset);
 
-            // Update offset of entry
-            e.offset = offset;
+            // Verify alignment requirements
+            } else if let EntryData::Data { ref alignment, .. } = e.data {
+                if *alignment == DataAlignment::Word && e.offset & 0xFF != 0 {
+                    return Err(e.inner.error(
+                        "Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.".to_string()
+                    ));
+
+                } else if *alignment == DataAlignment::WithinWord && (e.offset & 0xFF) + e.size > 256 {
+                    return Err(e.inner.error(
+                        "Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.".to_string()
+                    ));
+                }
+            }
 
             // Advance section offset by entry size
             offset += e.size
 
         }
         self.bytes_in_use = offset;
+        Ok(())
     }
 
-    pub fn resolve_arguments(&mut self, _context: &mut EvaluatorContext) {
+    pub fn resolve_arguments(&mut self, _context: &mut EvaluatorContext) -> Result<(), LexerError> {
         for e in &mut self.entries {
             if let EntryData::Data { .. } = e.data {
                 // TODO resolve all data arguments
@@ -474,6 +507,7 @@ impl Section {
                 // TODO jr Instructions need to convert to a relative value using their own offset
             }
         }
+        Ok(())
     }
 
     pub fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {
@@ -483,10 +517,9 @@ impl Section {
 
     pub fn generate(&self, buffer: &mut [u8]) {
         if self.is_rom {
-            let mut offset = self.start_address + self.bank_offset;
             for e in &self.entries {
-                 e.generate(&mut buffer[offset..]);
-                 offset += e.size;
+                let offset =self.bank_offset + e.offset;
+                e.generate(&mut buffer[offset..]);
             }
         }
     }

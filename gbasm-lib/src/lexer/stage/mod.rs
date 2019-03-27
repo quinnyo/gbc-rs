@@ -143,5 +143,10 @@ pub mod mocks {
         Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
     }
 
+    pub fn entry_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<EntryStage> {
+        let lexer = expr_lex_binary(s, b);
+        Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
+    }
+
 }
 

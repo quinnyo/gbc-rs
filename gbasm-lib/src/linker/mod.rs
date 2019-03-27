@@ -95,7 +95,7 @@ impl Linker {
         }
 
         SectionList::initialize(&mut sections);
-        SectionList::resolve(&mut sections, &mut context);
+        SectionList::resolve(&mut sections, &mut context)?;
 
         // for s in &sections {
         //     println!("{}", s);
@@ -107,11 +107,12 @@ impl Linker {
         })
     }
 
-    pub fn optimize_instructions(&mut self) {
+    pub fn optimize_instructions(&mut self) -> Result<(), LexerError> {
         // Run passes until no more optimizations were applied
         while SectionList::optimize_instructions(&mut self.sections, &mut self.context) {
-            SectionList::resolve(&mut self.sections, &mut self.context);
+            SectionList::resolve(&mut self.sections, &mut self.context)?;
         }
+        Ok(())
     }
 
     pub fn generate(&self, buffer: &mut [u8]) {
@@ -128,8 +129,9 @@ mod test {
     use super::Linker;
     use super::section::EntryData;
     use ordered_float::OrderedFloat;
-    use crate::lexer::stage::mocks::entry_lex;
-    use crate::expression::ExpressionResult;
+    use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
+    use crate::expression::{Expression, ExpressionResult, ExpressionValue};
+    use crate::expression::data::{DataAlignment, DataEndianess};
 
     fn linker<S: Into<String>>(s: S) -> Linker {
         Linker::from_lexer(entry_lex(s.into())).expect("Linker failed")
@@ -157,10 +159,20 @@ mod test {
         }).collect()
     }
 
-    fn linker_section_entries(linker: Linker) -> Vec<Vec<EntryData>> {
+    fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {
         linker.sections.into_iter().map(|s| {
             s.entries.into_iter().map(|e| {
-                e.data
+                (e.size, e.data)
+
+            }).collect()
+
+        }).collect()
+    }
+
+    fn linker_section_offsets(linker: Linker) -> Vec<Vec<(usize, usize)>> {
+        linker.sections.into_iter().map(|s| {
+            s.entries.into_iter().map(|e| {
+                (e.offset, e.size)
 
             }).collect()
 
@@ -340,31 +352,47 @@ mod test {
     fn test_section_entry_labels() {
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal_label:\n.local_label:")), vec![
             vec![
-                EntryData::Label {
+                (0, EntryData::Label {
                     id: 1,
                     name: "global_label".to_string()
-                },
-                EntryData::Label {
+                }),
+                (0, EntryData::Label {
                     id: 2,
                     name: "local_label".to_string()
-                }
+                })
             ]
         ]);
     }
-
-    // Instructions -----------------------------------------------------------
-
 
     // ROM Data Entries -------------------------------------------------------
     #[test]
     fn test_section_entry_data_rom_db() {
         // TODO value range errors
+        // TODO test actual expression evaluation
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nDB $10,$20")), vec![
             vec![
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (0, Expression::Value(ExpressionValue::Integer(16))),
+                        (1, Expression::Value(ExpressionValue::Integer(32)))
+                    ]),
+                    bytes: None
+                })
             ]
         ]);
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nDB -1,-128")), vec![
             vec![
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (0, Expression::Value(ExpressionValue::Integer(-1))),
+                        (1, Expression::Value(ExpressionValue::Integer(-128)))
+                    ]),
+                    bytes: None
+                })
             ]
         ]);
     }
@@ -372,33 +400,101 @@ mod test {
     #[test]
     fn test_section_entry_data_rom_dw() {
         // TODO value range errors
+        // TODO test actual expression evaluation
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nDW $1000,$2000")), vec![
             vec![
+                (4, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (0, Expression::Value(ExpressionValue::Integer(4096))),
+                        (1, Expression::Value(ExpressionValue::Integer(8192)))
+                    ]),
+                    bytes: None
+                })
             ]
         ]);
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nDW -1")), vec![
             vec![
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (0, Expression::Value(ExpressionValue::Integer(-1)))
+                    ]),
+                    bytes: None
+                })
             ]
         ]);
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nBW $1000,$2000")), vec![
             vec![
+                (4, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Big,
+                    expressions: Some(vec![
+                        (0, Expression::Value(ExpressionValue::Integer(4096))),
+                        (1, Expression::Value(ExpressionValue::Integer(8192)))
+                    ]),
+                    bytes: None
+                })
             ]
         ]);
     }
 
     #[test]
     fn test_section_entry_data_rom_incbin() {
-        // TODO include file
+        let linker = Linker::from_lexer(entry_lex_binary("SECTION ROM0\nINCBIN 'child.bin'", vec![1, 2, 3, 4])).expect("Linker failed");
+        assert_eq!(linker_section_entries(linker), vec![
+            vec![
+                (4, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1, 2, 3, 4])
+                })
+            ]
+        ]);
     }
 
     #[test]
     fn test_section_entry_data_rom_ds() {
-        // TODO handle rom vs. ram errors
-        // TODO length errors
-        // TODO fill errors
-        // TODO DS size
-        // TODO DS size fillValue
-        // TODO DS size fillValueString
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5")), vec![
+            vec![
+                (5, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![0, 0, 0, 0, 0])
+                })
+            ]
+        ]);
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 'FOO'")), vec![
+            vec![
+                (3, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![70, 79, 79])
+                })
+            ]
+        ]);
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5 'FOO'")), vec![
+            vec![
+                (5, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![70, 79, 79, 0, 0])
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_section_entry_data_rom_ds() {
+        assert_eq!(linker_error("SECTION ROM0\nDS -1"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDS -1 'FOO'"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1 \'FOO\'\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDS 2 'FOO'"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, specified capacity must be >= length of stored string data.\n\nDS 2 \'FOO\'\n^--- Here");
     }
 
     // RAM Data Entries -------------------------------------------------------
@@ -406,6 +502,12 @@ mod test {
     fn test_section_entry_data_ram_db() {
         assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDB")), vec![
             vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: None
+                })
             ]
         ]);
     }
@@ -414,6 +516,12 @@ mod test {
     fn test_section_entry_data_ram_dw() {
         assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDW")), vec![
             vec![
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: None
+                })
             ]
         ]);
     }
@@ -422,9 +530,102 @@ mod test {
     fn test_section_entry_data_ram_ds() {
         assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDS 8")), vec![
             vec![
+                (8, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: None
+                })
             ]
         ]);
     }
+
+    #[test]
+    fn test_section_entry_data_ram_ds8() {
+        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDS8 8")), vec![
+            vec![
+                (8, EntryData::Data {
+                    alignment: DataAlignment::WithinWord,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: None
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_data_ram_ds16() {
+        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDS16 8")), vec![
+            vec![
+                (8, EntryData::Data {
+                    alignment: DataAlignment::Word,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: None
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_section_entry_data_ds16_alignment() {
+        linker("SECTION ROM0[$0000]\n DS16 1");
+        linker("SECTION ROM0[$0100]\n DS16 1");
+        linker("SECTION ROM0[$1000]\n DS16 1");
+        assert_eq!(linker_error("SECTION ROM0[$0001]\nDS16 1"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.\n\nDS16 1\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_section_entry_data_ds8_alignment() {
+        linker("SECTION ROM0[$0000]\n DS8 256");
+        linker("SECTION ROM0[$0100]\n DS8 256");
+        linker("SECTION ROM0[$0080]\n DS8 128");
+        assert_eq!(linker_error("SECTION ROM0[$0000]\nDS8 257"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0100]\nDS8 257"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0080]\nDS8 129"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 129\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_section_entry_data_ram_ds() {
+        assert_eq!(linker_error("SECTION WRAM0\nDS -1"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
+    }
+
+    // Address Evaluation -----------------------------------------------------
+
+    // TODO test correct evaluation of label addresses
+    // TODO test correct evaluation of label addresses across sections
+
+    // Offsets ----------------------------------------------------------------
+
+    #[test]
+    fn test_section_entry_offsets() {
+        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nDS16 5\nDS8 3\nDS 4\nDS 10\nglobal_label:")), vec![
+            vec![
+                (0, 5),
+                (5, 3),
+                (8, 4),
+                (12, 10),
+                (22, 0)
+            ]
+        ]);
+        assert_eq!(linker_section_offsets(linker("SECTION ROM0[$2000]\nDS16 5\nDS8 3\nDS 4\nDS 10\nglobal_label:")), vec![
+            vec![
+                (8192 + 0, 5),
+                (8192 + 5, 3),
+                (8192 + 8, 4),
+                (8192 + 12, 10),
+                (8192 + 22, 0)
+            ]
+        ]);
+    }
+
+    // TODO test further offset calculation
+
+
+    // Instructions -----------------------------------------------------------
+
+    // TODO
 
 }
 
