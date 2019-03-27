@@ -25,7 +25,9 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     Comma(()),
     OpenBracket(()),
     CloseBracket(()),
+    // TODO remove id?
     Expression((usize, Expression)),
+    // TODO remove id?
     ConstExpression((usize, Expression)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))

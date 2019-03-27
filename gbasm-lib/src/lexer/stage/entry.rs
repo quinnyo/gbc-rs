@@ -805,7 +805,7 @@ impl EntryStage {
                         inner,
                         alignment,
                         endianess: DataEndianess::Little,
-                        storage: DataStorage::ByteData((id, expr), (data_id, data_expr))
+                        storage: DataStorage::Buffer((id, expr), Some((data_id, data_expr)))
                     })
 
                 } else {
@@ -817,7 +817,7 @@ impl EntryStage {
                     inner,
                     alignment,
                     endianess: DataEndianess::Little,
-                    storage: DataStorage::ByteRange((id, expr))
+                    storage: DataStorage::Buffer((id, expr), None)
                 })
             }
         } else {
@@ -1510,24 +1510,38 @@ mod test {
             inner: itk!(0, 2, "DS"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteRange((0, Expression::Binary {
+            storage: DataStorage::Buffer((0, Expression::Binary {
                 inner: itk!(5, 6, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-            }))
+
+            }), None)
         }]);
     }
 
     #[test]
-    fn test_data_ds_with_arg() {
-        assert_eq!(tfe("DS 2 'Hello World'"), vec![EntryToken::Data {
+    fn test_data_ds_with_size_and_string() {
+        assert_eq!(tfe("DS 15 'Hello World'"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DS"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteData(
-                (0, Expression::Value(ExpressionValue::Integer(2))),
-                (1, Expression::Value(ExpressionValue::String("Hello World".to_string())))
+            storage: DataStorage::Buffer(
+                (0, Expression::Value(ExpressionValue::Integer(15))),
+                Some((1, Expression::Value(ExpressionValue::String("Hello World".to_string()))))
+            )
+        }]);
+    }
+
+    #[test]
+    fn test_data_ds_with_string() {
+        assert_eq!(tfe("DS 'Hello World'"), vec![EntryToken::Data {
+            inner: itk!(0, 2, "DS"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::Buffer(
+                (0, Expression::Value(ExpressionValue::String("Hello World".to_string()))),
+                None
             )
         }]);
     }
@@ -1538,12 +1552,13 @@ mod test {
             inner: itk!(0, 3, "DS8"),
             alignment: DataAlignment::WithinWord,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteRange((0, Expression::Binary {
+            storage: DataStorage::Buffer((0, Expression::Binary {
                 inner: itk!(6, 7, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-            }))
+
+            }), None)
         }]);
     }
 
@@ -1553,12 +1568,13 @@ mod test {
             inner: itk!(0, 4, "DS16"),
             alignment: DataAlignment::Word,
             endianess: DataEndianess::Little,
-            storage: DataStorage::ByteRange((0, Expression::Binary {
+            storage: DataStorage::Buffer((0, Expression::Binary {
                 inner: itk!(7, 8, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-            }))
+
+            }), None)
         }]);
     }
 

@@ -24,7 +24,7 @@ pub struct EvaluatorConstant {
 pub struct EvaluatorContext {
     pub constants: HashMap<String, ExpressionResult>,
     pub raw_constants: HashMap<String, EvaluatorConstant>,
-    pub label_offsets: HashMap<usize, usize>,
+    pub label_addresses: HashMap<usize, usize>,
     pub rom_offset: i32
 }
 
@@ -34,7 +34,7 @@ impl EvaluatorContext {
         Self {
             constants: HashMap::new(),
             raw_constants: HashMap::new(),
-            label_offsets: HashMap::new(),
+            label_addresses: HashMap::new(),
             rom_offset: 0
         }
     }
@@ -86,6 +86,15 @@ impl EvaluatorContext {
         } else {
             Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
         }
+    }
+
+    pub fn resolve_expression(
+        &mut self,
+        expression: DataExpression
+
+    ) -> Result<ExpressionResult, LexerError> {
+        let stack = Vec::new();
+        self.resolve_expression_inner(&stack, expression.1)
     }
 
     pub fn resolve_optional_expression(
@@ -142,16 +151,13 @@ impl EvaluatorContext {
                     ExpressionValue::Float(f) => ExpressionResult::Float(f),
                     ExpressionValue::String(s) => ExpressionResult::String(s),
                     ExpressionValue::OffsetAddress(_, offset) => {
-                        // TODO jr Instructions need to convert to a relative value using their own offset
                         ExpressionResult::Integer(self.rom_offset + offset)
                     },
                     ExpressionValue::GlobalLabelAddress(_, id) => {
-                        // TODO jr Instructions need to convert to a relative value using their own offset
-                        ExpressionResult::Integer(*self.label_offsets.get(&id).expect("Invalid label ID!") as i32)
+                        ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
                     },
                     ExpressionValue::LocalLabelAddress(_, id) => {
-                        // TODO jr Instructions need to convert to a relative value using their own offset
-                        ExpressionResult::Integer(*self.label_offsets.get(&id).expect("Invalid label ID!") as i32)
+                        ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
                     }
                 }
             },

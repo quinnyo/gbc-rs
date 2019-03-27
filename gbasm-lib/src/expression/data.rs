@@ -33,9 +33,7 @@ pub enum DataStorage {
     Bytes(Vec<DataExpression>),
     /// DW 1[, 2, 3]
     Words(Vec<DataExpression>),
-    /// DS 1
-    ByteRange(DataExpression),
-    /// DS 1 expr
-    ByteData(DataExpression, DataExpression)
+    /// DS [length] [fill]
+    Buffer(DataExpression, Option<DataExpression>)
 }
 
