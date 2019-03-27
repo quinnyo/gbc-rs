@@ -166,16 +166,14 @@ impl SectionList {
         });
 
         // Limit end_address of sections to next section start_address - 1
-        let section_starts: Vec<(usize, String)> = sections.iter().skip(1).map(|s| {
-            (s.start_address, s.segment.clone())
+        let section_starts: Vec<(usize, usize, String)> = sections.iter().skip(1).map(|s| {
+            (s.start_address, s.bank, s.segment.clone())
 
         }).collect();
 
-        for (section, (next_start, next_segment)) in sections.iter_mut().zip(section_starts.into_iter()) {
-            if section.segment == next_segment {
-                if section.end_address >= next_start {
-                    section.end_address = next_start - 1;
-                }
+        for (section, (next_start, next_bank, next_segment)) in sections.iter_mut().zip(section_starts.into_iter()) {
+            if section.segment == next_segment && section.bank == next_bank && section.end_address >= next_start {
+                section.end_address = next_start - 1;
             }
         }
     }
@@ -264,22 +262,18 @@ impl Section {
             0
         };
 
-        // For sections with specified offsets we still need to correct for banking
-        let (start, default_end) = (defaults.base_address, defaults.base_address + defaults.size);
-        let (start_address, bank_offset) = if let Some(offset) = segment_offset {
-            if bank == 0 {
-                (offset, 0)
+        // Calculate section start and bank offset
+        let (start, offset, default_end) = (
+            defaults.base_address,
+            segment_offset.unwrap_or(defaults.base_address),
+            defaults.base_address + defaults.size
+        );
 
-            } else {
-                (offset, (bank - 1) * defaults.size)
-            }
-
-        // Set default offset if not specified
-        } else if bank == 0 {
-            (start, 0)
+        let (start_address, bank_offset) = if bank == 0 {
+            (offset, 0)
 
         } else {
-            (start, (bank - 1) * defaults.size)
+            (offset, (bank - defaults.min_bank.unwrap_or(0)) * defaults.size)
         };
 
         // Calculate section size
@@ -308,6 +302,8 @@ impl Section {
             let exceed = end_address - default_end;
             return Err(inner.error(format!("Invalid section size of ${:0>4x}, may not exceeed upper section bound at ${:0>4x}. Exceeds bound by {} bytes(s).", size, default_end, exceed)));
         }
+
+        debug_assert!(start_address < end_address);
 
         Ok(Self {
             id,
@@ -414,7 +410,7 @@ impl Section {
                 };
 
                 // TODO create entry
-                println!("{:?}", bytes)
+                // println!("{:?}", bytes)
 
             },
             _ => unreachable!()

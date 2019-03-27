@@ -257,11 +257,11 @@ mod test {
     #[test]
     fn test_section_append_banked() {
         assert_eq!(linker_sections(linker("SECTION 'A',ROMX\nSECTION 'B',ROMX,BANK[2]\n")), vec![
-            "[ 0][               A]  ROMX[4000-3fff +0000][1]".to_string(),
+            "[ 0][               A]  ROMX[4000-7fff +0000][1]".to_string(),
             "[ 1][               B]  ROMX[4000-7fff +4000][2]".to_string()
         ]);
         assert_eq!(linker_sections(linker("SECTION 'A',ROMX,BANK[1]\nSECTION 'B',ROMX,BANK[2]\n")), vec![
-            "[ 0][               A]  ROMX[4000-3fff +0000][1]".to_string(),
+            "[ 0][               A]  ROMX[4000-7fff +0000][1]".to_string(),
             "[ 1][               B]  ROMX[4000-7fff +4000][2]".to_string()
         ]);
     }
@@ -281,6 +281,15 @@ mod test {
             "[ 0][               A]  ROM0[0100-01ff +0000][0]".to_string(),
             "[ 1][               B]  ROM0[0200-0fff +0000][0]".to_string(),
             "[ 2][               C]  ROM0[1000-3fff +0000][0]".to_string()
+        ]);
+    }
+
+    #[test]
+    fn test_section_bank_no_cutoff() {
+        assert_eq!(linker_sections(linker("SECTION 'A',RAMX[$A000]\nSECTION 'B',RAMX[$A000],BANK[1]\nSECTION 'C',RAMX[$A000],BANK[2]")), vec![
+            "[ 0][               A]  RAMX[a000-bfff +0000][0]".to_string(),
+            "[ 1][               B]  RAMX[a000-bfff +2000][1]".to_string(),
+            "[ 2][               C]  RAMX[a000-bfff +4000][2]".to_string()
         ]);
     }
 
