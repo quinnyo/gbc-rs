@@ -148,7 +148,7 @@ impl ValueStage {
                 MacroToken::Name(mut inner) => {
                     if tokens.peek_is(TokenType::Colon, None) {
                         let colon = tokens.expect(TokenType::Colon, None, "when parsing global label definition")?.into_inner();
-                        let label_id = Self::global_label_id(&inner);
+                        let label_id = Self::global_label_id(&inner, false);
                         if let Some((previous, _)) = global_labels.get(&label_id) {
                             return Err(inner.error(format!(
                                 "Global label \"{}\" was already defined.",
@@ -230,7 +230,7 @@ impl ValueStage {
             if let ValueToken::Name(inner) = token {
 
                 // Generate references to global labels
-                let label_id = Self::global_label_id(&inner);
+                let label_id = Self::global_label_id(&inner, true);
                 if let Some((_, id)) = global_labels.get(&label_id) {
                     ValueToken::GlobalLabelRef(inner, *id)
 
@@ -251,13 +251,16 @@ impl ValueStage {
         }).collect()
     }
 
-    fn global_label_id(inner: &InnerToken) -> (String, Option<usize>) {
-        let name = if let Some(call_id) = inner.macro_call_id() {
+    fn global_label_id(inner: &InnerToken, global_only: bool) -> (String, Option<usize>) {
+        let name = if global_only || inner.macro_call_id.is_none() {
+            inner.value.to_string()
+
+        } else if let Some(call_id) = inner.macro_call_id() {
             // Postfix labels created by macros calls so they are unique
             format!("{}_from_macro_call_{}", inner.value, call_id)
 
         } else {
-            inner.value.to_string()
+            unreachable!()
         };
 
         if name.starts_with('_') {
@@ -640,6 +643,16 @@ mod test {
     macro_rules! vtk {
         ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
             ValueToken::$tok(itk!($start, $end, $parsed))
+        }
+    }
+
+    macro_rules! vtkm {
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr, $id:expr) => {
+            {
+                let mut t = itk!($start, $end, $parsed);
+                t.set_macro_call_id($id);
+                ValueToken::$tok(t)
+            }
         }
     }
 
@@ -1053,6 +1066,20 @@ mod test {
             ValueToken::GlobalLabelDef(itkm!(24, 40, "macro_label_def", 1), 3),
             ValueToken::LocalLabelDef(itkm!(41, 64, "local_macro_label_def_from_macro_call_1", 1), 4),
             ValueToken::LocalLabelRef(itkm!(65, 87, "local_macro_label_def_from_macro_call_1", 1), 4)
+        ]);
+    }
+
+    #[test]
+    fn test_macro_arg_global_label_ref() {
+        assert_eq!(tfv("global:\nMACRO FOO(@a) DB @a ENDMACRO\nFOO(global)"), vec![
+            ValueToken::GlobalLabelDef(
+                itk!(0, 7, "global"), 1
+            ),
+            vtkm!(Reserved, 22, 24, "DB", 0),
+            ValueToken::GlobalLabelRef(
+                itkm!(41, 47, "global", 0),
+                1
+            )
         ]);
     }
 

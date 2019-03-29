@@ -97,7 +97,7 @@ pub enum EntryData {
     Data {
         alignment: DataAlignment,
         endianess: DataEndianess,
-        expressions: Option<Vec<DataExpression>>,
+        expressions: Option<Vec<(usize, DataExpression)>>,
         bytes: Option<Vec<u8>>
     },
     Instruction {
@@ -373,11 +373,11 @@ impl Section {
                     },
                     DataStorage::Bytes(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        (exprs.len(), None, Some(exprs))
+                        (exprs.len(), None, Some(exprs.into_iter().map(|e| (1, e)).collect()))
                     },
                     DataStorage::Words(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        (exprs.len() * 2, None, Some(exprs))
+                        (exprs.len() * 2, None, Some(exprs.into_iter().map(|e| (2, e)).collect()))
                     },
                     DataStorage::Buffer(length, fill) => {
                         let length_or_string = context.resolve_expression(length)?;
@@ -474,34 +474,36 @@ impl Section {
         Ok(())
     }
 
-    pub fn resolve_arguments(&mut self, _context: &mut EvaluatorContext) -> Result<(), LexerError> {
-        for e in &mut self.entries {
-            if let EntryData::Data { .. } = e.data {
-                // TODO resolve all data arguments
+    pub fn resolve_arguments(&mut self, context: &mut EvaluatorContext) -> Result<(), LexerError> {
+        for entry in &mut self.entries {
+            if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
 
-                /*
-                let mut bytes = Vec::new();
-                for expr in exprs {
-                    bytes.push(
-                        util::byte_value(&inner, context.resolve_expression(expr)?, "Invalid byte data")?
-                    );
-                }*/
+                // Resolve Data Argument Expressions
+                if let Some(expressions) = expressions {
+                    let mut data_bytes = Vec::new();
+                    for (width, expr) in expressions {
+                        if *width == 1 {
+                            data_bytes.push(
+                                util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte data")?
+                            );
 
-                /*
-                let mut bytes = Vec::new();
-                for expr in exprs {
-                    let word = util::word_value(&inner, context.resolve_expression(expr)?, "Invalid word data")?;
-                    if endianess == DataEndianess::Little {
-                        bytes.push(word as u8);
-                        bytes.push((word >> 8) as u8);
+                        } else {
+                            let word = util::word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word data")?;
+                            if *endianess == DataEndianess::Little {
+                                data_bytes.push(word as u8);
+                                data_bytes.push((word >> 8) as u8);
 
-                    } else {
-                        bytes.push((word >> 8) as u8);
-                        bytes.push(word as u8);
+                            } else {
+                                data_bytes.push((word >> 8) as u8);
+                                data_bytes.push(word as u8);
+                            }
+                        }
+
                     }
-                }*/
+                    *bytes = Some(data_bytes);
+                }
 
-            } else if let EntryData::Instruction { .. } = e.data {
+            } else if let EntryData::Instruction { .. } = entry.data {
                 // TODO resolve all instruction arguments
                     // TODO check argument types and whether they fit into the data slot size
                 // TODO jr Instructions need to convert to a relative value using their own offset

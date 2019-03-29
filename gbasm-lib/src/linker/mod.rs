@@ -129,6 +129,7 @@ mod test {
     use super::Linker;
     use super::section::EntryData;
     use ordered_float::OrderedFloat;
+    use crate::lexer::InnerToken;
     use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
     use crate::expression::{Expression, ExpressionResult, ExpressionValue};
     use crate::expression::data::{DataAlignment, DataEndianess};
@@ -177,6 +178,22 @@ mod test {
             }).collect()
 
         }).collect()
+    }
+
+    macro_rules! itk {
+        ($start:expr, $end:expr, $parsed:expr) => {
+            InnerToken::new(0, $start, $end, $parsed.into())
+        }
+    }
+
+    macro_rules! mtk {
+        ($start:expr, $end:expr, $parsed:expr, $id:expr) => {
+            {
+                let mut t = itk!($start, $end, $parsed);
+                t.set_macro_call_id($id);
+                t
+            }
+        }
     }
 
     // Constant Evaluation ----------------------------------------------------
@@ -367,18 +384,16 @@ mod test {
     // ROM Data Entries -------------------------------------------------------
     #[test]
     fn test_section_entry_data_rom_db() {
-        // TODO value range errors
-        // TODO test actual expression evaluation
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nDB $10,$20")), vec![
             vec![
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (0, Expression::Value(ExpressionValue::Integer(16))),
-                        (1, Expression::Value(ExpressionValue::Integer(32)))
+                        (1, (0, Expression::Value(ExpressionValue::Integer(16)))),
+                        (1, (1, Expression::Value(ExpressionValue::Integer(32))))
                     ]),
-                    bytes: None
+                    bytes: Some(vec![16, 32])
                 })
             ]
         ]);
@@ -388,29 +403,33 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (0, Expression::Value(ExpressionValue::Integer(-1))),
-                        (1, Expression::Value(ExpressionValue::Integer(-128)))
+                        (1, (0, Expression::Value(ExpressionValue::Integer(-1)))),
+                        (1, (1, Expression::Value(ExpressionValue::Integer(-128))))
                     ]),
-                    bytes: None
+                    bytes: Some(vec![255, 128])
                 })
             ]
         ]);
     }
 
     #[test]
-    fn test_section_entry_data_rom_dw() {
-        // TODO value range errors
-        // TODO test actual expression evaluation
+    fn test_error_section_entry_data_rom_db() {
+        assert_eq!(linker_error("SECTION ROM0\nDB 256"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data, expected a byte value in the range of -128 to 255 instead.\n\nDB 256\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDB -129"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data, expected a byte value in the range of -128 to 255 instead.\n\nDB -129\n^--- Here");
+    }
+
+    #[test]
+    fn test_section_entry_data_rom_dw_bw() {
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nDW $1000,$2000")), vec![
             vec![
                 (4, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (0, Expression::Value(ExpressionValue::Integer(4096))),
-                        (1, Expression::Value(ExpressionValue::Integer(8192)))
+                        (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
+                        (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
                     ]),
-                    bytes: None
+                    bytes: Some(vec![0, 16, 0, 32])
                 })
             ]
         ]);
@@ -420,9 +439,9 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (0, Expression::Value(ExpressionValue::Integer(-1)))
+                        (2, (0, Expression::Value(ExpressionValue::Integer(-1))))
                     ]),
-                    bytes: None
+                    bytes: Some(vec![255, 255])
                 })
             ]
         ]);
@@ -432,13 +451,19 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Big,
                     expressions: Some(vec![
-                        (0, Expression::Value(ExpressionValue::Integer(4096))),
-                        (1, Expression::Value(ExpressionValue::Integer(8192)))
+                        (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
+                        (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
                     ]),
-                    bytes: None
+                    bytes: Some(vec![16, 0, 32, 0])
                 })
             ]
         ]);
+    }
+
+    #[test]
+    fn test_error_section_entry_data_rom_dw_bw() {
+        assert_eq!(linker_error("SECTION ROM0\nDW 65536"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data, expected a word value in the range of -32768 to 65535 instead.\n\nDW 65536\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDW -32769"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data, expected a word value in the range of -32768 to 65535 instead.\n\nDW -32769\n^--- Here");
     }
 
     #[test]
@@ -593,8 +618,116 @@ mod test {
 
     // Address Evaluation -----------------------------------------------------
 
-    // TODO test correct evaluation of label addresses
-    // TODO test correct evaluation of label addresses across sections
+    #[test]
+    fn test_section_entry_data_label_evaluation() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5\nglobal:\nDW global\nDB global")), vec![
+            vec![
+                (5, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![0, 0, 0, 0, 0])
+                }),
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                }),
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
+                    ]),
+                    bytes: Some(vec![5, 0])
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(39, 45, "global"), 1))))
+                    ]),
+                    bytes: Some(vec![5])
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_data_label_evaluation_cross_section() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5\nglobal:\nDW global\nSECTION ROM0[$2000]\nDB global")), vec![
+            vec![
+                (5, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![0, 0, 0, 0, 0])
+                }),
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                }),
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
+                    ]),
+                    bytes: Some(vec![5, 0])
+                })
+            ],
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (3, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(59, 65, "global"), 1))))
+                    ]),
+                    bytes: Some(vec![5])
+                })
+            ]
+        ]);
+
+    }
+
+    // Macro Constant Evaluation ----------------------------------------------
+    #[test]
+    fn test_section_macro_constant_evaluation() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nC EQU 2\nMACRO FOO(@a) DB @a ENDMACRO")), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (0, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string()))))
+                    ]),
+                    bytes: Some(vec![2])
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_macro_label_address_evaluation() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(global)\nglobal:\nMACRO FOO(@a) DB @a ENDMACRO")), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (0, Expression::Value(ExpressionValue::GlobalLabelAddress(mtk!(17, 23, "global", 0), 1))))
+                    ]),
+                    bytes: Some(vec![1])
+                }),
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
+            ]
+        ]);
+    }
+
+    // TODO test correct evaluation of label addresses test for instructions
+    // TODO test correct evaluation of label addresses across sections test for instructions
 
     // Offsets ----------------------------------------------------------------
 
