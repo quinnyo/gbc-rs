@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
+use gbasm_cpu::{self, Argument, Instruction};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -28,6 +29,8 @@ struct SectionDefault {
 }
 
 lazy_static! {
+    static ref INSTRUCTIONS: Vec<Instruction> = gbasm_cpu::instruction_list();
+
     static ref SECTION_DEFAULTS: HashMap<&'static str, SectionDefault> = {
         let mut map = HashMap::new();
         map.insert("ROM0", SectionDefault {
@@ -98,13 +101,14 @@ pub enum EntryData {
         alignment: DataAlignment,
         endianess: DataEndianess,
         expressions: Option<Vec<(usize, DataExpression)>>,
-        bytes: Option<Vec<u8>>
+        bytes: Option<Vec<u8>>,
+        debug_only: bool
     },
     Instruction {
-        op: usize,
-        argument: OptionalDataExpression,
-        value: Option<ExpressionResult>,
-        is_debug: bool
+        op_code: usize,
+        expression: OptionalDataExpression,
+        bytes: Vec<u8>,
+        debug_only: bool
     }
 }
 
@@ -145,8 +149,6 @@ impl SectionEntry {
 
     fn generate(&self, _buffer: &mut [u8]) {
         // TODO write to buffer using the computed data and instruction values
-        // TODO if data entry has no bytes it needs to insert a padding of 0 bytes with it's size
-        // TODO for instructions check if > 255 and generate $CB, opCode % 256 bytes
     }
 
 }
@@ -188,6 +190,13 @@ impl SectionList {
             s.resolve_arguments(context)?;
         }
         Ok(())
+    }
+
+    pub fn strip_debug(sections: &mut Vec<Section>, context: &mut EvaluatorContext) -> Result<(), LexerError> {
+        for s in sections.iter_mut() {
+            s.strip_debug();
+        }
+        Self::resolve(sections, context)
     }
 
     pub fn optimize_instructions(sections: &mut Vec<Section>, context: &mut EvaluatorContext) -> bool {
@@ -331,28 +340,66 @@ impl Section {
 
     pub fn add_entry(&mut self, context: &mut EvaluatorContext, token: EntryToken) -> Result<(), LexerError> {
         match token {
-            EntryToken::Instruction(inner, _) => {
+            EntryToken::Instruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
-                // TODO get instr size
+                self.entries.push(SectionEntry::new_with_size(
+                    self.id,
+                    inner,
+                    instruction_size(op_code),
+                    EntryData::Instruction {
+                        op_code,
+                        expression: None,
+                        bytes: instruction_bytes(op_code),
+                        debug_only: false
+                    }
+                ))
             },
-            EntryToken::InstructionWithArg(inner, _, _) => {
+            EntryToken::InstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
-                // TODO get instr size
+                self.entries.push(SectionEntry::new_with_size(
+                    self.id,
+                    inner,
+                    instruction_size(op_code),
+                    EntryData::Instruction {
+                        op_code,
+                        expression: Some(expr),
+                        bytes: instruction_bytes(op_code),
+                        debug_only: false
+                    }
+                ))
             },
-            EntryToken::DebugInstruction(inner, _) => {
+            EntryToken::DebugInstruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
-                // TODO get instr size
-                // TODO handle debug mode
+                self.entries.push(SectionEntry::new_with_size(
+                    self.id,
+                    inner,
+                    instruction_size(op_code),
+                    EntryData::Instruction {
+                        op_code,
+                        expression: None,
+                        bytes: instruction_bytes(op_code),
+                        debug_only: true
+                    }
+                ))
             },
-            EntryToken::DebugInstructionWithArg(inner, _, _) => {
+            EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
-                // TODO handle debug mode
-                // TODO get instr size
+                self.entries.push(SectionEntry::new_with_size(
+                    self.id,
+                    inner,
+                    instruction_size(op_code),
+                    EntryData::Instruction {
+                        op_code,
+                        expression: Some(expr),
+                        bytes: instruction_bytes(op_code),
+                        debug_only: true
+                    }
+                ))
             },
             EntryToken::GlobalLabelDef(inner, id) | EntryToken::LocalLabelDef(inner, id) => {
                 self.entries.push(SectionEntry::new_label(self.id, inner, id));
             },
-            EntryToken::Data { inner, endianess, storage, alignment } => {
+            EntryToken::Data { inner, endianess, storage, alignment, debug_only } => {
 
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = match storage {
@@ -427,8 +474,9 @@ impl Section {
                         alignment,
                         endianess,
                         expressions,
-                        bytes
-                    }
+                        bytes,
+                        debug_only
+                    },
                 ));
 
             },
@@ -502,14 +550,85 @@ impl Section {
                     }
                     *bytes = Some(data_bytes);
                 }
+                debug_assert_eq!(self.is_rom, bytes.is_some());
 
-            } else if let EntryData::Instruction { .. } = entry.data {
-                // TODO resolve all instruction arguments
-                    // TODO check argument types and whether they fit into the data slot size
-                // TODO jr Instructions need to convert to a relative value using their own offset
+            } else if let EntryData::Instruction { ref op_code, ref mut bytes, ref expression, .. } = entry.data {
+                if let Some(expr) = expression {
+                    if let Some(argument) = instruction_argument(*op_code) {
+
+                        // Handle constant/offset -> op code mapping
+                        if let Some(offsets) = instruction_offsets(*op_code) {
+                            let value = util::constant_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid constant argument")?;
+                            let mut mapped_op_code = None;
+                            for (constant_value, constant_op_code) in offsets {
+                                if value == *constant_value {
+                                    mapped_op_code = Some(*constant_op_code);
+                                    break;
+                                }
+                            }
+
+                            // Rewrite instruction to matched op code
+                            if let Some(mapped_op_code) = mapped_op_code {
+                                *bytes = instruction_bytes(mapped_op_code);
+
+                            } else {
+                                // TODO error constant our of range, list possible constant values
+                            }
+
+                        } else {
+                            let mut instr_bytes = instruction_bytes(*op_code);
+                            let mut arg_bytes: Vec<u8> = match argument {
+                                Argument::MemoryLookupByteValue | Argument::ByteValue => {
+                                    vec![
+                                        util::positive_byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte argument")?
+                                    ]
+                                },
+                                Argument::MemoryLookupWordValue | Argument::WordValue => {
+                                    let word = util::positive_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word argument")?;
+                                    vec![
+                                        word as u8,
+                                        (word >> 8) as u8
+                                    ]
+                                },
+                                Argument::SignedByteValue => {
+                                    // TODO this is broken right now
+                                    // Evaluate and convert into relative offset for jr, ldsp etc.
+                                    let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
+                                    // TODO handle LDSP correctly which does not need the - 2
+                                    let offset = util::signed_byte_value(&entry.inner, (address as i32 - entry.offset as i32) - 2, "Invalid signed byte argument")?;
+                                    vec![
+                                        offset
+                                    ]
+                                },
+                                _ => unreachable!("Invalid argument type for instruction with expression")
+                            };
+
+                            instr_bytes.append(&mut arg_bytes);
+                            *bytes = instr_bytes;
+                        }
+
+                    } else {
+                        unreachable!("Instruction has expression but does not expect any argument!");
+                    }
+                }
             }
         }
         Ok(())
+    }
+
+    pub fn strip_debug(&mut self) {
+        self.entries.retain(|entry| {
+            match entry.data {
+                EntryData::Instruction { debug_only, .. } => {
+                    !debug_only
+                },
+                EntryData::Data { debug_only, .. } => {
+                    !debug_only
+                },
+                _ => true
+            }
+        });
+        // TODO remove debug entries
     }
 
     pub fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {
@@ -544,5 +663,22 @@ impl Section {
         }
     }
 
+}
+
+// Helpers --------------------------------------------------------------------
+fn instruction_size(op_code: usize) -> usize {
+    INSTRUCTIONS[op_code].size
+}
+
+fn instruction_bytes(op_code: usize) -> Vec<u8> {
+    INSTRUCTIONS[op_code].to_bytes()
+}
+
+fn instruction_offsets(op_code: usize) -> Option<&'static Vec<(usize, usize)>> {
+    INSTRUCTIONS[op_code].offsets.as_ref()
+}
+
+fn instruction_argument(op_code: usize) -> Option<&'static Argument> {
+    INSTRUCTIONS[op_code].argument.as_ref()
 }
 

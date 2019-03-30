@@ -107,6 +107,10 @@ impl Linker {
         })
     }
 
+    pub fn strip_debug(&mut self) -> Result<(), LexerError> {
+        SectionList::strip_debug(&mut self.sections, &mut self.context)
+    }
+
     pub fn optimize_instructions(&mut self) -> Result<(), LexerError> {
         // Run passes until no more optimizations were applied
         while SectionList::optimize_instructions(&mut self.sections, &mut self.context) {
@@ -131,7 +135,7 @@ mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::InnerToken;
     use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
-    use crate::expression::{Expression, ExpressionResult, ExpressionValue};
+    use crate::expression::{Expression, ExpressionResult, ExpressionValue, TEMPORARY_EXPRESSION_ID};
     use crate::expression::data::{DataAlignment, DataEndianess};
 
     fn linker<S: Into<String>>(s: S) -> Linker {
@@ -393,7 +397,8 @@ mod test {
                         (1, (0, Expression::Value(ExpressionValue::Integer(16)))),
                         (1, (1, Expression::Value(ExpressionValue::Integer(32))))
                     ]),
-                    bytes: Some(vec![16, 32])
+                    bytes: Some(vec![16, 32]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -406,7 +411,8 @@ mod test {
                         (1, (0, Expression::Value(ExpressionValue::Integer(-1)))),
                         (1, (1, Expression::Value(ExpressionValue::Integer(-128))))
                     ]),
-                    bytes: Some(vec![255, 128])
+                    bytes: Some(vec![255, 128]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -429,7 +435,8 @@ mod test {
                         (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
                         (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
                     ]),
-                    bytes: Some(vec![0, 16, 0, 32])
+                    bytes: Some(vec![0, 16, 0, 32]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -441,7 +448,8 @@ mod test {
                     expressions: Some(vec![
                         (2, (0, Expression::Value(ExpressionValue::Integer(-1))))
                     ]),
-                    bytes: Some(vec![255, 255])
+                    bytes: Some(vec![255, 255]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -454,7 +462,8 @@ mod test {
                         (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
                         (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
                     ]),
-                    bytes: Some(vec![16, 0, 32, 0])
+                    bytes: Some(vec![16, 0, 32, 0]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -475,7 +484,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![1, 2, 3, 4])
+                    bytes: Some(vec![1, 2, 3, 4]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -489,7 +499,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![0, 0, 0, 0, 0])
+                    bytes: Some(vec![0, 0, 0, 0, 0]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -499,7 +510,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![70, 79, 79])
+                    bytes: Some(vec![70, 79, 79]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -509,7 +521,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![70, 79, 79, 0, 0])
+                    bytes: Some(vec![70, 79, 79, 0, 0]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -531,7 +544,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: None
+                    bytes: None,
+                    debug_only: false
                 })
             ]
         ]);
@@ -545,7 +559,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: None
+                    bytes: None,
+                    debug_only: false
                 })
             ]
         ]);
@@ -559,7 +574,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: None
+                    bytes: None,
+                    debug_only: false
                 })
             ]
         ]);
@@ -573,7 +589,8 @@ mod test {
                     alignment: DataAlignment::WithinWord,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: None
+                    bytes: None,
+                    debug_only: false
                 })
             ]
         ]);
@@ -587,7 +604,8 @@ mod test {
                     alignment: DataAlignment::Word,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: None
+                    bytes: None,
+                    debug_only: false
                 })
             ]
         ]);
@@ -626,7 +644,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![0, 0, 0, 0, 0])
+                    bytes: Some(vec![0, 0, 0, 0, 0]),
+                    debug_only: false
                 }),
                 (0, EntryData::Label {
                     id: 1,
@@ -638,7 +657,8 @@ mod test {
                     expressions: Some(vec![
                         (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
                     ]),
-                    bytes: Some(vec![5, 0])
+                    bytes: Some(vec![5, 0]),
+                    debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
@@ -646,7 +666,8 @@ mod test {
                     expressions: Some(vec![
                         (1, (2, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(39, 45, "global"), 1))))
                     ]),
-                    bytes: Some(vec![5])
+                    bytes: Some(vec![5]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -660,7 +681,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![0, 0, 0, 0, 0])
+                    bytes: Some(vec![0, 0, 0, 0, 0]),
+                    debug_only: false
                 }),
                 (0, EntryData::Label {
                     id: 1,
@@ -672,7 +694,8 @@ mod test {
                     expressions: Some(vec![
                         (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
                     ]),
-                    bytes: Some(vec![5, 0])
+                    bytes: Some(vec![5, 0]),
+                    debug_only: false
                 })
             ],
             vec![
@@ -682,7 +705,8 @@ mod test {
                     expressions: Some(vec![
                         (1, (3, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(59, 65, "global"), 1))))
                     ]),
-                    bytes: Some(vec![5])
+                    bytes: Some(vec![5]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -700,7 +724,8 @@ mod test {
                     expressions: Some(vec![
                         (1, (0, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string()))))
                     ]),
-                    bytes: Some(vec![2])
+                    bytes: Some(vec![2]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -716,11 +741,29 @@ mod test {
                     expressions: Some(vec![
                         (1, (0, Expression::Value(ExpressionValue::GlobalLabelAddress(mtk!(17, 23, "global", 0), 1))))
                     ]),
-                    bytes: Some(vec![1])
+                    bytes: Some(vec![1]),
+                    debug_only: false
                 }),
                 (0, EntryData::Label {
                     id: 1,
                     name: "global".to_string()
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_macro_defined_constant_evaluation() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nMACRO FOO(@a) @a EQU 2 ENDMACRO\n DB C")), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (1, Expression::Value(ExpressionValue::ConstantValue(itk!(56, 57, "C"), "C".to_string()))))
+                    ]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
                 })
             ]
         ]);
@@ -732,7 +775,7 @@ mod test {
     // Offsets ----------------------------------------------------------------
 
     #[test]
-    fn test_section_entry_offsets() {
+    fn test_section_entry_offsets_data() {
         assert_eq!(linker_section_offsets(linker("SECTION ROM0\nDS16 5\nDS8 3\nDS 4\nDS 10\nglobal_label:")), vec![
             vec![
                 (0, 5),
@@ -753,12 +796,214 @@ mod test {
         ]);
     }
 
-    // TODO test further offset calculation
+    #[test]
+    fn test_section_entry_instruction_offsets() {
+        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nld a,a\nld hl,$4000\nsrl a")), vec![
+            vec![
+                (0, 1),
+                (1, 3),
+                (4, 2)
+            ]
+        ]);
+        assert_eq!(linker_section_offsets(linker("SECTION ROM0[$2000]\nld a,a\nld hl,$4000\nsrl a")), vec![
+            vec![
+                (8192, 1),
+                (8193, 3),
+                (8196, 2)
+            ]
+        ]);
+    }
 
+    #[test]
+    fn test_section_entry_instruction_offsets_debug() {
+        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nmsg 'Hello World'\nbrk")), vec![
+            vec![
+                (0, 1),  // ld d,d
+                (1, 2),  // jr
+                (3, 1),  // 0x64
+                (4, 1),  // 0x64
+                (5, 1),  // 0x00
+                (6, 1),  // 0x00
+                (7, 11),  // String Bytes
+                (18, 1)   // ld b,b,
+            ]
+        ]);
+    }
 
     // Instructions -----------------------------------------------------------
 
-    // TODO
+    #[test]
+    fn test_section_instructions() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nld a,a\nadd hl,de\nsrl a")), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 25,
+                    expression: None,
+                    bytes: vec![25],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 319,
+                    expression: None,
+                    bytes: vec![203, 63],
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_instructions_with_arg() {
+        // TODO test value range errors
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nld a,$20\nld hl,$4000")), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 62,
+                    expression: Some((0, Expression::Value(ExpressionValue::Integer(32)))),
+                    bytes: vec![62, 32],
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 33,
+                    expression: Some((1, Expression::Value(ExpressionValue::Integer(16384)))),
+                    bytes: vec![33, 0, 64],
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_instructions_with_arg_constants() {
+        // TODO test range errors for constant mapping
+        // TODO replace constants
+        // TODO test bit, res, set, rst instructions for their mappings
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nbit 6,a")), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 327,
+                    expression: Some((0, Expression::Value(ExpressionValue::Integer(6)))),
+                    bytes: vec![203, 119],
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_instructions_with_arg_signed() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal:\njr z,global\njr @+4\njr @-1")), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_instructions_debug_brk() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nbrk")), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 64,
+                    expression: None,
+                    bytes: vec![64],
+                    debug_only: true
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_instructions_debug_msg() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nmsg 'Hello World'")), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 82,
+                    expression: None,
+                    bytes: vec![82],
+                    debug_only: true
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((
+                        TEMPORARY_EXPRESSION_ID,
+                        Expression::Value(ExpressionValue::Integer(11))
+                    )),
+                    // TODO is 8 correct here?
+                    bytes: vec![24, 8],
+                    debug_only: true
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 100,
+                    expression: None,
+                    bytes: vec![100],
+                    debug_only: true
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 100,
+                    expression: None,
+                    bytes: vec![100],
+                    debug_only: true
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 0,
+                    expression: None,
+                    bytes: vec![0],
+                    debug_only: true
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 0,
+                    expression: None,
+                    bytes: vec![0],
+                    debug_only: true
+                }),
+                (11, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
+                    debug_only: true
+                })
+            ]
+        ]);
+    }
+
+    // Debug Stripping --------------------------------------------------------
+    #[test]
+    fn test_section_debug_strip_entries() {
+        let mut l = linker("SECTION ROM0\nmsg 'Hello World'\nld a,a");
+        l.strip_debug().expect("Debug stripping failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_debug_strip_offsets() {
+        let mut l = linker("SECTION ROM0\nmsg 'Hello World'\nld a,a");
+        l.strip_debug().expect("Debug stripping failed");
+        assert_eq!(linker_section_offsets(l), vec![
+            vec![
+                (0, 1)
+            ]
+        ]);
+    }
 
 }
 

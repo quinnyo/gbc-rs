@@ -35,7 +35,8 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
     Data {
         alignment => DataAlignment,
         endianess => DataEndianess,
-        storage => DataStorage
+        storage => DataStorage,
+        debug_only => bool
     },
     // SECTION EXPR[String]
     SectionDeclaration {
@@ -111,7 +112,8 @@ impl EntryStage {
                         inner,
                         alignment: DataAlignment::Byte,
                         endianess: DataEndianess::Little,
-                        storage: DataStorage::Array(bytes)
+                        storage: DataStorage::Array(bytes),
+                        debug_only: false
                     }
                 },
 
@@ -389,7 +391,7 @@ impl EntryStage {
                             // ld d,d
                             EntryToken::DebugInstruction(inner.clone(), 0x52),
 
-                            // jr @+4+bytes.len()
+                            // jr @+bytes.len()+4 to skip over the literal and magic bytes
                             EntryToken::DebugInstructionWithArg(
                                 inner.clone(),
                                 0x18,
@@ -402,7 +404,16 @@ impl EntryStage {
 
                             // 0x0000
                             EntryToken::DebugInstruction(inner.clone(), 0x00),
-                            EntryToken::DebugInstruction(inner, 0x00)
+                            EntryToken::DebugInstruction(inner.clone(), 0x00),
+
+                            // Msg Payload
+                            EntryToken::Data {
+                                inner: inner,
+                                alignment: DataAlignment::Byte,
+                                endianess: DataEndianess::Little,
+                                storage: DataStorage::Array(bytes),
+                                debug_only: true
+                            }
                         ]
                     }
 
@@ -734,14 +745,15 @@ impl EntryStage {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
-                storage: DataStorage::Bytes(e)
-
+                storage: DataStorage::Bytes(e),
+                debug_only: false
             }),
             None => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
-                storage: DataStorage::Byte
+                storage: DataStorage::Byte,
+                debug_only: false
             })
         }
     }
@@ -756,14 +768,15 @@ impl EntryStage {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
-                storage: DataStorage::Words(e)
-
+                storage: DataStorage::Words(e),
+                debug_only: false
             }),
             None => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
-                storage: DataStorage::Word
+                storage: DataStorage::Word,
+                debug_only: false
             })
         }
     }
@@ -778,14 +791,15 @@ impl EntryStage {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
-                storage: DataStorage::Words(e)
-
+                storage: DataStorage::Words(e),
+                debug_only: false
             }),
             None => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
-                storage: DataStorage::Word
+                storage: DataStorage::Word,
+                debug_only: false
             })
         }
     }
@@ -805,7 +819,8 @@ impl EntryStage {
                         inner,
                         alignment,
                         endianess: DataEndianess::Little,
-                        storage: DataStorage::Buffer((id, expr), Some((data_id, data_expr)))
+                        storage: DataStorage::Buffer((id, expr), Some((data_id, data_expr))),
+                        debug_only: false
                     })
 
                 } else {
@@ -817,7 +832,8 @@ impl EntryStage {
                     inner,
                     alignment,
                     endianess: DataEndianess::Little,
-                    storage: DataStorage::Buffer((id, expr), None)
+                    storage: DataStorage::Buffer((id, expr), None),
+                    debug_only: false
                 })
             }
         } else {
@@ -1387,13 +1403,15 @@ mod test {
             inner: itk!(0, 2, "DB"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Byte
+            storage: DataStorage::Byte,
+            debug_only: false
         }]);
         assert_eq!(tfe("DB 2"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DB"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Bytes(vec![(0, Expression::Value(ExpressionValue::Integer(2)))])
+            storage: DataStorage::Bytes(vec![(0, Expression::Value(ExpressionValue::Integer(2)))]),
+            debug_only: false
         }]);
         assert_eq!(tfe("DB 2 + 3, 1"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DB"),
@@ -1407,7 +1425,8 @@ mod test {
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
                 }),
                 (1, Expression::Value(ExpressionValue::Integer(1)))
-            ])
+            ]),
+            debug_only: false
         }]);
         assert_eq!(tfe("DB 2, 3, 4, 5"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DB"),
@@ -1418,7 +1437,8 @@ mod test {
                 (1, Expression::Value(ExpressionValue::Integer(3))),
                 (2, Expression::Value(ExpressionValue::Integer(4))),
                 (3, Expression::Value(ExpressionValue::Integer(5)))
-            ])
+            ]),
+            debug_only: false
         }]);
     }
 
@@ -1428,13 +1448,15 @@ mod test {
             inner: itk!(0, 2, "DW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Word
+            storage: DataStorage::Word,
+            debug_only: false
         }]);
         assert_eq!(tfe("DW 2000"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))])
+            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))]),
+            debug_only: false
         }]);
         assert_eq!(tfe("DW 2 + 3, 1"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DW"),
@@ -1448,7 +1470,8 @@ mod test {
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
                 }),
                 (1, Expression::Value(ExpressionValue::Integer(1)))
-            ])
+            ]),
+            debug_only: false
         }]);
         assert_eq!(tfe("DW 2000, 3000, 4000, 5000"), vec![EntryToken::Data {
             inner: itk!(0, 2, "DW"),
@@ -1459,7 +1482,8 @@ mod test {
                 (1, Expression::Value(ExpressionValue::Integer(3000))),
                 (2, Expression::Value(ExpressionValue::Integer(4000))),
                 (3, Expression::Value(ExpressionValue::Integer(5000)))
-            ])
+            ]),
+            debug_only: false
         }]);
     }
 
@@ -1469,13 +1493,15 @@ mod test {
             inner: itk!(0, 2, "BW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
-            storage: DataStorage::Word
+            storage: DataStorage::Word,
+            debug_only: false
         }]);
         assert_eq!(tfe("BW 2000"), vec![EntryToken::Data {
             inner: itk!(0, 2, "BW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
-            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))])
+            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))]),
+            debug_only: false
         }]);
         assert_eq!(tfe("BW 2 + 3, 1"), vec![EntryToken::Data {
             inner: itk!(0, 2, "BW"),
@@ -1489,7 +1515,8 @@ mod test {
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
                 }),
                 (1, Expression::Value(ExpressionValue::Integer(1)))
-            ])
+            ]),
+            debug_only: false
         }]);
         assert_eq!(tfe("BW 2000, 3000, 4000, 5000"), vec![EntryToken::Data {
             inner: itk!(0, 2, "BW"),
@@ -1500,7 +1527,8 @@ mod test {
                 (1, Expression::Value(ExpressionValue::Integer(3000))),
                 (2, Expression::Value(ExpressionValue::Integer(4000))),
                 (3, Expression::Value(ExpressionValue::Integer(5000)))
-            ])
+            ]),
+            debug_only: false
         }]);
     }
 
@@ -1516,7 +1544,8 @@ mod test {
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }), None)
+            }), None),
+            debug_only: false
         }]);
     }
 
@@ -1529,7 +1558,8 @@ mod test {
             storage: DataStorage::Buffer(
                 (0, Expression::Value(ExpressionValue::Integer(15))),
                 Some((1, Expression::Value(ExpressionValue::String("Hello World".to_string()))))
-            )
+            ),
+            debug_only: false
         }]);
     }
 
@@ -1542,7 +1572,8 @@ mod test {
             storage: DataStorage::Buffer(
                 (0, Expression::Value(ExpressionValue::String("Hello World".to_string()))),
                 None
-            )
+            ),
+            debug_only: false
         }]);
     }
 
@@ -1558,7 +1589,8 @@ mod test {
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }), None)
+            }), None),
+            debug_only: false
         }]);
     }
 
@@ -1574,7 +1606,8 @@ mod test {
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }), None)
+            }), None),
+            debug_only: false
         }]);
     }
 
@@ -1585,7 +1618,8 @@ mod test {
             inner: itk!(7, 18, "child.bin"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Array(vec![1, 2, 3])
+            storage: DataStorage::Array(vec![1, 2, 3]),
+            debug_only: false
         }]);
     }
 
@@ -2262,7 +2296,16 @@ mod test {
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00),
-            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00)
+            EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00),
+            EntryToken::Data {
+                inner: itk!(0, 3, "msg"),
+                alignment: DataAlignment::Byte,
+                endianess: DataEndianess::Little,
+                storage: DataStorage::Array(vec![
+                    72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100
+                ]),
+                debug_only: true
+            }
         ]);
     }
 
