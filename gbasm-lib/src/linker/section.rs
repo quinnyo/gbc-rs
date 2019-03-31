@@ -189,6 +189,10 @@ impl SectionList {
         for s in sections.iter_mut() {
             s.resolve_arguments(context)?;
         }
+        // TODO validate JR target across all sections
+        // for s in &sections {
+        //     s.validate_relative_jumps(&sections)?;
+        // }
         Ok(())
     }
 
@@ -524,6 +528,10 @@ impl Section {
 
     pub fn resolve_arguments(&mut self, context: &mut EvaluatorContext) -> Result<(), LexerError> {
         for entry in &mut self.entries {
+
+            // Set context rom_offset for relative offset calculation
+            context.rom_offset = (entry.offset + entry.size) as i32;
+
             if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
 
                 // Resolve Data Argument Expressions
@@ -561,7 +569,7 @@ impl Section {
                             let value = util::constant_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid constant argument")?;
                             let mut mapped_op_code = None;
                             for (constant_value, constant_op_code) in offsets {
-                                if value == *constant_value {
+                                if value == *constant_value as i32 {
                                     mapped_op_code = Some(*constant_op_code);
                                     break;
                                 }
@@ -572,7 +580,10 @@ impl Section {
                                 *bytes = instruction_bytes(mapped_op_code);
 
                             } else {
-                                // TODO error constant our of range, list possible constant values
+                                let valid_values: Vec<String> = offsets.iter().map(|(v, _)| v.to_string()).collect();
+                                return Err(entry.inner.error(
+                                    format!("Invalid constant value {}, one of the following values is required: {}", value, valid_values.join(", "))
+                                ));
                             }
 
                         } else {
@@ -593,12 +604,23 @@ impl Section {
                                 Argument::SignedByteValue => {
                                     // TODO this is broken right now
                                     // Evaluate and convert into relative offset for jr, ldsp etc.
-                                    let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
-                                    // TODO handle LDSP correctly which does not need the - 2
-                                    let offset = util::signed_byte_value(&entry.inner, (address as i32 - entry.offset as i32) - 2, "Invalid signed byte argument")?;
-                                    vec![
-                                        offset
-                                    ]
+
+                                    // ldsp
+                                    if *op_code == 248 {
+                                        vec![
+                                            // TODO test
+                                            util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid signed byte argument")?
+                                        ]
+
+                                    // jr
+                                    } else {
+                                        let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
+                                        vec![
+                                            // TODO validate that address points at a valid section entry by running another pass after the optimzation phase
+                                            // Value is calculated to end of JR instruction
+                                            util::signed_byte_value(&entry.inner, address as i32 - entry.offset as i32, "Invalid signed byte argument")?
+                                        ]
+                                    }
                                 },
                                 _ => unreachable!("Invalid argument type for instruction with expression")
                             };

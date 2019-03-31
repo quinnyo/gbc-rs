@@ -881,19 +881,65 @@ mod test {
 
     #[test]
     fn test_section_instructions_with_arg_constants() {
-        // TODO test range errors for constant mapping
-        // TODO replace constants
-        // TODO test bit, res, set, rst instructions for their mappings
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nbit 6,a")), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 327,
-                    expression: Some((0, Expression::Value(ExpressionValue::Integer(6)))),
-                    bytes: vec![203, 119],
-                    debug_only: false
-                })
-            ]
-        ]);
+        for (bit, op) in vec![(0, 71), (1, 79), (2, 87), (3, 95), (4, 103), (5, 111), (6, 119), (7, 127)] {
+            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nbit {},a", bit))), vec![
+                vec![
+                    (2, EntryData::Instruction {
+                        op_code: 327,
+                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
+                        bytes: vec![203, op],
+                        debug_only: false
+                    })
+                ]
+            ]);
+        }
+
+        for (bit, op) in vec![(0, 135), (1, 143), (2, 151), (3, 159), (4, 167), (5, 175), (6, 183), (7, 191)] {
+            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nres {},a", bit))), vec![
+                vec![
+                    (2, EntryData::Instruction {
+                        op_code: 391,
+                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
+                        bytes: vec![203, op],
+                        debug_only: false
+                    })
+                ]
+            ]);
+        }
+
+        for (bit, op) in vec![(0, 199), (1, 207), (2, 215), (3, 223), (4, 231), (5, 239), (6, 247), (7, 255)] {
+            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nset {},a", bit))), vec![
+                vec![
+                    (2, EntryData::Instruction {
+                        op_code: 455,
+                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
+                        bytes: vec![203, op],
+                        debug_only: false
+                    })
+                ]
+            ]);
+        }
+
+        for (rst, op) in vec![(0, 199), (8, 207), (16, 215), (24, 223), (32, 231), (40, 239), (48, 247), (56, 255)] {
+            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nrst {}", rst))), vec![
+                vec![
+                    (1, EntryData::Instruction {
+                        op_code: 199,
+                        expression: Some((0, Expression::Value(ExpressionValue::Integer(rst)))),
+                        bytes: vec![op],
+                        debug_only: false
+                    })
+                ]
+            ]);
+        }
+    }
+
+    #[test]
+    fn test_error_section_instructions_with_arg_constants() {
+        assert_eq!(linker_error("SECTION ROM0\nbit -1,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value -1, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit -1,a\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nbit 8,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 8, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit 8,a\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nrst 2"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 2, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 2\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nrst 41"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 41, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 41\n^--- Here");
     }
 
     #[test]
@@ -903,6 +949,56 @@ mod test {
                 (0, EntryData::Label {
                     id: 1,
                     name: "global".to_string()
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 40,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(26, 32, "global"), 1)))),
+                    bytes: vec![40, 0],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((1, Expression::Value(ExpressionValue::OffsetAddress(itk!(36, 39, "+4"), 4)))),
+                    bytes: vec![24, 6],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((2, Expression::Value(ExpressionValue::OffsetAddress(itk!(43, 46, "-1"), -1)))),
+                    bytes: vec![24, 1],
+                    debug_only: false
+                })
+            ]
+        ]);
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nvsync")), vec![
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 250,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(65345)))),
+                    bytes: vec![250, 65, 255],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 230,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(2)))),
+                    bytes: vec![230, 2],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 32,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -4)))),
+                    bytes: vec![32, 254],
+                    debug_only: false
+                })
+            ]
+        ]);
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nldsp hl,-3")), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 248,
+                    expression: Some((0, Expression::Value(ExpressionValue::Integer(-3)))),
+                    bytes: vec![248, 253],
+                    debug_only: false
                 })
             ]
         ]);
@@ -924,6 +1020,18 @@ mod test {
 
     #[test]
     fn test_section_instructions_debug_msg() {
+        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nmsg 'Hello World'\nglobal:")), vec![
+           vec![
+                (0, 1),
+                (1, 2),
+                (3, 1),
+                (4, 1),
+                (5, 1),
+                (6, 1),
+                (7, 11),
+                (18, 0)
+           ]
+        ]);
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nmsg 'Hello World'")), vec![
             vec![
                 (1, EntryData::Instruction {
@@ -936,10 +1044,9 @@ mod test {
                     op_code: 24,
                     expression: Some((
                         TEMPORARY_EXPRESSION_ID,
-                        Expression::Value(ExpressionValue::Integer(11))
+                        Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 13))
                     )),
-                    // TODO is 8 correct here?
-                    bytes: vec![24, 8],
+                    bytes: vec![24, 15],
                     debug_only: true
                 }),
                 (1, EntryData::Instruction {

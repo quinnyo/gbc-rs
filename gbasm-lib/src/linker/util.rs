@@ -9,18 +9,13 @@ pub fn constant_value(
     result: ExpressionResult,
     msg: &'static str
 
-) -> Result<usize, LexerError> {
+) -> Result<i32, LexerError> {
     match result {
         ExpressionResult::Integer(i) => {
-            if i >= 0 {
-                Ok(i as usize)
-
-            } else {
-                Err(inner.error(format!("{}, expected a positive integer value instead.", msg)))
-            }
+            Ok(i)
         },
         _ => {
-            Err(inner.error(format!("{}, expected a positive interger value instead.", msg)))
+            Err(inner.error(format!("{}, expected a interger value instead.", msg)))
         }
     }
 }

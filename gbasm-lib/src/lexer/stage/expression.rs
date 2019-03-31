@@ -25,9 +25,9 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     Comma(()),
     OpenBracket(()),
     CloseBracket(()),
-    // TODO remove id?
+    // TODO remove id and use name for constant evaluation loop detection?
     Expression((usize, Expression)),
-    // TODO remove id?
+    // TODO remove id and use name for constant evaluation loop detection?
     ConstExpression((usize, Expression)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))
