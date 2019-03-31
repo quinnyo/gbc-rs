@@ -667,7 +667,7 @@ impl Section {
         false
     }
 
-    fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
+    fn validate_jump_targets(&self, _sections: &[Section]) -> Result<(), LexerError> {
         // TODO check if all jump targets land on a section entry that's either a label or
         // instruction
         Ok(())

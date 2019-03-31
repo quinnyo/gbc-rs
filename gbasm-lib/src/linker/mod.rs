@@ -1168,9 +1168,19 @@ mod test {
     // Debug Stripping --------------------------------------------------------
     #[test]
     fn test_section_debug_strip_entries() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nmsg 'Hello World'\nld a,a"), true, false).expect("Debug stripping failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njr global\nmsg 'Hello World'\nglobal:\nld a,a"), true, false).expect("Debug stripping failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    bytes: vec![24, 0],
+                    debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
@@ -1183,10 +1193,12 @@ mod test {
 
     #[test]
     fn test_section_debug_strip_offsets() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nmsg 'Hello World'\nld a,a"), true, false).expect("Debug stripping failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njr global\nmsg 'Hello World'\nglobal:\nld a,a"), true, false).expect("Debug stripping failed");
         assert_eq!(linker_section_offsets(l), vec![
             vec![
-                (0, 1)
+                (0, 2),
+                (2, 0),
+                (2, 1)
             ]
         ]);
     }
