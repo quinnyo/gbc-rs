@@ -1046,6 +1046,14 @@ mod test {
     }
 
     #[test]
+    fn test_error_section_instructions_jr_range() {
+        linker("SECTION ROM0\njr global\nSECTION ROM0[129]\nglobal:");
+        assert_eq!(linker_error("SECTION ROM0\njr global\nSECTION ROM0[130]\nglobal:"), "In file \"main.gb.s\" on line 2, column 1: Relative jump offset of 128 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
+        linker("SECTION ROM0\nglobal:\nSECTION ROM0[126]\njr global");
+        assert_eq!(linker_error("SECTION ROM0\nglobal:\nSECTION ROM0[127]\njr global"), "In file \"main.gb.s\" on line 4, column 1: Relative jump offset of -129 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
+    }
+
+    #[test]
     fn test_section_instructions_jp() {
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal:\njp foo\njp global\nfoo:")), vec![
             vec![

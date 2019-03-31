@@ -623,11 +623,12 @@ impl Section {
                                     // jr
                                     } else {
                                         let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
-                                        println!("address: {} endd_of_instr: {}", address, end_of_instruction);
+                                        let target = address as i32 - end_of_instruction;
                                         vec![
-                                            // TODO validate that address points at a valid section entry by running another pass after the optimzation phase
-                                            // Value is calculated to end of JR instruction
-                                            util::signed_byte_value(&entry.inner, address as i32 - end_of_instruction, "Invalid signed byte argument")?
+                                            util::signed_byte_value(&entry.inner, target, "").map_err(|mut e| {
+                                                e.message = format!("Relative jump offset of {} is out of range{}", target, e.message);
+                                                e
+                                            })?
                                         ]
                                     }
                                 },
@@ -667,6 +668,8 @@ impl Section {
     }
 
     fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
+        // TODO check if all jump targets land on a section entry that's either a label or
+        // instruction
         Ok(())
     }
 
