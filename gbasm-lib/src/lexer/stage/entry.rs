@@ -396,9 +396,7 @@ impl EntryStage {
                                 inner.clone(),
                                 0x18,
                                 (TEMPORARY_EXPRESSION_ID, Expression::Value(
-                                    // We only add 2 here since the jump value is calculated from
-                                    // the end of the jr instruction
-                                    ExpressionValue::OffsetAddress(inner.clone(), 2 + bytes.len() as i32))
+                                    ExpressionValue::OffsetAddress(inner.clone(), 4 + bytes.len() as i32))
                                 )
                             ),
 
@@ -2296,7 +2294,7 @@ mod test {
     fn test_meta_instruction_msg() {
         assert_eq!(tfe("msg 'Hello World'"), vec![
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x52),
-            EntryToken::DebugInstructionWithArg(itk!(0, 3, "msg"), 0x18, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 3, "msg"), 13)))),
+            EntryToken::DebugInstructionWithArg(itk!(0, 3, "msg"), 0x18, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 3, "msg"), 15)))),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00),

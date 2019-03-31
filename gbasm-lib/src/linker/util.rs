@@ -62,48 +62,6 @@ pub fn word_value(
     }
 }
 
-pub fn positive_byte_value(
-    inner: &InnerToken,
-    result: ExpressionResult,
-    msg: &'static str
-
-) -> Result<u8, LexerError> {
-    match result {
-        ExpressionResult::Integer(i) => {
-            if i >= 0 && i <= 255 {
-                Ok(i as u8)
-
-            } else {
-                Err(inner.error(format!("{}, expected a byte value in the range of 0 to 255 instead.", msg)))
-            }
-        },
-        _ => {
-            Err(inner.error(format!("{}, expected a byte value in the range of 0 to 255 instead.", msg)))
-        }
-    }
-}
-
-pub fn positive_word_value(
-    inner: &InnerToken,
-    result: ExpressionResult,
-    msg: &'static str
-
-) -> Result<u16, LexerError> {
-    match result {
-        ExpressionResult::Integer(i) => {
-            if i >= 0 && i <= 65535 {
-                Ok(i as u16)
-
-            } else {
-                Err(inner.error(format!("{}, expected a word value in the range of 0 to 65535 instead.", msg)))
-            }
-        },
-        _ => {
-            Err(inner.error(format!("{}, expected a word value in the range of 0 to 65535 instead.", msg)))
-        }
-    }
-}
-
 pub fn address_word_value(
     inner: &InnerToken,
     result: ExpressionResult,

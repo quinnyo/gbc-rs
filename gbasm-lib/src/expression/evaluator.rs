@@ -40,12 +40,12 @@ impl EvaluatorContext {
     }
 
     pub fn resolve_constants(&mut self) -> Result<(), LexerError> {
-        let mut names: Vec<String> = self.raw_constants.keys().cloned().into_iter().collect();
+        let mut names: Vec<String> = self.raw_constants.keys().cloned().collect();
         names.sort_by(|a, b| {
             a.cmp(&b)
         });
         for name in names {
-            let constant = self.raw_constants.get(&name).unwrap().clone();
+            let constant = self.raw_constants[&name].clone();
             let stack = vec![constant.expression.0];
             let c = self.resolve_expression_inner(
                 &stack,
@@ -66,7 +66,7 @@ impl EvaluatorContext {
         if let Some(result) = self.constants.get(name) {
             Ok(result.clone())
 
-        } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(name).map(|c| c.clone()) {
+        } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(name).cloned() {
             let (id, value) = expression.clone();
             if constant_stack.contains(&id) {
                 Err(parent.error(
@@ -151,6 +151,7 @@ impl EvaluatorContext {
                     ExpressionValue::Float(f) => ExpressionResult::Float(f),
                     ExpressionValue::String(s) => ExpressionResult::String(s),
                     ExpressionValue::OffsetAddress(_, offset) => {
+                        println!("offset is: {}", offset);
                         ExpressionResult::Integer(self.rom_offset + offset)
                     },
                     ExpressionValue::GlobalLabelAddress(_, id) => {
@@ -353,10 +354,10 @@ impl EvaluatorContext {
                 Ok(ExpressionResult::Integer(l << r))
             },
             (Operator::LogicalAnd, ExpressionResult::Integer(l), ExpressionResult::Integer(r)) => {
-                Ok(ExpressionResult::Integer(b2i(i2b(l) && i2b(r))))
+                Ok(ExpressionResult::Integer(b2i(i2b(*l) && i2b(*r))))
             },
             (Operator::LogicalOr, ExpressionResult::Integer(l), ExpressionResult::Integer(r)) => {
-                Ok(ExpressionResult::Integer(b2i(i2b(l) || i2b(r))))
+                Ok(ExpressionResult::Integer(b2i(i2b(*l) || i2b(*r))))
             },
             (Operator::Equals, ExpressionResult::Integer(l), ExpressionResult::Integer(r)) => {
                 Ok(ExpressionResult::Integer(b2i(l == r)))
@@ -618,8 +619,8 @@ fn b2i(m: bool) -> i32 {
     }
 }
 
-fn i2b(i: &i32) -> bool {
-    *i != 0
+fn i2b(i: i32) -> bool {
+    i != 0
 }
 
 // Tests ----------------------------------------------------------------------

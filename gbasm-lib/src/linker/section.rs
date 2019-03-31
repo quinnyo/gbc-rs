@@ -182,21 +182,20 @@ impl SectionList {
         }
     }
 
-    pub fn resolve(sections: &mut Vec<Section>, context: &mut EvaluatorContext) -> Result<(), LexerError> {
+    pub fn resolve(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
         for s in sections.iter_mut() {
             s.resolve_addresses(context)?;
         }
         for s in sections.iter_mut() {
             s.resolve_arguments(context)?;
         }
-        // TODO validate JR target across all sections
-        // for s in &sections {
-        //     s.validate_relative_jumps(&sections)?;
-        // }
+        for s in sections.iter() {
+            s.validate_jump_targets(&sections)?;
+        }
         Ok(())
     }
 
-    pub fn strip_debug(sections: &mut Vec<Section>, context: &mut EvaluatorContext) -> Result<(), LexerError> {
+    pub fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
         for s in sections.iter_mut() {
             s.strip_debug();
         }
@@ -530,7 +529,8 @@ impl Section {
         for entry in &mut self.entries {
 
             // Set context rom_offset for relative offset calculation
-            context.rom_offset = (entry.offset + entry.size) as i32;
+            let end_of_instruction = (entry.offset + entry.size) as i32;
+            context.rom_offset = end_of_instruction;
 
             if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
 
@@ -595,7 +595,7 @@ impl Section {
                                     ]
                                 },
                                 Argument::MemoryLookupWordValue | Argument::WordValue => {
-                                    let word = util::positive_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word argument")?;
+                                    let word = util::word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word argument")?;
                                     vec![
                                         word as u8,
                                         (word >> 8) as u8
@@ -611,10 +611,11 @@ impl Section {
                                     // jr
                                     } else {
                                         let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
+                                        println!("address: {} endd_of_instr: {}", address, end_of_instruction);
                                         vec![
                                             // TODO validate that address points at a valid section entry by running another pass after the optimzation phase
                                             // Value is calculated to end of JR instruction
-                                            util::signed_byte_value(&entry.inner, address as i32 - entry.offset as i32, "Invalid signed byte argument")?
+                                            util::signed_byte_value(&entry.inner, address as i32 - end_of_instruction, "Invalid signed byte argument")?
                                         ]
                                     }
                                 },
@@ -646,7 +647,10 @@ impl Section {
                 _ => true
             }
         });
-        // TODO remove debug entries
+    }
+
+    pub fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
+        Ok(())
     }
 
     pub fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {

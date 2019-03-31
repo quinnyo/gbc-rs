@@ -943,7 +943,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_instructions_with_arg_signed() {
+    fn test_section_instructions_jr() {
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal:\njr z,global\njr @+4\njr @-1")), vec![
             vec![
                 (0, EntryData::Label {
@@ -953,19 +953,19 @@ mod test {
                 (2, EntryData::Instruction {
                     op_code: 40,
                     expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(26, 32, "global"), 1)))),
-                    bytes: vec![40, 0],
+                    bytes: vec![40, 254],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
                     expression: Some((1, Expression::Value(ExpressionValue::OffsetAddress(itk!(36, 39, "+4"), 4)))),
-                    bytes: vec![24, 6],
+                    bytes: vec![24, 4],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
                     expression: Some((2, Expression::Value(ExpressionValue::OffsetAddress(itk!(43, 46, "-1"), -1)))),
-                    bytes: vec![24, 1],
+                    bytes: vec![24, 255],
                     debug_only: false
                 })
             ]
@@ -987,7 +987,7 @@ mod test {
                 (2, EntryData::Instruction {
                     op_code: 32,
                     expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -4)))),
-                    bytes: vec![32, 254],
+                    bytes: vec![32, 252],
                     debug_only: false
                 })
             ]
@@ -1002,6 +1002,65 @@ mod test {
                 })
             ]
         ]);
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\njr foo\nfoo:\njr bar\nld a,a\nbar:")), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 19, "foo"), 1)))),
+                    bytes: vec![24, 0],
+                    debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "foo".to_string()
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(28, 31, "bar"), 2)))),
+                    bytes: vec![24, 1],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 2,
+                    name: "bar".to_string()
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_instructions_jp() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal:\njp foo\njp global\nfoo:")), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 195,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(24, 27, "foo"), 2)))),
+                    bytes: vec![195, 6, 0],
+                    debug_only: false }),
+
+                (3, EntryData::Instruction {
+                    op_code: 195,
+                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(31, 37, "global"), 1)))),
+                    bytes: vec![195, 0, 0],
+                    debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 2,
+                    name: "foo".to_string()
+                })
+            ]
+        ]);
+
     }
 
     #[test]
@@ -1044,7 +1103,7 @@ mod test {
                     op_code: 24,
                     expression: Some((
                         TEMPORARY_EXPRESSION_ID,
-                        Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 13))
+                        Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 15))
                     )),
                     bytes: vec![24, 15],
                     debug_only: true
