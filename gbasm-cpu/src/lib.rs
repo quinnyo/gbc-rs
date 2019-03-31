@@ -20,6 +20,10 @@ pub fn instruction_layouts() -> InstructionLayouts {
     layouts
 }
 
+pub fn instruction_list() -> Vec<Instruction> {
+    instructions::instructions()
+}
+
 pub fn instruction_is_conditional(mnemonic: &str) -> bool {
     match mnemonic {
         "jr" | "jp" | "call" | "ret" => true,
@@ -254,6 +258,21 @@ pub struct Instruction {
     pub argument: Option<Argument>,
     pub offsets: Option<Vec<(usize, usize)>>,
     pub flags: FlagState
+}
+
+impl Instruction {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        if self.code == 16 {
+            // Pad STOP with a NOP
+            vec![16, 0]
+
+        } else if self.code > 255 {
+            vec![0xCB, (self.code % 256) as u8]
+
+        } else {
+            vec![self.code as u8]
+        }
+    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone)]

@@ -591,7 +591,7 @@ impl Section {
                             let mut arg_bytes: Vec<u8> = match argument {
                                 Argument::MemoryLookupByteValue | Argument::ByteValue => {
                                     vec![
-                                        util::positive_byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte argument")?
+                                        util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte argument")?
                                     ]
                                 },
                                 Argument::MemoryLookupWordValue | Argument::WordValue => {
@@ -602,13 +602,9 @@ impl Section {
                                     ]
                                 },
                                 Argument::SignedByteValue => {
-                                    // TODO this is broken right now
-                                    // Evaluate and convert into relative offset for jr, ldsp etc.
-
-                                    // ldsp
+                                    // ldsp hl,X
                                     if *op_code == 248 {
                                         vec![
-                                            // TODO test
                                             util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid signed byte argument")?
                                         ]
 
