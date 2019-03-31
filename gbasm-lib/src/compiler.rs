@@ -33,8 +33,6 @@ impl Compiler {
 
         let _linker = Linker::from_lexer(entry_lexer, false, false).map_err(|e| CompilerError::new("LINKER", e))?;
 
-        // TODO optimize if flags are passed
-
         // TODO figure out required rom size and generate
 
         Ok(())

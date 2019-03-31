@@ -899,7 +899,7 @@ mod test {
         assert_eq!(const_expression("ABS(-1)"), ExpressionResult::Integer(1));
         assert_eq!(const_expression("ABS(-1.5)"), ExpressionResult::Float(OrderedFloat(1.5)));
 
-        // TODO
+        // TODO test rand macro
         // assert_eq!(const_expression("RAND(0, 10)"), ExpressionResult::Integer(3));
         // assert_eq!(const_expression("RAND(0.0, 1.0)"), ExpressionResult::Float(OrderedFloat(3.0)));
 

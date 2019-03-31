@@ -774,9 +774,6 @@ mod test {
         ]);
     }
 
-    // TODO test correct evaluation of label addresses test for instructions
-    // TODO test correct evaluation of label addresses across sections test for instructions
-
     // Offsets ----------------------------------------------------------------
 
     #[test]
@@ -865,7 +862,6 @@ mod test {
 
     #[test]
     fn test_section_instructions_with_arg() {
-        // TODO test value range errors
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nld a,$20\nld hl,$4000")), vec![
             vec![
                 (2, EntryData::Instruction {
