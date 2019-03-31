@@ -21,15 +21,25 @@ pub struct Linker {
 
 impl Linker {
 
-    pub fn from_lexer(lexer: Lexer<EntryStage>) -> Result<Self, Box<dyn Error>> {
+    pub fn from_lexer(
+        lexer: Lexer<EntryStage>,
+        strip_debug: bool,
+        optimize: bool
+
+    ) -> Result<Self, Box<dyn Error>> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        Ok(Self::new(lexer.tokens).map_err(|err| {
+        Ok(Self::new(lexer.tokens, strip_debug, optimize).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?)
     }
 
-    fn new(tokens: Vec<EntryToken>) -> Result<Self, LexerError> {
+    fn new(
+        tokens: Vec<EntryToken>,
+        strip_debug: bool,
+        optimize: bool
+
+    ) -> Result<Self, LexerError> {
 
         let mut context = EvaluatorContext::new();
 
@@ -97,9 +107,18 @@ impl Linker {
         SectionList::initialize(&mut sections);
         SectionList::resolve(&mut sections, &mut context)?;
 
-        // for s in &sections {
-        //     println!("{}", s);
-        // }
+        if strip_debug {
+            SectionList::strip_debug(&mut sections, &mut context)?;
+        }
+
+        if optimize {
+            // Run passes until no more optimizations were applied
+            while SectionList::optimize_instructions(&mut sections, &mut context) {
+                SectionList::resolve(&mut sections, &mut context)?;
+            }
+        }
+
+        SectionList::verify(&sections)?;
 
         Ok(Self {
             context,
@@ -107,22 +126,8 @@ impl Linker {
         })
     }
 
-    pub fn strip_debug(&mut self) -> Result<(), LexerError> {
-        SectionList::strip_debug(&mut self.sections, &mut self.context)
-    }
-
-    pub fn optimize_instructions(&mut self) -> Result<(), LexerError> {
-        // Run passes until no more optimizations were applied
-        while SectionList::optimize_instructions(&mut self.sections, &mut self.context) {
-            SectionList::resolve(&mut self.sections, &mut self.context)?;
-        }
-        Ok(())
-    }
-
     pub fn generate(&self, buffer: &mut [u8]) {
-        for s in &self.sections {
-            s.generate(buffer);
-        }
+        SectionList::generate(&self.sections, buffer)
     }
 
 }
@@ -139,11 +144,11 @@ mod test {
     use crate::expression::data::{DataAlignment, DataEndianess};
 
     fn linker<S: Into<String>>(s: S) -> Linker {
-        Linker::from_lexer(entry_lex(s.into())).expect("Linker failed")
+        Linker::from_lexer(entry_lex(s.into()), false, false).expect("Linker failed")
     }
 
     fn linker_error<S: Into<String>>(s: S) -> String {
-        Linker::from_lexer(entry_lex(s.into())).err().unwrap().to_string()
+        Linker::from_lexer(entry_lex(s.into()), false, false).err().unwrap().to_string()
     }
 
     fn context_constants(linker: &Linker) -> Vec<(String, ExpressionResult)> {
@@ -477,7 +482,7 @@ mod test {
 
     #[test]
     fn test_section_entry_data_rom_incbin() {
-        let linker = Linker::from_lexer(entry_lex_binary("SECTION ROM0\nINCBIN 'child.bin'", vec![1, 2, 3, 4])).expect("Linker failed");
+        let linker = Linker::from_lexer(entry_lex_binary("SECTION ROM0\nINCBIN 'child.bin'", vec![1, 2, 3, 4]), false, false).expect("Linker failed");
         assert_eq!(linker_section_entries(linker), vec![
             vec![
                 (4, EntryData::Data {
@@ -880,6 +885,12 @@ mod test {
     }
 
     #[test]
+    fn test_error_section_instructions_with_arg() {
+        assert_eq!(linker_error("SECTION ROM0\nld hl,$10000"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument, expected a word value in the range of -32768 to 65535 instead.\n\nld hl,$10000\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld hl,-$8001"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument, expected a word value in the range of -32768 to 65535 instead.\n\nld hl,-$8001\n^--- Here");
+    }
+
+    #[test]
     fn test_section_instructions_with_arg_constants() {
         for (bit, op) in vec![(0, 71), (1, 79), (2, 87), (3, 95), (4, 103), (5, 111), (6, 119), (7, 127)] {
             assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nbit {},a", bit))), vec![
@@ -1060,7 +1071,6 @@ mod test {
                 })
             ]
         ]);
-
     }
 
     #[test]
@@ -1143,11 +1153,18 @@ mod test {
         ]);
     }
 
+    // Section Validation -----------------------------------------------------
+    #[test]
+    fn test_error_section_size_bounds() {
+        linker("SECTION ROM0[$0000][2]\nld a,a\nld a,a");
+        assert_eq!(linker_error("SECTION ROM0[$0000][2]\nld a,a\nld a,a\nld a,a"), "In file \"main.gb.s\" on line 1, column 1: Section contents exceeds allocated area $0000-$0001 by 1 byte(s)\n\nSECTION ROM0[$0000][2]\n^--- Here");
+    }
+
+
     // Debug Stripping --------------------------------------------------------
     #[test]
     fn test_section_debug_strip_entries() {
-        let mut l = linker("SECTION ROM0\nmsg 'Hello World'\nld a,a");
-        l.strip_debug().expect("Debug stripping failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nmsg 'Hello World'\nld a,a"), true, false).expect("Debug stripping failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Instruction {
@@ -1162,8 +1179,7 @@ mod test {
 
     #[test]
     fn test_section_debug_strip_offsets() {
-        let mut l = linker("SECTION ROM0\nmsg 'Hello World'\nld a,a");
-        l.strip_debug().expect("Debug stripping failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nmsg 'Hello World'\nld a,a"), true, false).expect("Debug stripping failed");
         assert_eq!(linker_section_offsets(l), vec![
             vec![
                 (0, 1)

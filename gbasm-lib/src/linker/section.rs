@@ -189,9 +189,6 @@ impl SectionList {
         for s in sections.iter_mut() {
             s.resolve_arguments(context)?;
         }
-        for s in sections.iter() {
-            s.validate_jump_targets(&sections)?;
-        }
         Ok(())
     }
 
@@ -208,6 +205,21 @@ impl SectionList {
             optimzations_applied |= s.optimize_instructions(context);
         }
         optimzations_applied
+    }
+
+    pub fn verify(sections: &[Section]) -> Result<(), LexerError> {
+        for s in sections.iter() {
+            // TODO make optional via --enforce-strict-jump-targets?
+            s.validate_jump_targets(&sections)?;
+            s.validate_bounds()?;
+        }
+        Ok(())
+    }
+
+    pub fn generate(sections: &[Section], buffer: &mut [u8]) {
+        for s in sections.iter() {
+            s.generate(buffer);
+        }
     }
 
 }
@@ -635,7 +647,7 @@ impl Section {
         Ok(())
     }
 
-    pub fn strip_debug(&mut self) {
+    fn strip_debug(&mut self) {
         self.entries.retain(|entry| {
             match entry.data {
                 EntryData::Instruction { debug_only, .. } => {
@@ -649,16 +661,30 @@ impl Section {
         });
     }
 
-    pub fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
-        Ok(())
-    }
-
-    pub fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {
+    fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {
         // TODO run consecutive instruction entries through optimizer
         false
     }
 
-    pub fn generate(&self, buffer: &mut [u8]) {
+    fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
+        Ok(())
+    }
+
+    fn validate_bounds(&self) -> Result<(), LexerError> {
+        if self.start_address + self.bytes_in_use > self.end_address + 1 {
+            Err(self.inner.error(format!(
+                "Section contents exceeds allocated area ${:0>4x}-${:0>4x} by {} byte(s)",
+                self.start_address,
+                self.end_address,
+                (self.start_address + self.bytes_in_use) - (self.end_address + 1)
+            )))
+
+        } else {
+            Ok(())
+        }
+    }
+
+    fn generate(&self, buffer: &mut [u8]) {
         if self.is_rom {
             for e in &self.entries {
                 let offset =self.bank_offset + e.offset;
