@@ -1164,7 +1164,6 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0[$0000][2]\nld a,a\nld a,a\nld a,a"), "In file \"main.gb.s\" on line 1, column 1: Section contents exceeds allocated area $0000-$0001 by 1 byte(s)\n\nSECTION ROM0[$0000][2]\n^--- Here");
     }
 
-
     // Debug Stripping --------------------------------------------------------
     #[test]
     fn test_section_debug_strip_entries() {
@@ -1199,6 +1198,108 @@ mod test {
                 (0, 2),
                 (2, 0),
                 (2, 1)
+            ]
+        ]);
+    }
+
+    // Optimizations ----------------------------------------------------------
+    #[test]
+    fn test_section_optimize_lda0_to_xora() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,0"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_cp0_to_ora() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncp 0"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_ldaffxx_to_ldhaxx() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,[$FF05]"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_ldffxxa_to_ldhxxa() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld [$FF05],a"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_callret_to_jp() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nglobal:\ncall global\nret\nld a,a"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_jp_to_jr() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp c,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp nc,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp z,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp nz,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_ldbldc_to_ldbc() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld b,1\nld c,2\nld a,a"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_lddlde_to_ldde() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld d,1\nld e,2\nld a,a"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_ldhldl_to_ldhl() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld h,1\nld l,2\nld a,a"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
             ]
         ]);
     }

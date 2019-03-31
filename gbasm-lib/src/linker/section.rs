@@ -663,7 +663,40 @@ impl Section {
     }
 
     fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {
-        // TODO run consecutive instruction entries through optimizer
+
+        fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(usize, i32, &[u8])> {
+            if let Some(entry) = entries.get(i) {
+                if let EntryData::Instruction { ref op_code, ref bytes, .. } = entry.data {
+                    Some((*op_code, (entry.offset + entry.size) as i32, bytes))
+
+                } else {
+                    None
+                }
+
+            } else {
+                None
+            }
+        }
+
+        let mut i = 0;
+        while i < self.entries.len() {
+            if let Some((op_code, offset, bytes)) = get_instruction(&self.entries, i) {
+                let b = get_instruction(&self.entries, i + 1);
+                let c = get_instruction(&self.entries, i + 2);
+                if let Some((remove_count, new_instruction)) = optimize_instructions(
+                    op_code,
+                    offset,
+                    bytes,
+                    b,
+                    c
+                ) {
+                    // TODO strip out removed from current location
+                    // TODO insert new at current location
+                }
+            }
+            i += 1;
+        }
+
         false
     }
 
@@ -715,6 +748,114 @@ impl Section {
     }
 
 }
+
+fn optimize_instructions(
+    op_code: usize,
+    end_of_instruction: i32,
+    bytes: &[u8],
+    b: Option<(usize, i32, &[u8])>,
+    c: Option<(usize, i32, &[u8])>
+
+) -> Option<(usize, EntryData)> {
+    // TODO unsafe optimizations
+    match (op_code, b, c) {
+        // ld a,0 -> xor a
+        //
+        // -> save 1 byte and 3 T-states
+        (0x3E, _, _) if bytes[1] == 0x00 => {
+            println!("opti ld a,0");
+
+        },
+
+        // cp 0 -> or a
+        //
+        // save 1 byte and 3 T-states
+        (0xFE , _, _) if bytes[1] == 0x00 => {
+            println!("opti cp 0");
+        },
+
+        // ld a,[someLabel] -> ldh a,$XX
+        (0xFA, _, _) if bytes[2] == 0xFF => {
+            println!("opti a,ff");
+        },
+
+        // ld [someLabel],a -> ldh $XX,a
+        (0xEA, _, _) if bytes[2] == 0xFF => {
+            println!("opti ff,a");
+        },
+
+        // jp c,label  -> jr c,label
+        // jp nc,label -> jr nc,label
+        // jp z,label  -> jr z,label
+        // jp nz,label -> jr nz,label
+        // jp label    -> jr label
+        (0xDA, _, _) |
+        (0xD2, _, _) |
+        (0xCA, _, _) |
+        (0xC2, _, _) |
+        (0xC3, _, _) => {
+            println!("{:?}", bytes);
+            let address = bytes[1] as i32 | ((bytes[2] as i32) << 8);
+            let relative = address - end_of_instruction;
+            if relative >= -128 && relative <= 127 {
+                // Without flags
+                if op_code == 0xC3 {
+                    // TODO check for nop and only perform is unsafe opts are enabled
+
+                // With flags
+                } else {
+
+                }
+                println!("opti jp");
+            }
+        },
+
+        // call LABEL
+        // ret
+        // ->
+        // jp   LABEL
+        //
+        // save 1 byte and 17 T-states
+        (0xCD, Some((0xC9, _, _)), _) => {
+            println!("opti call ret");
+        },
+
+        // ld b,$XX
+        // ld c,$XX
+        // ->
+        // ld bc,$XXXX
+        //
+        // -> save 1 byte and 4 T-states
+        (0x06, Some((0x0E, _, bytes_two)), _) => {
+            println!("opti bc");
+        },
+
+        // ld d,$XX
+        // ld e,$XX
+        // ->
+        // ld de,$XXXX
+        //
+        // -> save 1 byte and 4 T-states
+        (0x16, Some((0x1E, _, bytes_two)), _) => {
+            println!("opti de");
+        },
+
+        // ld h,$XX
+        // ld l,$XX
+        // ->
+        // ld hl,$XXXX
+        //
+        // -> save 1 byte and 4 T-states
+        (0x26, Some((0x2E, _, bytes_two)), _) => {
+            println!("opti hl");
+        },
+
+        // TODO optimize srl a, srl a, srl a
+        _ => {}
+    }
+    None
+}
+
 
 // Helpers --------------------------------------------------------------------
 fn instruction_size(op_code: usize) -> usize {
