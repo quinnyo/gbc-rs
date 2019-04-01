@@ -126,8 +126,8 @@ impl Linker {
         })
     }
 
-    pub fn generate(&self, buffer: &mut [u8]) {
-        SectionList::generate(&self.sections, buffer)
+    pub fn to_rom_buffer(&self) -> Vec<u8> {
+        SectionList::to_rom_buffer(&self.sections)
     }
 
 }
@@ -1205,36 +1205,84 @@ mod test {
     // Optimizations ----------------------------------------------------------
     #[test]
     fn test_section_optimize_lda0_to_xora() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,0"), true, true).expect("Optimization failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,0\nld a,a"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (1, EntryData::Instruction {
+                    op_code: 175,
+                    expression: None,
+                    bytes: vec![175],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
             ]
         ]);
     }
 
     #[test]
     fn test_section_optimize_cp0_to_ora() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncp 0"), true, true).expect("Optimization failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncp 0\nld a,a"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (1, EntryData::Instruction {
+                    op_code: 183,
+                    expression: None,
+                    bytes: vec![183],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
             ]
         ]);
     }
 
     #[test]
     fn test_section_optimize_ldaffxx_to_ldhaxx() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,[$FF05]"), true, true).expect("Optimization failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,[$FF05]\nld a,a"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 240,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(5)))),
+                    bytes: vec![240, 5],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
             ]
         ]);
     }
 
     #[test]
     fn test_section_optimize_ldffxxa_to_ldhxxa() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld [$FF05],a"), true, true).expect("Optimization failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld [$FF05],a\nld a,a"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 224,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(5)))),
+                    bytes: vec![224, 5],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
             ]
         ]);
     }

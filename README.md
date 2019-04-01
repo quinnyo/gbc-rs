@@ -13,7 +13,12 @@ This is a Rust based rewrite of https://gitlab.com/BonsaiDen/gbasm.
 ## Status
 
 - [x] Lexing and Parsing is fully implemented
-- [ ] Work on Linker has started
+- [x] Section Parsing  
+- [x] Argument and Data Evaluation
+- [-] Instruction Optimization
+- [ ] ROM generation
+- [ ] ROM validation and checksums
+- [ ] CLI
 
 ## License
 

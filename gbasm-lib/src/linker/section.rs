@@ -12,7 +12,7 @@ use gbasm_cpu::{self, Argument, Instruction};
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::{InnerToken, LexerError, EntryToken};
-use crate::expression::{OptionalDataExpression, DataExpression, ExpressionResult};
+use crate::expression::{OptionalDataExpression, DataExpression, ExpressionResult, Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
 use super::util;
@@ -147,8 +147,20 @@ impl SectionEntry {
         }
     }
 
-    fn generate(&self, _buffer: &mut [u8]) {
-        // TODO write to buffer using the computed data and instruction values
+    fn generate(&self, buffer: &mut [u8]) {
+        match &self.data {
+            EntryData::Instruction { bytes, .. } => {
+                for (index, b) in bytes.iter().enumerate() {
+                    buffer[index] = *b;
+                }
+            }
+            EntryData::Data { bytes, .. } => if let Some(bytes) = bytes {
+                for (index, b) in bytes.iter().enumerate() {
+                    buffer[index] = *b;
+                }
+            },
+            _ => {}
+        }
     }
 
 }
@@ -216,10 +228,27 @@ impl SectionList {
         Ok(())
     }
 
-    pub fn generate(sections: &[Section], buffer: &mut [u8]) {
+    pub fn to_rom_buffer(sections: &[Section]) -> Vec<u8> {
+
+        // Calculate required ROM size
+        let mut max_address = 0;
         for s in sections.iter() {
-            s.generate(buffer);
+            if s.is_rom {
+                max_address = cmp::max(max_address, s.end_address + 1);
+            }
         }
+
+        // TODO calculate required ROM size
+        // TODO check end_address of is_rom sections
+        // TODO select next power of two
+
+        // 32kb, 64kb, 128kb, 256kb etc.
+        let mut buffer: Vec<u8> = Vec::new();
+        for s in sections.iter() {
+            s.generate(&mut buffer[..]);
+        }
+
+        buffer
     }
 
 }
@@ -679,25 +708,38 @@ impl Section {
         }
 
         let mut i = 0;
+        let mut any_optimizations = false;
         while i < self.entries.len() {
             if let Some((op_code, offset, bytes)) = get_instruction(&self.entries, i) {
                 let b = get_instruction(&self.entries, i + 1);
                 let c = get_instruction(&self.entries, i + 2);
-                if let Some((remove_count, new_instruction)) = optimize_instructions(
+                if let Some((remove_count, EntryData::Instruction { op_code, expression, bytes, .. })) = optimize_instructions(
                     op_code,
                     offset,
                     bytes,
                     b,
                     c
                 ) {
-                    // TODO strip out removed from current location
-                    // TODO insert new at current location
+                    // Remove additional instruction
+                    for _ in 0..remove_count {
+                        self.entries.remove(i + 1);
+                    }
+
+                    // Modify the current instruction
+                    let entry = &mut self.entries[i];
+                    entry.size = instruction_size(op_code);
+                    entry.data = EntryData::Instruction {
+                        op_code,
+                        expression,
+                        bytes,
+                        debug_only: false
+                    };
+                    any_optimizations = true;
                 }
             }
             i += 1;
         }
-
-        false
+        any_optimizations
     }
 
     fn validate_jump_targets(&self, _sections: &[Section]) -> Result<(), LexerError> {
@@ -723,7 +765,7 @@ impl Section {
     fn generate(&self, buffer: &mut [u8]) {
         if self.is_rom {
             for e in &self.entries {
-                let offset =self.bank_offset + e.offset;
+                let offset = self.bank_offset + e.offset;
                 e.generate(&mut buffer[offset..]);
             }
         }
@@ -757,31 +799,49 @@ fn optimize_instructions(
     c: Option<(usize, i32, &[u8])>
 
 ) -> Option<(usize, EntryData)> {
-    // TODO unsafe optimizations
     match (op_code, b, c) {
         // ld a,0 -> xor a
         //
         // -> save 1 byte and 3 T-states
         (0x3E, _, _) if bytes[1] == 0x00 => {
-            println!("opti ld a,0");
-
+            Some((0, EntryData::Instruction {
+                op_code: 175,
+                expression: None,
+                bytes: instruction_bytes(175),
+                debug_only: false
+            }))
         },
 
         // cp 0 -> or a
         //
         // save 1 byte and 3 T-states
         (0xFE , _, _) if bytes[1] == 0x00 => {
-            println!("opti cp 0");
+            Some((0, EntryData::Instruction {
+                op_code: 183,
+                expression: None,
+                bytes: instruction_bytes(183),
+                debug_only: false
+            }))
         },
 
         // ld a,[someLabel] -> ldh a,$XX
         (0xFA, _, _) if bytes[2] == 0xFF => {
-            println!("opti a,ff");
+            Some((0, EntryData::Instruction {
+                op_code: 0xF0,
+                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(bytes[1] as i32)))),
+                bytes: instruction_bytes(0xF0),
+                debug_only: false
+            }))
         },
 
         // ld [someLabel],a -> ldh $XX,a
         (0xEA, _, _) if bytes[2] == 0xFF => {
-            println!("opti ff,a");
+            Some((0, EntryData::Instruction {
+                op_code: 0xE0,
+                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(bytes[1] as i32)))),
+                bytes: instruction_bytes(0xE0),
+                debug_only: false
+            }))
         },
 
         // jp c,label  -> jr c,label
@@ -794,19 +854,26 @@ fn optimize_instructions(
         (0xCA, _, _) |
         (0xC2, _, _) |
         (0xC3, _, _) => {
-            println!("{:?}", bytes);
             let address = bytes[1] as i32 | ((bytes[2] as i32) << 8);
             let relative = address - end_of_instruction;
             if relative >= -128 && relative <= 127 {
+                println!("opti jp");
                 // Without flags
                 if op_code == 0xC3 {
+                    // TODO unsafe optimizations flag
                     // TODO check for nop and only perform is unsafe opts are enabled
+                    // TODO must return a expression with the absolute address as a word
+                    // TODO relative is then calculated by resolver
+                    None
 
                 // With flags
                 } else {
-
+                    // TODO must return a expression with the absolute address as a word
+                    // TODO relative is then calculated by resolver
+                    None
                 }
-                println!("opti jp");
+            } else {
+                None
             }
         },
 
@@ -818,6 +885,7 @@ fn optimize_instructions(
         // save 1 byte and 17 T-states
         (0xCD, Some((0xC9, _, _)), _) => {
             println!("opti call ret");
+            None
         },
 
         // ld b,$XX
@@ -828,6 +896,8 @@ fn optimize_instructions(
         // -> save 1 byte and 4 T-states
         (0x06, Some((0x0E, _, bytes_two)), _) => {
             println!("opti bc");
+            // TODO must return a expression for the value
+            None
         },
 
         // ld d,$XX
@@ -838,6 +908,8 @@ fn optimize_instructions(
         // -> save 1 byte and 4 T-states
         (0x16, Some((0x1E, _, bytes_two)), _) => {
             println!("opti de");
+            // TODO must return a expression for the value
+            None
         },
 
         // ld h,$XX
@@ -848,12 +920,13 @@ fn optimize_instructions(
         // -> save 1 byte and 4 T-states
         (0x26, Some((0x2E, _, bytes_two)), _) => {
             println!("opti hl");
+            // TODO must return a expression for the value
+            None
         },
 
         // TODO optimize srl a, srl a, srl a
-        _ => {}
+        _ => None
     }
-    None
 }
 
 

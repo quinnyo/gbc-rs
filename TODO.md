@@ -1,9 +1,7 @@
 # MVP
 
-- Correct JR value calculation (done?)
 - Implement verification of jump targets (both relative and absolute)
 - Implemented instruction optimization logic and test
-- Detect if section contents exceed size (run after optimization)
 - Generate ROM
 - Detect ROM size from headers
 - Write Checksum and Nintendo Logo to generated ROM
