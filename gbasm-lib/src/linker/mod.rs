@@ -142,6 +142,7 @@ mod test {
     use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
     use crate::expression::{Expression, ExpressionResult, ExpressionValue, TEMPORARY_EXPRESSION_ID};
     use crate::expression::data::{DataAlignment, DataEndianess};
+    use pretty_assertions::assert_eq;
 
     fn linker<S: Into<String>>(s: S) -> Linker {
         Linker::from_lexer(entry_lex(s.into()), false, false).expect("Linker failed")
@@ -1204,6 +1205,44 @@ mod test {
 
     // Optimizations ----------------------------------------------------------
     #[test]
+    fn test_section_no_optimization_across_labels() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncall global\nfoo:\nret\nld a,a\nSECTION ROM0[130]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 2)))),
+                    bytes: vec![205, 130, 0],
+                    debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "foo".to_string()
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 201,
+                    expression: None,
+                    bytes: vec![201],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 2,
+                    name: "global".to_string()
+                })
+            ]
+        ]);
+    }
+
+
+    #[test]
     fn test_section_optimize_lda0_to_xora() {
         let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,0\nld a,a"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
@@ -1289,9 +1328,54 @@ mod test {
 
     #[test]
     fn test_section_optimize_callret_to_jp() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nglobal:\ncall global\nret\nld a,a"), true, true).expect("Optimization failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[130]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (3, EntryData::Instruction {
+                    op_code: 195,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    bytes: vec![195, 130, 0],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_optimize_callret_to_jp_to_jr() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    bytes: vec![24, 127],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
     }
@@ -1301,53 +1385,169 @@ mod test {
         let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    bytes: vec![24, 127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nglobal:\nSECTION ROM0[124]\njp global"), true, true).expect("Optimization failed");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
+            ],
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
+                    bytes: vec![24, 130],
+                    debug_only: false
+                })
+            ]
+        ]);
+
         let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp c,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 56,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    bytes: vec![56, 127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
         let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp nc,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 48,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1)))),
+                    bytes: vec![48, 127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
         let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp z,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 40,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    bytes: vec![40, 127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
         let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp nz,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (2, EntryData::Instruction {
+                    op_code: 32,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1)))),
+                    bytes: vec![32, 127],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
     }
 
     #[test]
-    fn test_section_optimize_ldbldc_to_ldbc() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld b,1\nld c,2\nld a,a"), true, true).expect("Optimization failed");
+    fn test_section_no_optimization_jp_when_followed_by_nop() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nnop\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (3, EntryData::Instruction {
+                    op_code: 195,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    bytes: vec![195, 129, 0],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 0,
+                    expression: None,
+                    bytes: vec![0],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
     }
 
     #[test]
-    fn test_section_optimize_lddlde_to_ldde() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld d,1\nld e,2\nld a,a"), true, true).expect("Optimization failed");
+    fn test_section_no_optimization_jp_when_out_of_range() {
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nSECTION ROM0[130]\nglobal:"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (3, EntryData::Instruction {
+                    op_code: 195,
+                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    bytes: vec![195, 130, 0],
+                    debug_only: false
+                })
+            ],
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
             ]
         ]);
-    }
-
-    #[test]
-    fn test_section_optimize_ldhldl_to_ldhl() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld h,1\nld l,2\nld a,a"), true, true).expect("Optimization failed");
+        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nglobal:\nSECTION ROM0[125]\njp global"), true, true).expect("Optimization failed");
         assert_eq!(linker_section_entries(l), vec![
             vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    name: "global".to_string()
+                })
+            ],
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 195,
+                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
+                    bytes: vec![195, 0, 0],
+                    debug_only: false
+                })
             ]
         ]);
     }

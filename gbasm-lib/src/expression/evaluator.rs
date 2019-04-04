@@ -151,7 +151,6 @@ impl EvaluatorContext {
                     ExpressionValue::Float(f) => ExpressionResult::Float(f),
                     ExpressionValue::String(s) => ExpressionResult::String(s),
                     ExpressionValue::OffsetAddress(_, offset) => {
-                        println!("offset is: {}", offset);
                         ExpressionResult::Integer(self.rom_offset + offset)
                     },
                     ExpressionValue::GlobalLabelAddress(_, id) => {

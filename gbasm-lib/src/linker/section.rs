@@ -693,10 +693,10 @@ impl Section {
 
     fn optimize_instructions(&mut self, _context: &mut EvaluatorContext) -> bool {
 
-        fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(usize, i32, &[u8])> {
+        fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(usize, i32, &OptionalDataExpression, &[u8])> {
             if let Some(entry) = entries.get(i) {
-                if let EntryData::Instruction { ref op_code, ref bytes, .. } = entry.data {
-                    Some((*op_code, (entry.offset + entry.size) as i32, bytes))
+                if let EntryData::Instruction { ref op_code, ref bytes, ref expression, .. } = entry.data {
+                    Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes))
 
                 } else {
                     None
@@ -710,12 +710,13 @@ impl Section {
         let mut i = 0;
         let mut any_optimizations = false;
         while i < self.entries.len() {
-            if let Some((op_code, offset, bytes)) = get_instruction(&self.entries, i) {
+            if let Some((op_code, offset, expression, bytes)) = get_instruction(&self.entries, i) {
                 let b = get_instruction(&self.entries, i + 1);
                 let c = get_instruction(&self.entries, i + 2);
                 if let Some((remove_count, EntryData::Instruction { op_code, expression, bytes, .. })) = optimize_instructions(
                     op_code,
                     offset,
+                    expression,
                     bytes,
                     b,
                     c
@@ -794,9 +795,10 @@ impl Section {
 fn optimize_instructions(
     op_code: usize,
     end_of_instruction: i32,
+    expression: &OptionalDataExpression,
     bytes: &[u8],
-    b: Option<(usize, i32, &[u8])>,
-    c: Option<(usize, i32, &[u8])>
+    b: Option<(usize, i32, &OptionalDataExpression, &[u8])>,
+    c: Option<(usize, i32, &OptionalDataExpression, &[u8])>
 
 ) -> Option<(usize, EntryData)> {
     match (op_code, b, c) {
@@ -848,29 +850,39 @@ fn optimize_instructions(
         // jp nc,label -> jr nc,label
         // jp z,label  -> jr z,label
         // jp nz,label -> jr nz,label
-        // jp label    -> jr label
         (0xDA, _, _) |
         (0xD2, _, _) |
         (0xCA, _, _) |
         (0xC2, _, _) |
-        (0xC3, _, _) => {
+
+        // jp label    -> jr label
+        // We only want jp's without that are not followed by a nop
+        (0xC3, None, _) |
+        (0xC3, Some((0x01..=512, _, _, _)), _) => {
             let address = bytes[1] as i32 | ((bytes[2] as i32) << 8);
             let relative = address - end_of_instruction;
-            if relative >= -128 && relative <= 127 {
-                println!("opti jp");
+
+            // Since the resulting instruction shrinks in size we might now be able
+            // to reach the full jump range when the target is at a fixed distance
+            // due to a rom section boundray
+            if relative > -128 && relative < 127 {
                 // Without flags
                 if op_code == 0xC3 {
-                    // TODO unsafe optimizations flag
-                    // TODO check for nop and only perform is unsafe opts are enabled
-                    // TODO must return a expression with the absolute address as a word
-                    // TODO relative is then calculated by resolver
-                    None
+                    Some((0, EntryData::Instruction {
+                        op_code: 0x18,
+                        expression: expression.clone(),
+                        bytes: instruction_bytes(0x18),
+                        debug_only: false
+                    }))
 
                 // With flags
                 } else {
-                    // TODO must return a expression with the absolute address as a word
-                    // TODO relative is then calculated by resolver
-                    None
+                    Some((0, EntryData::Instruction {
+                        op_code: op_code - 0xA2,
+                        expression: expression.clone(),
+                        bytes: instruction_bytes(op_code - 0xA2),
+                        debug_only: false
+                    }))
                 }
             } else {
                 None
@@ -883,9 +895,13 @@ fn optimize_instructions(
         // jp   LABEL
         //
         // save 1 byte and 17 T-states
-        (0xCD, Some((0xC9, _, _)), _) => {
-            println!("opti call ret");
-            None
+        (0xCD, Some((0xC9, _, _, _)), _) => {
+            Some((1, EntryData::Instruction {
+                op_code: 0xC3,
+                expression: expression.clone(),
+                bytes: instruction_bytes(0xC3),
+                debug_only: false
+            }))
         },
 
         // ld b,$XX
@@ -894,11 +910,10 @@ fn optimize_instructions(
         // ld bc,$XXXX
         //
         // -> save 1 byte and 4 T-states
-        (0x06, Some((0x0E, _, bytes_two)), _) => {
-            println!("opti bc");
-            // TODO must return a expression for the value
-            None
-        },
+        // (0x06, Some((0x0E, _, bytes_two, _)), _) => {
+        //     // TODO must return a expression for the value
+        //     None
+        // },
 
         // ld d,$XX
         // ld e,$XX
@@ -906,11 +921,10 @@ fn optimize_instructions(
         // ld de,$XXXX
         //
         // -> save 1 byte and 4 T-states
-        (0x16, Some((0x1E, _, bytes_two)), _) => {
-            println!("opti de");
-            // TODO must return a expression for the value
-            None
-        },
+        // (0x16, Some((0x1E, _, bytes_two, _)), _) => {
+        //     // TODO must return a expression for the value
+        //     None
+        // },
 
         // ld h,$XX
         // ld l,$XX
@@ -918,13 +932,13 @@ fn optimize_instructions(
         // ld hl,$XXXX
         //
         // -> save 1 byte and 4 T-states
-        (0x26, Some((0x2E, _, bytes_two)), _) => {
-            println!("opti hl");
-            // TODO must return a expression for the value
-            None
-        },
+        // (0x26, Some((0x2E, _, bytes_two, _)), _) => {
+        //     // TODO must return a expression for the value
+        //     None
+        // },
 
-        // TODO optimize srl a, srl a, srl a
+        // TODO MUST optimize srl a, srl a, srl a generated by div meta instruction for core gb to
+        // compile
         _ => None
     }
 }
