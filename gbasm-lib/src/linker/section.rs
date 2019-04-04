@@ -669,7 +669,7 @@ impl Section {
                         }
 
                     } else {
-                        unreachable!("Instruction has expression but does not expect any argument!");
+                        unreachable!("Instruction has expression but does not expect any argument: {}", op_code);
                     }
                 }
             }

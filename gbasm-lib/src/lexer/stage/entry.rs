@@ -431,8 +431,8 @@ impl EntryStage {
             },
 
             // Mulitply / Divide Shorthands
-            "mul" => Self::parse_meta_div_mul(tokens, inner, 288)?, // sla b
-            "div" => Self::parse_meta_div_mul(tokens, inner, 312)?, // srl b
+            "mul" => Self::parse_meta_div_mul(tokens, inner, true)?,
+            "div" => Self::parse_meta_div_mul(tokens, inner, false)?,
 
             // Increment Memory Address Shorthands
             "incx" => {
@@ -623,13 +623,13 @@ impl EntryStage {
         Ok(instructions)
     }
 
-    fn parse_meta_div_mul(tokens: &mut TokenIterator<ExpressionToken>, inner: InnerToken, op_base: usize) -> Result<Vec<EntryToken>, LexerError> {
+    fn parse_meta_div_mul(tokens: &mut TokenIterator<ExpressionToken>, inner: InnerToken, multiply: bool) -> Result<Vec<EntryToken>, LexerError> {
         let reg = Self::parse_meta_byte_register(tokens)?;
         tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
         let expr = tokens.get("Unexpected end of input while parsing instruction arguments.")?;
         if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::Integer(i))) = expr {
             if i > 0 && (i as u32).is_power_of_two() && i <= 128 {
-                let op = op_base + reg.instruction_offset();
+
                 let shifts = match i {
                     128 => 7,
                     64 => 6,
@@ -640,11 +640,91 @@ impl EntryStage {
                     2 => 1,
                     _ => unreachable!()
                 };
-                let mut instructions = Vec::new();
-                for _ in 0..shifts {
-                    instructions.push(EntryToken::Instruction(inner.clone(), op));
+
+                let (op_base, acc_shift, and_constant) = if multiply {
+                    (288, 7, ((255 << shifts) as u8) as i32)
+
+                } else {
+                    (312, 15, ((255 >> shifts) as u8) as i32)
+                };
+
+                // Accumulator special cases
+                let offset = reg.instruction_offset();
+                let shift_op = op_base + offset;
+                if offset == 7 {
+                    let and_instruction = EntryToken::InstructionWithArg(
+                        inner.clone(),
+                        230,
+                        (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(and_constant)))
+                    );
+                    Ok(match shifts {
+                        1 => vec![
+                            // srl / sla a
+                            EntryToken::Instruction(inner.clone(), shift_op)
+                        ],
+                        2 => vec![
+                            // srl / sla a
+                            EntryToken::Instruction(inner.clone(), shift_op),
+                            // srl / sla a
+                            EntryToken::Instruction(inner.clone(), shift_op)
+                        ],
+                        3 => vec![
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // and
+                            and_instruction
+                        ],
+                        4 => vec![
+                            // swap a
+                            EntryToken::Instruction(inner.clone(), 311),
+                            // and
+                            and_instruction
+                        ],
+                        5 => vec![
+                            // swap a
+                            EntryToken::Instruction(inner.clone(), 311),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // and
+                            and_instruction
+                        ],
+                        6 => vec![
+                            // swap a
+                            EntryToken::Instruction(inner.clone(), 311),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // and
+                            and_instruction
+                        ],
+                        7 => vec![
+                            // swap a
+                            EntryToken::Instruction(inner.clone(), 311),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // rrca / rlca
+                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            // and
+                            and_instruction
+                        ],
+                        _ => unreachable!()
+                    })
+
+                // Other registers
+                } else {
+                    let mut instructions = Vec::new();
+                    for _ in 0..shifts {
+                        instructions.push(EntryToken::Instruction(inner.clone(), shift_op));
+                    }
+                    Ok(instructions)
                 }
-                Ok(instructions)
 
             } else {
                 Err(expr.error(
@@ -1281,6 +1361,7 @@ mod test {
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage};
     use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
     use super::super::mocks::{expr_lex, expr_lex_binary};
+    use pretty_assertions::assert_eq;
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
         Lexer::<EntryStage>::from_lexer(expr_lex(s)).expect("EntryStage failed")
@@ -2339,39 +2420,32 @@ mod test {
             EntryToken::Instruction(itk!(0, 3, "mul"), 295)
         ]);
         assert_eq!(tfe("mul a,8"), vec![
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(248))))
         ]);
         assert_eq!(tfe("mul a,16"), vec![
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+            EntryToken::Instruction(itk!(0, 3, "mul"), 311),
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(240))))
         ]);
         assert_eq!(tfe("mul a,32"), vec![
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+            EntryToken::Instruction(itk!(0, 3, "mul"), 311),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(224))))
         ]);
         assert_eq!(tfe("mul a,64"), vec![
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+            EntryToken::Instruction(itk!(0, 3, "mul"), 311),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(192))))
         ]);
         assert_eq!(tfe("mul a,128"), vec![
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295),
-            EntryToken::Instruction(itk!(0, 3, "mul"), 295)
+            EntryToken::Instruction(itk!(0, 3, "mul"), 311),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::Instruction(itk!(0, 3, "mul"), 7),
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(128))))
         ]);
     }
 
@@ -2396,6 +2470,38 @@ mod test {
         assert_eq!(tfe("div e,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 315)]);
         assert_eq!(tfe("div h,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 316)]);
         assert_eq!(tfe("div l,2"), vec![EntryToken::Instruction(itk!(0, 3, "div"), 317)]);
+        assert_eq!(tfe("div a,4"), vec![
+            EntryToken::Instruction(itk!(0, 3, "div"), 319),
+            EntryToken::Instruction(itk!(0, 3, "div"), 319)
+        ]);
+        assert_eq!(tfe("div a,8"), vec![
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(31))))
+        ]);
+        assert_eq!(tfe("div a,16"), vec![
+            EntryToken::Instruction(itk!(0, 3, "div"), 311),
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(15))))
+        ]);
+        assert_eq!(tfe("div a,32"), vec![
+            EntryToken::Instruction(itk!(0, 3, "div"), 311),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(7))))
+        ]);
+        assert_eq!(tfe("div a,64"), vec![
+            EntryToken::Instruction(itk!(0, 3, "div"), 311),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(3))))
+        ]);
+        assert_eq!(tfe("div a,128"), vec![
+            EntryToken::Instruction(itk!(0, 3, "div"), 311),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::Instruction(itk!(0, 3, "div"), 15),
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(1))))
+        ]);
     }
 
     #[test]

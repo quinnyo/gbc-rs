@@ -32,6 +32,7 @@ impl Compiler {
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
         let _linker = Linker::from_lexer(entry_lexer, true, true).map_err(|e| CompilerError::new("LINKER", e))?;
+        // TODO report sections and their entry counts
 
         // TODO figure out required rom size and generate
 
