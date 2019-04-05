@@ -1,8 +1,10 @@
 // STD Dependencies -----------------------------------------------------------
+use std::cmp;
 use std::error::Error;
 
 
 // Modules --------------------------------------------------------------------
+mod optimizer;
 mod section;
 mod util;
 
@@ -10,7 +12,7 @@ mod util;
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::{Lexer, LexerError, LexerToken, EntryStage, EntryToken};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
-use self::section::{Section, SectionList};
+use self::section::Section;
 
 
 // Linker Implementation ------------------------------------------------------
@@ -113,7 +115,7 @@ impl Linker {
 
         if optimize {
             // Run passes until no more optimizations were applied
-            while SectionList::optimize_instructions(&mut sections, &mut context) {
+            while SectionList::optimize_instructions(&mut sections) {
                 SectionList::resolve(&mut sections, &mut context)?;
             }
         }
@@ -126,30 +128,157 @@ impl Linker {
         })
     }
 
+    pub fn to_section_layout(&self) {
+        // TODO return section layout and usage data
+    }
+
     pub fn to_rom_buffer(&self) -> Vec<u8> {
         SectionList::to_rom_buffer(&self.sections)
     }
 
 }
 
+
+// Section List Abstraction ---------------------------------------------------
+pub struct SectionList;
+impl SectionList {
+
+    pub fn initialize(sections: &mut Vec<Section>) {
+        // Sort sections by base address
+        sections.sort_by(|a, b| {
+            if a.start_address == b.start_address {
+                a.bank.cmp(&b.bank)
+
+            } else {
+                a.start_address.cmp(&b.start_address)
+            }
+        });
+
+        // Limit end_address of sections to next section start_address - 1
+        let section_starts: Vec<(usize, usize, String)> = sections.iter().skip(1).map(|s| {
+            (s.start_address, s.bank, s.segment.clone())
+
+        }).collect();
+
+        for (section, (next_start, next_bank, next_segment)) in sections.iter_mut().zip(section_starts.into_iter()) {
+            if section.segment == next_segment && section.bank == next_bank && section.end_address >= next_start {
+                section.end_address = next_start - 1;
+            }
+        }
+    }
+
+    pub fn resolve(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
+        for s in sections.iter_mut() {
+            s.resolve_addresses(context)?;
+        }
+        for s in sections.iter_mut() {
+            s.resolve_arguments(context)?;
+        }
+        Ok(())
+    }
+
+    pub fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
+        for s in sections.iter_mut() {
+            s.strip_debug();
+        }
+        Self::resolve(sections, context)
+    }
+
+    pub fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
+        let mut optimzations_applied = false;
+        for s in sections.iter_mut() {
+            optimzations_applied |= optimizer::optimize_section_entries(&mut s.entries);
+        }
+        optimzations_applied
+    }
+
+    pub fn verify(sections: &[Section]) -> Result<(), LexerError> {
+        for s in sections.iter() {
+            s.validate_jump_targets(&sections)?;
+            s.validate_bounds()?;
+        }
+        Ok(())
+    }
+
+    // TODO rename to write_to_rom_buffer
+    pub fn to_rom_buffer(sections: &[Section]) -> Vec<u8> {
+
+        // Calculate required ROM size
+        let mut max_address = 0;
+        for s in sections.iter() {
+            if s.is_rom {
+                max_address = cmp::max(max_address, s.end_address + 1);
+            }
+        }
+
+        // TODO move buffer generation to Geneerator
+        // TODO have a special max_address() -> usize fn
+
+        // TODO calculate required ROM size
+        // TODO check end_address of is_rom sections
+        // TODO select next power of two
+
+        // 32kb, 64kb, 128kb, 256kb etc.
+        let mut buffer: Vec<u8> = Vec::new();
+        for s in sections.iter() {
+            s.write_to_rom_buffer(&mut buffer[..]);
+        }
+
+        buffer
+    }
+
+}
+
+
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use super::Linker;
-    use super::section::EntryData;
     use ordered_float::OrderedFloat;
-    use crate::lexer::InnerToken;
-    use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
-    use crate::expression::{Expression, ExpressionResult, ExpressionValue, TEMPORARY_EXPRESSION_ID};
-    use crate::expression::data::{DataAlignment, DataEndianess};
     use pretty_assertions::assert_eq;
 
-    fn linker<S: Into<String>>(s: S) -> Linker {
+    use super::Linker;
+    use super::section::entry::EntryData;
+    use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
+    use crate::expression::ExpressionResult;
+
+    pub fn linker<S: Into<String>>(s: S) -> Linker {
         Linker::from_lexer(entry_lex(s.into()), false, false).expect("Linker failed")
     }
 
-    fn linker_error<S: Into<String>>(s: S) -> String {
+    pub fn linker_error<S: Into<String>>(s: S) -> String {
         Linker::from_lexer(entry_lex(s.into()), false, false).err().unwrap().to_string()
+    }
+
+    pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
+        Linker::from_lexer(entry_lex(s.into()), true, false).expect("Debug stripping failed")
+    }
+
+    pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
+        Linker::from_lexer(entry_lex(s.into()), true, true).expect("Instruction optimization failed")
+    }
+
+    pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {
+        Linker::from_lexer(entry_lex_binary(s.into(), d), false, false).expect("Binary Linker failed")
+    }
+
+    pub fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {
+        linker.sections.into_iter().map(|s| {
+            s.entries.into_iter().map(|e| {
+                (e.size, e.data)
+
+            }).collect()
+
+        }).collect()
+    }
+
+    pub fn linker_section_offsets(linker: Linker) -> Vec<Vec<(usize, usize)>> {
+        linker.sections.into_iter().map(|s| {
+            s.entries.into_iter().map(|e| {
+                (e.offset, e.size)
+
+            }).collect()
+
+        }).collect()
     }
 
     fn context_constants(linker: &Linker) -> Vec<(String, ExpressionResult)> {
@@ -168,42 +297,6 @@ mod test {
             format!("{}", s)
 
         }).collect()
-    }
-
-    fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {
-        linker.sections.into_iter().map(|s| {
-            s.entries.into_iter().map(|e| {
-                (e.size, e.data)
-
-            }).collect()
-
-        }).collect()
-    }
-
-    fn linker_section_offsets(linker: Linker) -> Vec<Vec<(usize, usize)>> {
-        linker.sections.into_iter().map(|s| {
-            s.entries.into_iter().map(|e| {
-                (e.offset, e.size)
-
-            }).collect()
-
-        }).collect()
-    }
-
-    macro_rules! itk {
-        ($start:expr, $end:expr, $parsed:expr) => {
-            InnerToken::new(0, $start, $end, $parsed.into())
-        }
-    }
-
-    macro_rules! mtk {
-        ($start:expr, $end:expr, $parsed:expr, $id:expr) => {
-            {
-                let mut t = itk!($start, $end, $parsed);
-                t.set_macro_call_id($id);
-                t
-            }
-        }
     }
 
     // Constant Evaluation ----------------------------------------------------
@@ -372,1184 +465,6 @@ mod test {
     fn test_error_entry_outside_ram_segment() {
         assert_eq!(linker_error("SECTION ROM0\nDB"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Byte Variable outside of RAM segment.\n\nDB\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nDW"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Word Variable outside of RAM segment.\n\nDW\n^--- Here");
-    }
-
-    // Labels -----------------------------------------------------------------
-    #[test]
-    fn test_section_entry_labels() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal_label:\n.local_label:")), vec![
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global_label".to_string()
-                }),
-                (0, EntryData::Label {
-                    id: 2,
-                    name: "local_label".to_string()
-                })
-            ]
-        ]);
-    }
-
-    // ROM Data Entries -------------------------------------------------------
-    #[test]
-    fn test_section_entry_data_rom_db() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDB $10,$20")), vec![
-            vec![
-                (2, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::Integer(16)))),
-                        (1, (1, Expression::Value(ExpressionValue::Integer(32))))
-                    ]),
-                    bytes: Some(vec![16, 32]),
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDB -1,-128")), vec![
-            vec![
-                (2, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::Integer(-1)))),
-                        (1, (1, Expression::Value(ExpressionValue::Integer(-128))))
-                    ]),
-                    bytes: Some(vec![255, 128]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_section_entry_data_rom_db() {
-        assert_eq!(linker_error("SECTION ROM0\nDB 256"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data, expected a byte value in the range of -128 to 255 instead.\n\nDB 256\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDB -129"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data, expected a byte value in the range of -128 to 255 instead.\n\nDB -129\n^--- Here");
-    }
-
-    #[test]
-    fn test_section_entry_data_rom_dw_bw() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDW $1000,$2000")), vec![
-            vec![
-                (4, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
-                        (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
-                    ]),
-                    bytes: Some(vec![0, 16, 0, 32]),
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDW -1")), vec![
-            vec![
-                (2, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, (0, Expression::Value(ExpressionValue::Integer(-1))))
-                    ]),
-                    bytes: Some(vec![255, 255]),
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nBW $1000,$2000")), vec![
-            vec![
-                (4, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Big,
-                    expressions: Some(vec![
-                        (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
-                        (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
-                    ]),
-                    bytes: Some(vec![16, 0, 32, 0]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_section_entry_data_rom_dw_bw() {
-        assert_eq!(linker_error("SECTION ROM0\nDW 65536"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data, expected a word value in the range of -32768 to 65535 instead.\n\nDW 65536\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDW -32769"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data, expected a word value in the range of -32768 to 65535 instead.\n\nDW -32769\n^--- Here");
-    }
-
-    #[test]
-    fn test_section_entry_data_rom_incbin() {
-        let linker = Linker::from_lexer(entry_lex_binary("SECTION ROM0\nINCBIN 'child.bin'", vec![1, 2, 3, 4]), false, false).expect("Linker failed");
-        assert_eq!(linker_section_entries(linker), vec![
-            vec![
-                (4, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![1, 2, 3, 4]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_data_rom_ds() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5")), vec![
-            vec![
-                (5, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![0, 0, 0, 0, 0]),
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 'FOO'")), vec![
-            vec![
-                (3, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![70, 79, 79]),
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5 'FOO'")), vec![
-            vec![
-                (5, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![70, 79, 79, 0, 0]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_section_entry_data_rom_ds() {
-        assert_eq!(linker_error("SECTION ROM0\nDS -1"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDS -1 'FOO'"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1 \'FOO\'\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDS 2 'FOO'"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, specified capacity must be >= length of stored string data.\n\nDS 2 \'FOO\'\n^--- Here");
-    }
-
-    // RAM Data Entries -------------------------------------------------------
-    #[test]
-    fn test_section_entry_data_ram_db() {
-        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDB")), vec![
-            vec![
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: None,
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_data_ram_dw() {
-        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDW")), vec![
-            vec![
-                (2, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: None,
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_data_ram_ds() {
-        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDS 8")), vec![
-            vec![
-                (8, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: None,
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_data_ram_ds8() {
-        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDS8 8")), vec![
-            vec![
-                (8, EntryData::Data {
-                    alignment: DataAlignment::WithinWord,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: None,
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_data_ram_ds16() {
-        assert_eq!(linker_section_entries(linker("SECTION WRAM0\nDS16 8")), vec![
-            vec![
-                (8, EntryData::Data {
-                    alignment: DataAlignment::Word,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: None,
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_section_entry_data_ds16_alignment() {
-        linker("SECTION ROM0[$0000]\n DS16 1");
-        linker("SECTION ROM0[$0100]\n DS16 1");
-        linker("SECTION ROM0[$1000]\n DS16 1");
-        assert_eq!(linker_error("SECTION ROM0[$0001]\nDS16 1"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.\n\nDS16 1\n^--- Here");
-    }
-
-    #[test]
-    fn test_error_section_entry_data_ds8_alignment() {
-        linker("SECTION ROM0[$0000]\n DS8 256");
-        linker("SECTION ROM0[$0100]\n DS8 256");
-        linker("SECTION ROM0[$0080]\n DS8 128");
-        assert_eq!(linker_error("SECTION ROM0[$0000]\nDS8 257"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[$0100]\nDS8 257"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[$0080]\nDS8 129"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 129\n^--- Here");
-    }
-
-    #[test]
-    fn test_error_section_entry_data_ram_ds() {
-        assert_eq!(linker_error("SECTION WRAM0\nDS -1"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
-    }
-
-    // Address Evaluation -----------------------------------------------------
-
-    #[test]
-    fn test_section_entry_data_label_evaluation() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5\nglobal:\nDW global\nDB global")), vec![
-            vec![
-                (5, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![0, 0, 0, 0, 0]),
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                }),
-                (2, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
-                    ]),
-                    bytes: Some(vec![5, 0]),
-                    debug_only: false
-                }),
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(39, 45, "global"), 1))))
-                    ]),
-                    bytes: Some(vec![5]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_data_label_evaluation_cross_section() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5\nglobal:\nDW global\nSECTION ROM0[$2000]\nDB global")), vec![
-            vec![
-                (5, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![0, 0, 0, 0, 0]),
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                }),
-                (2, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
-                    ]),
-                    bytes: Some(vec![5, 0]),
-                    debug_only: false
-                })
-            ],
-            vec![
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (3, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(59, 65, "global"), 1))))
-                    ]),
-                    bytes: Some(vec![5]),
-                    debug_only: false
-                })
-            ]
-        ]);
-
-    }
-
-    // Macro Constant Evaluation ----------------------------------------------
-    #[test]
-    fn test_section_macro_constant_evaluation() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nC EQU 2\nMACRO FOO(@a) DB @a ENDMACRO")), vec![
-            vec![
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string()))))
-                    ]),
-                    bytes: Some(vec![2]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_macro_label_address_evaluation() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(global)\nglobal:\nMACRO FOO(@a) DB @a ENDMACRO")), vec![
-            vec![
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::GlobalLabelAddress(mtk!(17, 23, "global", 0), 1))))
-                    ]),
-                    bytes: Some(vec![1]),
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_macro_defined_constant_evaluation() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nMACRO FOO(@a) @a EQU 2 ENDMACRO\n DB C")), vec![
-            vec![
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, (1, Expression::Value(ExpressionValue::ConstantValue(itk!(56, 57, "C"), "C".to_string()))))
-                    ]),
-                    bytes: Some(vec![2]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    // Offsets ----------------------------------------------------------------
-
-    #[test]
-    fn test_section_entry_offsets_data() {
-        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nDS16 5\nDS8 3\nDS 4\nDS 10\nglobal_label:")), vec![
-            vec![
-                (0, 5),
-                (5, 3),
-                (8, 4),
-                (12, 10),
-                (22, 0)
-            ]
-        ]);
-        assert_eq!(linker_section_offsets(linker("SECTION ROM0[$2000]\nDS16 5\nDS8 3\nDS 4\nDS 10\nglobal_label:")), vec![
-            vec![
-                (8192 + 0, 5),
-                (8192 + 5, 3),
-                (8192 + 8, 4),
-                (8192 + 12, 10),
-                (8192 + 22, 0)
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_instruction_offsets() {
-        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nld a,a\nld hl,$4000\nsrl a")), vec![
-            vec![
-                (0, 1),
-                (1, 3),
-                (4, 2)
-            ]
-        ]);
-        assert_eq!(linker_section_offsets(linker("SECTION ROM0[$2000]\nld a,a\nld hl,$4000\nsrl a")), vec![
-            vec![
-                (8192, 1),
-                (8193, 3),
-                (8196, 2)
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_entry_instruction_offsets_debug() {
-        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nmsg 'Hello World'\nbrk")), vec![
-            vec![
-                (0, 1),  // ld d,d
-                (1, 2),  // jr
-                (3, 1),  // 0x64
-                (4, 1),  // 0x64
-                (5, 1),  // 0x00
-                (6, 1),  // 0x00
-                (7, 11),  // String Bytes
-                (18, 1)   // ld b,b,
-            ]
-        ]);
-    }
-
-    // Instructions -----------------------------------------------------------
-
-    #[test]
-    fn test_section_instructions() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nld a,a\nadd hl,de\nsrl a")), vec![
-            vec![
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 25,
-                    expression: None,
-                    bytes: vec![25],
-                    debug_only: false
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 319,
-                    expression: None,
-                    bytes: vec![203, 63],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_instructions_with_arg() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nld a,$20\nld hl,$4000")), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 62,
-                    expression: Some((0, Expression::Value(ExpressionValue::Integer(32)))),
-                    bytes: vec![62, 32],
-                    debug_only: false
-                }),
-                (3, EntryData::Instruction {
-                    op_code: 33,
-                    expression: Some((1, Expression::Value(ExpressionValue::Integer(16384)))),
-                    bytes: vec![33, 0, 64],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_section_instructions_with_arg() {
-        assert_eq!(linker_error("SECTION ROM0\nld hl,$10000"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument, expected a word value in the range of -32768 to 65535 instead.\n\nld hl,$10000\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nld hl,-$8001"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument, expected a word value in the range of -32768 to 65535 instead.\n\nld hl,-$8001\n^--- Here");
-    }
-
-    #[test]
-    fn test_section_instructions_with_arg_constants() {
-        for (bit, op) in vec![(0, 71), (1, 79), (2, 87), (3, 95), (4, 103), (5, 111), (6, 119), (7, 127)] {
-            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nbit {},a", bit))), vec![
-                vec![
-                    (2, EntryData::Instruction {
-                        op_code: 327,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
-                        bytes: vec![203, op],
-                        debug_only: false
-                    })
-                ]
-            ]);
-        }
-
-        for (bit, op) in vec![(0, 135), (1, 143), (2, 151), (3, 159), (4, 167), (5, 175), (6, 183), (7, 191)] {
-            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nres {},a", bit))), vec![
-                vec![
-                    (2, EntryData::Instruction {
-                        op_code: 391,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
-                        bytes: vec![203, op],
-                        debug_only: false
-                    })
-                ]
-            ]);
-        }
-
-        for (bit, op) in vec![(0, 199), (1, 207), (2, 215), (3, 223), (4, 231), (5, 239), (6, 247), (7, 255)] {
-            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nset {},a", bit))), vec![
-                vec![
-                    (2, EntryData::Instruction {
-                        op_code: 455,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
-                        bytes: vec![203, op],
-                        debug_only: false
-                    })
-                ]
-            ]);
-        }
-
-        for (rst, op) in vec![(0, 199), (8, 207), (16, 215), (24, 223), (32, 231), (40, 239), (48, 247), (56, 255)] {
-            assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nrst {}", rst))), vec![
-                vec![
-                    (1, EntryData::Instruction {
-                        op_code: 199,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(rst)))),
-                        bytes: vec![op],
-                        debug_only: false
-                    })
-                ]
-            ]);
-        }
-    }
-
-    #[test]
-    fn test_error_section_instructions_with_arg_constants() {
-        assert_eq!(linker_error("SECTION ROM0\nbit -1,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value -1, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit -1,a\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nbit 8,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 8, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit 8,a\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nrst 2"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 2, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 2\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nrst 41"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 41, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 41\n^--- Here");
-    }
-
-    #[test]
-    fn test_section_instructions_jr() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal:\njr z,global\njr @+4\njr @-1")), vec![
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 40,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(26, 32, "global"), 1)))),
-                    bytes: vec![40, 254],
-                    debug_only: false
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((1, Expression::Value(ExpressionValue::OffsetAddress(itk!(36, 39, "+4"), 4)))),
-                    bytes: vec![24, 4],
-                    debug_only: false
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((2, Expression::Value(ExpressionValue::OffsetAddress(itk!(43, 46, "-1"), -1)))),
-                    bytes: vec![24, 255],
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nvsync")), vec![
-            vec![
-                (3, EntryData::Instruction {
-                    op_code: 250,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(65345)))),
-                    bytes: vec![250, 65, 255],
-                    debug_only: false
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 230,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(2)))),
-                    bytes: vec![230, 2],
-                    debug_only: false
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 32,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -4)))),
-                    bytes: vec![32, 252],
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nldsp hl,-3")), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 248,
-                    expression: Some((0, Expression::Value(ExpressionValue::Integer(-3)))),
-                    bytes: vec![248, 253],
-                    debug_only: false
-                })
-            ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\njr foo\nfoo:\njr bar\nld a,a\nbar:")), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 19, "foo"), 1)))),
-                    bytes: vec![24, 0],
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "foo".to_string()
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(28, 31, "bar"), 2)))),
-                    bytes: vec![24, 1],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 2,
-                    name: "bar".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_section_instructions_jr_range() {
-        linker("SECTION ROM0\njr global\nSECTION ROM0[129]\nglobal:");
-        assert_eq!(linker_error("SECTION ROM0\njr global\nSECTION ROM0[130]\nglobal:"), "In file \"main.gb.s\" on line 2, column 1: Relative jump offset of 128 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
-        linker("SECTION ROM0\nglobal:\nSECTION ROM0[126]\njr global");
-        assert_eq!(linker_error("SECTION ROM0\nglobal:\nSECTION ROM0[127]\njr global"), "In file \"main.gb.s\" on line 4, column 1: Relative jump offset of -129 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
-    }
-
-    #[test]
-    fn test_section_instructions_jp() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nglobal:\njp foo\njp global\nfoo:")), vec![
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                }),
-                (3, EntryData::Instruction {
-                    op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(24, 27, "foo"), 2)))),
-                    bytes: vec![195, 6, 0],
-                    debug_only: false }),
-
-                (3, EntryData::Instruction {
-                    op_code: 195,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(31, 37, "global"), 1)))),
-                    bytes: vec![195, 0, 0],
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 2,
-                    name: "foo".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_instructions_debug_brk() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nbrk")), vec![
-            vec![
-                (1, EntryData::Instruction {
-                    op_code: 64,
-                    expression: None,
-                    bytes: vec![64],
-                    debug_only: true
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_instructions_debug_msg() {
-        assert_eq!(linker_section_offsets(linker("SECTION ROM0\nmsg 'Hello World'\nglobal:")), vec![
-           vec![
-                (0, 1),
-                (1, 2),
-                (3, 1),
-                (4, 1),
-                (5, 1),
-                (6, 1),
-                (7, 11),
-                (18, 0)
-           ]
-        ]);
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nmsg 'Hello World'")), vec![
-            vec![
-                (1, EntryData::Instruction {
-                    op_code: 82,
-                    expression: None,
-                    bytes: vec![82],
-                    debug_only: true
-                }),
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((
-                        TEMPORARY_EXPRESSION_ID,
-                        Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 15))
-                    )),
-                    bytes: vec![24, 15],
-                    debug_only: true
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 100,
-                    expression: None,
-                    bytes: vec![100],
-                    debug_only: true
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 100,
-                    expression: None,
-                    bytes: vec![100],
-                    debug_only: true
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 0,
-                    expression: None,
-                    bytes: vec![0],
-                    debug_only: true
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 0,
-                    expression: None,
-                    bytes: vec![0],
-                    debug_only: true
-                }),
-                (11, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
-                    debug_only: true
-                })
-            ]
-        ]);
-    }
-
-    // Section Validation -----------------------------------------------------
-    #[test]
-    fn test_error_section_size_bounds() {
-        linker("SECTION ROM0[$0000][2]\nld a,a\nld a,a");
-        assert_eq!(linker_error("SECTION ROM0[$0000][2]\nld a,a\nld a,a\nld a,a"), "In file \"main.gb.s\" on line 1, column 1: Section contents exceeds allocated area $0000-$0001 by 1 byte(s)\n\nSECTION ROM0[$0000][2]\n^--- Here");
-    }
-
-    // Debug Stripping --------------------------------------------------------
-    #[test]
-    fn test_section_debug_strip_entries() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njr global\nmsg 'Hello World'\nglobal:\nld a,a"), true, false).expect("Debug stripping failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
-                    bytes: vec![24, 0],
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_debug_strip_offsets() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njr global\nmsg 'Hello World'\nglobal:\nld a,a"), true, false).expect("Debug stripping failed");
-        assert_eq!(linker_section_offsets(l), vec![
-            vec![
-                (0, 2),
-                (2, 0),
-                (2, 1)
-            ]
-        ]);
-    }
-
-    // Optimizations ----------------------------------------------------------
-    #[test]
-    fn test_section_no_optimization_across_labels() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncall global\nfoo:\nret\nld a,a\nSECTION ROM0[130]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (3, EntryData::Instruction {
-                    op_code: 205,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 2)))),
-                    bytes: vec![205, 130, 0],
-                    debug_only: false
-                }),
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "foo".to_string()
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 201,
-                    expression: None,
-                    bytes: vec![201],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 2,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-    }
-
-
-    #[test]
-    fn test_section_optimize_lda0_to_xora() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,0\nld a,a"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (1, EntryData::Instruction {
-                    op_code: 175,
-                    expression: None,
-                    bytes: vec![175],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_optimize_cp0_to_ora() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncp 0\nld a,a"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (1, EntryData::Instruction {
-                    op_code: 183,
-                    expression: None,
-                    bytes: vec![183],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_optimize_ldaffxx_to_ldhaxx() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld a,[$FF05]\nld a,a"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 240,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(5)))),
-                    bytes: vec![240, 5],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_optimize_ldffxxa_to_ldhxxa() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nld [$FF05],a\nld a,a"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 224,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(5)))),
-                    bytes: vec![224, 5],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_optimize_callret_to_jp() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[130]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (3, EntryData::Instruction {
-                    op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
-                    bytes: vec![195, 130, 0],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_optimize_callret_to_jp_to_jr() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
-                    bytes: vec![24, 127],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 127,
-                    expression: None,
-                    bytes: vec![127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_optimize_jp_to_jr() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
-                    bytes: vec![24, 127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nglobal:\nSECTION ROM0[124]\njp global"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ],
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 24,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
-                    bytes: vec![24, 130],
-                    debug_only: false
-                })
-            ]
-        ]);
-
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp c,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 56,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
-                    bytes: vec![56, 127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp nc,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 48,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1)))),
-                    bytes: vec![48, 127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp z,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 40,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
-                    bytes: vec![40, 127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp nz,global\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (2, EntryData::Instruction {
-                    op_code: 32,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1)))),
-                    bytes: vec![32, 127],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_no_optimization_jp_when_followed_by_nop() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nnop\nSECTION ROM0[129]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (3, EntryData::Instruction {
-                    op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
-                    bytes: vec![195, 129, 0],
-                    debug_only: false
-                }),
-                (1, EntryData::Instruction {
-                    op_code: 0,
-                    expression: None,
-                    bytes: vec![0],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_section_no_optimization_jp_when_out_of_range() {
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\njp global\nSECTION ROM0[130]\nglobal:"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (3, EntryData::Instruction {
-                    op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
-                    bytes: vec![195, 130, 0],
-                    debug_only: false
-                })
-            ],
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ]
-        ]);
-        let l = Linker::from_lexer(entry_lex("SECTION ROM0\nglobal:\nSECTION ROM0[125]\njp global"), true, true).expect("Optimization failed");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (0, EntryData::Label {
-                    id: 1,
-                    name: "global".to_string()
-                })
-            ],
-            vec![
-                (3, EntryData::Instruction {
-                    op_code: 195,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
-                    bytes: vec![195, 0, 0],
-                    debug_only: false
-                })
-            ]
-        ]);
     }
 
 }

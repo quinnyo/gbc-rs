@@ -1,9 +1,18 @@
+// External Dependencies ------------------------------------------------------
+use lazy_static::lazy_static;
+use gbasm_cpu::Instruction;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::{InnerToken, LexerError};
 use crate::expression::ExpressionResult;
 
+// Statics --------------------------------------------------------------------
+lazy_static! {
+    static ref INSTRUCTIONS: Vec<Instruction> = gbasm_cpu::instruction_list();
+}
 
-// Linker Data Evaluation Utilities -------------------------------------------
+// Linker and Section Helpers -------------------------------------------------
 pub fn constant_value(
     inner: &InnerToken,
     result: ExpressionResult,
@@ -163,4 +172,26 @@ fn to_twos_word(i: i32) -> u16 {
     }
 }
 
+
+// Helpers --------------------------------------------------------------------
+pub mod instruction {
+    use super::INSTRUCTIONS;
+    use gbasm_cpu::Argument;
+
+    pub fn size(op_code: usize) -> usize {
+        INSTRUCTIONS[op_code].size
+    }
+
+    pub fn bytes(op_code: usize) -> Vec<u8> {
+        INSTRUCTIONS[op_code].to_bytes()
+    }
+
+    pub fn offsets(op_code: usize) -> Option<&'static Vec<(usize, usize)>> {
+        INSTRUCTIONS[op_code].offsets.as_ref()
+    }
+
+    pub fn argument(op_code: usize) -> Option<&'static Argument> {
+        INSTRUCTIONS[op_code].argument.as_ref()
+    }
+}
 
