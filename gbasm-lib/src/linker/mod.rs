@@ -17,7 +17,6 @@ use self::section::Section;
 
 // Linker Implementation ------------------------------------------------------
 pub struct Linker {
-    context: EvaluatorContext,
     sections: Vec<Section>
 }
 
@@ -123,7 +122,6 @@ impl Linker {
         SectionList::verify(&sections)?;
 
         Ok(Self {
-            context,
             sections
         })
     }
@@ -132,8 +130,11 @@ impl Linker {
         // TODO return section layout and usage data
     }
 
-    pub fn to_rom_buffer(&self) -> Vec<u8> {
-        SectionList::to_rom_buffer(&self.sections)
+    pub fn into_rom_buffer(self) -> Vec<u8> {
+        let required_rom_size = SectionList::required_rom_size(&self.sections);
+        let mut buffer: Vec<u8> = std::iter::repeat(0u8).take(required_rom_size).collect();
+        SectionList::write_to_rom_buffer(&self.sections, &mut buffer);
+        buffer
     }
 
 }
@@ -200,31 +201,36 @@ impl SectionList {
         Ok(())
     }
 
-    // TODO rename to write_to_rom_buffer
-    pub fn to_rom_buffer(sections: &[Section]) -> Vec<u8> {
+    pub fn required_rom_size(sections: &[Section]) -> usize {
 
-        // Calculate required ROM size
-        let mut max_address = 0;
+        let mut max_start_address = 0;
         for s in sections.iter() {
             if s.is_rom {
-                max_address = cmp::max(max_address, s.end_address + 1);
+                max_start_address = cmp::max(max_start_address, s.start_address + s.bank_offset);
             }
         }
 
-        // TODO move buffer generation to Geneerator
-        // TODO have a special max_address() -> usize fn
+        let mut v = cmp::max(max_start_address, 0x4000) / 0x4000;
 
-        // TODO calculate required ROM size
-        // TODO check end_address of is_rom sections
-        // TODO select next power of two
+        // Next power of two
+        v |= v >> 1;
+        v |= v >> 2;
+        v |= v >> 4;
+        v |= v >> 8;
+        v |= v >> 16;
+
+        // Minimum of 32kb
+        v += 1;
 
         // 32kb, 64kb, 128kb, 256kb etc.
-        let mut buffer: Vec<u8> = Vec::new();
+        v * 0x4000
+
+    }
+
+    pub fn write_to_rom_buffer(sections: &[Section], buffer: &mut [u8]) {
         for s in sections.iter() {
             s.write_to_rom_buffer(&mut buffer[..]);
         }
-
-        buffer
     }
 
 }
@@ -233,13 +239,10 @@ impl SectionList {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use ordered_float::OrderedFloat;
-    use pretty_assertions::assert_eq;
 
     use super::Linker;
     use super::section::entry::EntryData;
     use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
-    use crate::expression::ExpressionResult;
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
         Linker::from_lexer(entry_lex(s.into()), false, false).expect("Linker failed")
@@ -281,17 +284,6 @@ mod test {
         }).collect()
     }
 
-    fn context_constants(linker: &Linker) -> Vec<(String, ExpressionResult)> {
-        let mut constants = Vec::new();
-        for (key, value) in &linker.context.constants {
-            constants.push((key.clone(), value.clone()));
-        }
-        constants.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-        });
-        constants
-    }
-
     fn linker_sections(linker: Linker) -> Vec<String> {
         linker.sections.iter().map(|s| {
             format!("{}", s)
@@ -299,27 +291,23 @@ mod test {
         }).collect()
     }
 
+    // ROM Sizing -------------------------------------------------------------
+    #[test]
+    fn test_rom_buffer_sizing() {
+        assert_eq!(linker("").into_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROM0[$2000]").into_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROMX[$4000]").into_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[1]").into_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[2]").into_rom_buffer().len(), 0x10000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[3]").into_rom_buffer().len(), 0x10000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[4]").into_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[5]").into_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[6]").into_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[7]").into_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[8]").into_rom_buffer().len(), 0x40000);
+    }
+
     // Constant Evaluation ----------------------------------------------------
-    #[test]
-    fn test_constant_eval_plain_values() {
-        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQU 'Hello World'");
-        assert_eq!(context_constants(&l), vec![
-            ("float".to_string(), ExpressionResult::Float(OrderedFloat(3.14))),
-            ("int".to_string(), ExpressionResult::Integer(1)),
-            ("string".to_string(), ExpressionResult::String("Hello World".to_string()))
-        ]);
-    }
-
-    #[test]
-    fn test_constant_eval_referenced_values() {
-        let l = linker("A EQU B\nB EQU C\nC EQU 2");
-        assert_eq!(context_constants(&l), vec![
-            ("A".to_string(), ExpressionResult::Integer(2)),
-            ("B".to_string(), ExpressionResult::Integer(2)),
-            ("C".to_string(), ExpressionResult::Integer(2))
-        ]);
-    }
-
     #[test]
     fn test_error_constant_eval_recursive() {
         assert_eq!(linker_error("A EQU B\nB EQU C\nC EQU A"), "In file \"main.gb.s\" on line 3, column 7: Recursive declaration of constant \"A\".\n\nC EQU A\n      ^--- Here\n\nInitial declaration was in file \"main.gb.s\" on line 1, column 1:\n\nA EQU B\n^--- Here");
@@ -465,6 +453,21 @@ mod test {
     fn test_error_entry_outside_ram_segment() {
         assert_eq!(linker_error("SECTION ROM0\nDB"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Byte Variable outside of RAM segment.\n\nDB\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nDW"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Word Variable outside of RAM segment.\n\nDW\n^--- Here");
+    }
+
+    // ROM Buffer -------------------------------------------------------------
+    #[test]
+    fn test_rom_buffer_write() {
+        let b = linker("SECTION ROM0\nDB $1, $2, $3, $4").into_rom_buffer();
+        assert_eq!(b[0..4].to_vec(), vec![1u8, 2, 3, 4]);
+        let b = linker("SECTION ROM0\nDW $2000").into_rom_buffer();
+        assert_eq!(b[0..2].to_vec(), vec![0, 32]);
+        let b = linker("SECTION ROM0\nBW $2000").into_rom_buffer();
+        assert_eq!(b[0..2].to_vec(), vec![32, 0]);
+        let b = linker("SECTION ROM0\nDS 'Hello World'").into_rom_buffer();
+        assert_eq!(b[0..11].to_vec(), vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]);
+        let b = linker("SECTION ROM0\nstop\nld a,a\nld hl,$1000\n").into_rom_buffer();
+        assert_eq!(b[0..10].to_vec(), vec![16, 0, 127, 33, 0, 16, 0, 0, 0, 0]);
     }
 
 }

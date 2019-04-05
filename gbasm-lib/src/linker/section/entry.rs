@@ -8,7 +8,7 @@ use crate::expression::data::{DataAlignment, DataEndianess};
 #[derive(Debug, Eq, PartialEq)]
 pub enum EntryData {
     Marker {
-        name: String
+        name: Option<String>
     },
     Label {
         id: usize,
@@ -41,17 +41,13 @@ pub struct SectionEntry {
 
 impl SectionEntry {
 
-    pub fn new_label(section_id: usize, inner: InnerToken, id: usize) -> Self {
-        let name = inner.value.clone();
+    pub fn new_unsized(section_id: usize, inner: InnerToken, data: EntryData) -> Self {
         SectionEntry {
             inner,
             section_id,
             offset: 0,
             size: 0,
-            data: EntryData::Label {
-                name,
-                id
-            }
+            data
         }
     }
 

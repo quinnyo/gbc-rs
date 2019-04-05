@@ -4,6 +4,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 // Internal Dependencies ------------------------------------------------------
+use crate::generator::Generator;
 use crate::linker::Linker;
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 use crate::traits::FileReader;
@@ -31,10 +32,10 @@ impl Compiler {
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
-        let _linker = Linker::from_lexer(entry_lexer, true, true).map_err(|e| CompilerError::new("LINKER", e))?;
         // TODO report sections and their entry counts
+        let linker = Linker::from_lexer(entry_lexer, true, true).map_err(|e| CompilerError::new("LINKER", e))?;
 
-        // TODO figure out required rom size and generate
+        let _generator = Generator::from_linker(linker);
 
         Ok(())
     }

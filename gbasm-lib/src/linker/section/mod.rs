@@ -101,7 +101,7 @@ pub struct Section {
     pub start_address: usize,
     pub end_address: usize,
     pub is_rom: bool,
-    bank_offset: usize,
+    pub bank_offset: usize,
     pub bank: usize,
 
     pub entries: Vec<SectionEntry>,
@@ -279,7 +279,11 @@ impl Section {
                 ))
             },
             EntryToken::GlobalLabelDef(inner, id) | EntryToken::LocalLabelDef(inner, id) => {
-                self.entries.push(SectionEntry::new_label(self.id, inner, id));
+                let name = inner.value.clone();
+                self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
+                    name,
+                    id
+                }));
             },
             EntryToken::Data { inner, endianess, storage, alignment, debug_only } => {
 
@@ -367,8 +371,10 @@ impl Section {
         Ok(())
     }
 
-    pub fn add_marker(&mut self, _inner: InnerToken, _name: Option<String>) {
-        // TODO push marker entry with size 0
+    pub fn add_marker(&mut self, inner: InnerToken, name: Option<String>) {
+        self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Marker {
+            name
+        }));
     }
 
     pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), LexerError> {
@@ -594,7 +600,6 @@ mod test {
     use crate::lexer::InnerToken;
     use crate::expression::{Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
     use crate::expression::data::{DataAlignment, DataEndianess};
-    use pretty_assertions::assert_eq;
 
     macro_rules! itk {
         ($start:expr, $end:expr, $parsed:expr) => {
@@ -611,6 +616,96 @@ mod test {
             }
         }
     }
+
+    // Markers ----------------------------------------------------------------
+    #[test]
+    fn test_section_markers() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nSECTION 'B',ROM0\nSECTION 'C',ROM0\nSECTION ROM0\nSECTION WRAM0\nSECTION 'R',WRAM0")), vec![
+            vec![
+                (0, EntryData::Marker {
+                    name: Some("B".to_string())
+                }),
+                (0, EntryData::Marker {
+                    name: Some("C".to_string())
+                }),
+                (0, EntryData::Marker {
+                    name: None
+                })
+            ],
+            vec![
+                (0, EntryData::Marker {
+                    name: Some("R".to_string())
+                })
+            ]
+        ]);
+    }
+
+    // Constant Evaluation ----------------------------------------------------
+    #[test]
+    fn test_section_entry_constant_eval() {
+        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQU 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![(1, (3, Expression::Value(ExpressionValue::ConstantValue(itk!(66, 69, "int"), "int".to_string()))))]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![(1, (5, Expression::BuiltinCall {
+                        inner: itk!(73, 78, "FLOOR"),
+                        name: "FLOOR".to_string(),
+                        args: vec![Expression::Value(ExpressionValue::ConstantValue(itk!(79, 84, "float"), "float".to_string()))]
+
+                    }))]),
+                    bytes: Some(vec![3]),
+                    debug_only: false
+                }),
+                (11, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_constant_eval_referenced() {
+        let l = linker("A EQU B\nB EQU C\nC EQU 2\nSECTION ROM0\nDB A\nDB B\nDB C");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![(1, (3, Expression::Value(ExpressionValue::ConstantValue(itk!(40, 41, "A"), "A".to_string()))))]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![(1, (4, Expression::Value(ExpressionValue::ConstantValue(itk!(45, 46, "B"), "B".to_string()))))]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![(1, (5, Expression::Value(ExpressionValue::ConstantValue(itk!(50, 51, "C"), "C".to_string()))))]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+            ]
+        ]);
+    }
+
 
     // Labels Entries ---------------------------------------------------------
     #[test]
