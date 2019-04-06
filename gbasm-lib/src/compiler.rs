@@ -17,18 +17,9 @@ impl Compiler {
     pub fn compile<T: FileReader>(reader: T, entry: PathBuf) -> Result<(), Box<dyn Error>> {
 
         let include_lexer = Lexer::<IncludeStage>::from_file(&reader, &entry).map_err(|e| CompilerError::new("INCLUDE", e))?;
-        let included_token_count = include_lexer.len();
-        println!("Included {} token(s).", included_token_count);
-
         let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
-        println!("{} token(s) after macro expansions.", macro_lexer.len());
-
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilerError::new("VALUE CONVERSION", e))?;
-        println!("{} token(s) after value construction.", value_lexer.len());
-
         let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| CompilerError::new("EXPRESSION CONSTRUCTION", e))?;
-        println!("{} token(s) after expression construction.", expr_lexer.len());
-
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 

@@ -168,39 +168,7 @@ fn optimize_instructions(
                 debug_only: false
             }))
         },
-
-        // ld b,$XX
-        // ld c,$XX
-        // ->
-        // ld bc,$XXXX
-        //
-        // -> save 1 byte and 4 T-states
-        // (0x06, Some((0x0E, _, bytes_two, _)), _) => {
-        //     // TODO must return a expression for the value
-        //     None
-        // },
-
-        // ld d,$XX
-        // ld e,$XX
-        // ->
-        // ld de,$XXXX
-        //
-        // -> save 1 byte and 4 T-states
-        // (0x16, Some((0x1E, _, bytes_two, _)), _) => {
-        //     // TODO must return a expression for the value
-        //     None
-        // },
-
-        // ld h,$XX
-        // ld l,$XX
-        // ->
-        // ld hl,$XXXX
-        //
-        // -> save 1 byte and 4 T-states
-        // (0x26, Some((0x2E, _, bytes_two, _)), _) => {
-        //     // TODO must return a expression for the value
-        //     None
-        // },
+        // TODO combine adjancent b/c c/b d/e e/d h/l l/h loads into a single ld bc etc.
         _ => None
     }
 }
