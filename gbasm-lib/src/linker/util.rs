@@ -154,7 +154,7 @@ pub fn positive_integer(
     }
 }
 
-pub fn to_twos_byte(i: i32) -> u8 {
+fn to_twos_byte(i: i32) -> u8 {
     if i < 0 {
         (256 - (-i as u16)) as u8
 
@@ -173,10 +173,25 @@ fn to_twos_word(i: i32) -> u16 {
 }
 
 
+
 // Helpers --------------------------------------------------------------------
 pub mod instruction {
     use super::INSTRUCTIONS;
     use gbasm_cpu::Argument;
+
+    pub fn jump_address(end_of_instruction: usize, bytes: &[u8]) -> Option<usize> {
+        match bytes[0] {
+            // jp
+            0xC2 | 0xC3 | 0xCA | 0xD2 | 0xDA => {
+                Some(bytes[1] as usize | ((bytes[2] as usize) << 8))
+            },
+            // jr
+            0x18 | 0x20 | 0x28 | 0x30 | 0x38 => {
+                Some((end_of_instruction as i32 + from_twos_byte(bytes[1])) as usize)
+            },
+            _ => None
+        }
+    }
 
     pub fn size(op_code: usize) -> usize {
         INSTRUCTIONS[op_code].size
@@ -193,5 +208,15 @@ pub mod instruction {
     pub fn argument(op_code: usize) -> Option<&'static Argument> {
         INSTRUCTIONS[op_code].argument.as_ref()
     }
+
+    fn from_twos_byte(i: u8) -> i32 {
+        if i > 127 {
+            i as i32 - 256
+
+        } else {
+            i as i32
+        }
+    }
+
 }
 

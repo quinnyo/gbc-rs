@@ -105,21 +105,21 @@ impl Linker {
             }
         }
 
-        SectionList::initialize(&mut sections);
-        SectionList::resolve(&mut sections, &mut context)?;
+        Self::initialize_sections(&mut sections);
+        Self::resolve_sections(&mut sections, &mut context)?;
 
         if strip_debug {
-            SectionList::strip_debug(&mut sections, &mut context)?;
+            Self::strip_debug(&mut sections, &mut context)?;
         }
 
         if optimize {
             // Run passes until no more optimizations were applied
-            while SectionList::optimize_instructions(&mut sections) {
-                SectionList::resolve(&mut sections, &mut context)?;
+            while Self::optimize_instructions(&mut sections) {
+                Self::resolve_sections(&mut sections, &mut context)?;
             }
         }
 
-        SectionList::verify(&sections)?;
+        Self::verify_sections(&sections)?;
 
         Ok(Self {
             sections
@@ -131,20 +131,19 @@ impl Linker {
     }
 
     pub fn into_rom_buffer(self) -> Vec<u8> {
-        let required_rom_size = SectionList::required_rom_size(&self.sections);
+        let required_rom_size = Self::required_rom_size(&self.sections);
         let mut buffer: Vec<u8> = std::iter::repeat(0u8).take(required_rom_size).collect();
-        SectionList::write_to_rom_buffer(&self.sections, &mut buffer);
+        for s in self.sections {
+            s.write_to_rom_buffer(&mut buffer[..]);
+        }
         buffer
     }
 
 }
 
+impl Linker {
 
-// Section List Abstraction ---------------------------------------------------
-pub struct SectionList;
-impl SectionList {
-
-    pub fn initialize(sections: &mut Vec<Section>) {
+    fn initialize_sections(sections: &mut Vec<Section>) {
         // Sort sections by base address
         sections.sort_by(|a, b| {
             if a.start_address == b.start_address {
@@ -168,7 +167,11 @@ impl SectionList {
         }
     }
 
-    pub fn resolve(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
+    fn resolve_sections(
+        sections: &mut [Section],
+        context: &mut EvaluatorContext
+
+    ) -> Result<(), LexerError> {
         for s in sections.iter_mut() {
             s.resolve_addresses(context)?;
         }
@@ -178,14 +181,15 @@ impl SectionList {
         Ok(())
     }
 
-    pub fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
+
+    fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
         for s in sections.iter_mut() {
             s.strip_debug();
         }
-        Self::resolve(sections, context)
+        Self::resolve_sections(sections, context)
     }
 
-    pub fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
+    fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
         let mut optimzations_applied = false;
         for s in sections.iter_mut() {
             optimzations_applied |= optimizer::optimize_section_entries(&mut s.entries);
@@ -193,7 +197,7 @@ impl SectionList {
         optimzations_applied
     }
 
-    pub fn verify(sections: &[Section]) -> Result<(), LexerError> {
+    fn verify_sections(sections: &[Section]) -> Result<(), LexerError> {
         for s in sections.iter() {
             s.validate_jump_targets(&sections)?;
             s.validate_bounds()?;
@@ -201,7 +205,7 @@ impl SectionList {
         Ok(())
     }
 
-    pub fn required_rom_size(sections: &[Section]) -> usize {
+    fn required_rom_size(sections: &[Section]) -> usize {
 
         let mut max_start_address = 0;
         for s in sections.iter() {
@@ -225,12 +229,6 @@ impl SectionList {
         // 32kb, 64kb, 128kb, 256kb etc.
         v * 0x4000
 
-    }
-
-    pub fn write_to_rom_buffer(sections: &[Section], buffer: &mut [u8]) {
-        for s in sections.iter() {
-            s.write_to_rom_buffer(&mut buffer[..]);
-        }
     }
 
 }

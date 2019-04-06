@@ -15,11 +15,11 @@ pub mod entry;
 
 
 // Internal Dependencies ------------------------------------------------------
+use super::util::{self, instruction};
 use crate::lexer::{InnerToken, LexerError, EntryToken};
 use crate::expression::ExpressionResult;
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
-use super::util::{self, instruction};
 use self::entry::{EntryData, SectionEntry};
 
 
@@ -210,7 +210,7 @@ impl Section {
             bank_offset,
             bank,
 
-            entries: Vec::new(),
+            entries: Vec::with_capacity(256),
             bytes_in_use: 0
         })
 
@@ -535,10 +535,27 @@ impl Section {
         });
     }
 
-    pub fn validate_jump_targets(&self, _sections: &[Section]) -> Result<(), LexerError> {
-        // TODO make optional via --enforce-strict-jump-targets?
-        // TODO check if all jump targets land on a section entry that's either a label or
-        // instruction
+    pub fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
+        for entry in &self.entries {
+            if let EntryData::Instruction { ref bytes, .. } = entry.data {
+                if let Some(address) = instruction::jump_address(entry.offset + entry.size, bytes) {
+
+                    for section in sections {
+                        for entry in &section.entries {
+                            // Either the start of an entry or the potential next entry after it
+                            // are considered valid
+                            if entry.offset == address || entry.offset + entry.size == address {
+                                return Ok(());
+                            }
+                        }
+                    }
+
+                    return Err(entry.inner.error(
+                        format!("Jump instruction does not target a valid address, ${:0>4x} is neither the start nor end of any section entry.", address)
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1534,6 +1551,21 @@ mod test {
                 (2, 1)
             ]
         ]);
+    }
+
+    // Jump Target Validation -------------------------------------------------
+    #[test]
+    fn test_section_jump_target_validation() {
+        linker("SECTION ROM0\nld a,a\njr global\nSECTION ROM0[129]\nglobal:");
+        linker("SECTION ROM0\nld a,a\nglobal:\nSECTION ROM0[127]\njr global");
+        linker("SECTION ROM0\nld a,a\njp global\nSECTION ROM0[$2000]\nglobal:");
+        linker("SECTION ROM0[$100]\nglobal:\nSECTION ROM0[$2000]\njp global");
+        linker("SECTION ROM0\nld a,a\njp @-4");
+        linker("SECTION ROM0\nld a,a\njr @-3");
+
+        assert_eq!(linker_error("SECTION ROM0\nld a,a\njr @-1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0002 is neither the start nor end of any section entry.\n\njr @-1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
     }
 
 }
