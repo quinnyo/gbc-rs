@@ -95,7 +95,7 @@ fn optimize_instructions(
         (0xFA, _, _) if bytes[2] == 0xFF => {
             Some((0, EntryData::Instruction {
                 op_code: 0xF0,
-                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(bytes[1] as i32)))),
+                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(i32::from(bytes[1]))))),
                 bytes: instruction::bytes(0xF0),
                 debug_only: false
             }))
@@ -105,7 +105,7 @@ fn optimize_instructions(
         (0xEA, _, _) if bytes[2] == 0xFF => {
             Some((0, EntryData::Instruction {
                 op_code: 0xE0,
-                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(bytes[1] as i32)))),
+                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(i32::from(bytes[1]))))),
                 bytes: instruction::bytes(0xE0),
                 debug_only: false
             }))
@@ -124,7 +124,7 @@ fn optimize_instructions(
         // We only want jp's without that are not followed by a nop
         (0xC3, None, _) |
         (0xC3, Some((0x01..=512, _, _, _)), _) => {
-            let address = bytes[1] as i32 | ((bytes[2] as i32) << 8);
+            let address = i32::from(bytes[1]) | (i32::from(bytes[2]) << 8);
             let relative = address - end_of_instruction;
 
             // Since the resulting instruction shrinks in size we might now be able

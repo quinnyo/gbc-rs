@@ -643,10 +643,10 @@ impl EntryStage {
                 };
 
                 let (op_base, acc_shift, and_constant) = if multiply {
-                    (288, 7, ((255 << shifts) as u8) as i32)
+                    (288, 7, i32::from((255 << shifts) as u8))
 
                 } else {
-                    (312, 15, ((255 >> shifts) as u8) as i32)
+                    (312, 15, i32::from((255 >> shifts) as u8))
                 };
 
                 // Accumulator special cases

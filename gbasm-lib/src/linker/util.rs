@@ -212,10 +212,10 @@ pub mod instruction {
 
     fn from_twos_byte(i: u8) -> i32 {
         if i > 127 {
-            i as i32 - 256
+            i32::from(i) - 256
 
         } else {
-            i as i32
+            i32::from(i)
         }
     }
 
