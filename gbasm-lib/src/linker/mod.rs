@@ -126,8 +126,16 @@ impl Linker {
         })
     }
 
+    pub fn to_symbol_list(&self) -> Vec<(usize, usize, String)> {
+        let mut symbols = Vec::new();
+        for section in &self.sections {
+            symbols.append(&mut section.symbol_list());
+        }
+        symbols
+    }
+
     pub fn to_section_layout(&self) {
-        // TODO return section layout and usage data
+        // TODO return section layout and usage information
     }
 
     pub fn into_rom_buffer(self) -> Vec<u8> {
@@ -466,6 +474,26 @@ mod test {
         assert_eq!(b[0..11].to_vec(), vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]);
         let b = linker("SECTION ROM0\nstop\nld a,a\nld hl,$1000\n").into_rom_buffer();
         assert_eq!(b[0..10].to_vec(), vec![16, 0, 127, 33, 0, 16, 0, 0, 0, 0]);
+    }
+
+    // Symbols ----------------------------------------------------------------
+    #[test]
+    fn test_symbols() {
+        let s = linker("SECTION ROM0\nglobal:\n.local:\nSECTION ROMX\nglobal_2:\n.local:\nSECTION WRAM0\nvar: DB\nSECTION RAMX,BANK[2]\nvar_two: DB\nSECTION HRAM\nbuffer: DS 5").to_symbol_list();
+        assert_eq!(s, vec![
+            (0, 0, "global".to_string()),
+            (0, 0, "global.local".to_string()),
+            (1, 16384, "global_2".to_string()),
+            (1, 16384, "global_2.local".to_string()),
+            (2, 40960, "var_two".to_string()),
+            (0, 49152, "var".to_string()),
+            (0, 65408, "buffer".to_string())
+        ]);
+        let s = linker("SECTION ROM0\nglobal:\nSECTION ROM0[$100]\n.local:").to_symbol_list();
+        assert_eq!(s, vec![
+            (0, 0, "global".to_string()),
+            (0, 256, "local".to_string()),
+        ]);
     }
 
 }

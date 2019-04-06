@@ -206,6 +206,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "foo".to_string()
                 }),
                 (1, EntryData::Instruction {
@@ -224,6 +225,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 2,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -336,6 +338,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -363,6 +366,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -384,6 +388,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -393,6 +398,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ],
@@ -419,6 +425,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -436,6 +443,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -453,6 +461,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -470,6 +479,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -497,6 +507,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -518,6 +529,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -527,6 +539,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ],

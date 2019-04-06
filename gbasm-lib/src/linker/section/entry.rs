@@ -12,7 +12,7 @@ pub enum EntryData {
     },
     Label {
         id: usize,
-        // use for label map later on
+        is_local: bool,
         name: String
     },
     Data {

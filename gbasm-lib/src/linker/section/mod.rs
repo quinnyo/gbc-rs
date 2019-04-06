@@ -279,10 +279,19 @@ impl Section {
                     }
                 ))
             },
-            EntryToken::GlobalLabelDef(inner, id) | EntryToken::LocalLabelDef(inner, id) => {
+            EntryToken::GlobalLabelDef(inner, id) => {
                 let name = inner.value.clone();
                 self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
                     name,
+                    is_local: false,
+                    id
+                }));
+            },
+            EntryToken::LocalLabelDef(inner, id) => {
+                let name = inner.value.clone();
+                self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
+                    name,
+                    is_local: true,
                     id
                 }));
             },
@@ -583,6 +592,28 @@ impl Section {
         }
     }
 
+    pub fn symbol_list(&self) -> Vec<(usize, usize, String)> {
+        let mut parent_label = None;
+        self.entries.iter().filter_map(|entry| {
+            if let EntryData::Label { ref name, is_local, .. } = entry.data {
+                if !is_local {
+                    parent_label = Some(name.clone());
+                    Some((self.bank, entry.offset, name.clone()))
+
+                } else if let Some(parent) = parent_label.as_ref() {
+                    Some((self.bank, entry.offset, format!("{}.{}", parent, name)))
+
+                } else {
+                    Some((self.bank, entry.offset, name.clone()))
+                }
+
+            } else {
+                None
+            }
+
+        }).collect()
+    }
+
     fn check_rom(&self, inner: &InnerToken, msg: &str) -> Result<(), SourceError> {
         if self.is_rom {
             Ok(())
@@ -732,10 +763,12 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global_label".to_string()
                 }),
                 (0, EntryData::Label {
                     id: 2,
+                    is_local: true,
                     name: "local_label".to_string()
                 })
             ]
@@ -1006,6 +1039,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 }),
                 (2, EntryData::Data {
@@ -1043,6 +1077,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 }),
                 (2, EntryData::Data {
@@ -1103,6 +1138,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 })
             ]
@@ -1307,6 +1343,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 }),
                 (2, EntryData::Instruction {
@@ -1371,6 +1408,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "foo".to_string()
                 }),
                 (2, EntryData::Instruction {
@@ -1387,6 +1425,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 2,
+                    is_local: false,
                     name: "bar".to_string()
                 })
             ]
@@ -1407,6 +1446,7 @@ mod test {
             vec![
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 }),
                 (3, EntryData::Instruction {
@@ -1423,6 +1463,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 2,
+                    is_local: false,
                     name: "foo".to_string()
                 })
             ]
@@ -1530,6 +1571,7 @@ mod test {
                 }),
                 (0, EntryData::Label {
                     id: 1,
+                    is_local: false,
                     name: "global".to_string()
                 }),
                 (1, EntryData::Instruction {
