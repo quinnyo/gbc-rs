@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::traits::FileReader;
 use super::super::LexerStage;
 use super::super::token::{TokenGenerator, TokenChar};
-use super::super::{InnerToken, LexerError, LexerFile, LexerToken, TokenType};
+use super::super::{InnerToken, SourceError, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------
@@ -67,7 +67,7 @@ impl LexerStage for IncludeStage {
         child_path: &PathBuf,
         files: &mut Vec<LexerFile>
 
-    ) -> Result<Vec<Self::Output>, LexerError> {
+    ) -> Result<Vec<Self::Output>, SourceError> {
         Self::include_child(IncludeLexerState {
             file_reader,
             files,
@@ -87,11 +87,11 @@ impl IncludeStage {
         file_index: usize,
         index: usize
 
-    ) -> Result<Vec<IncludeToken>, LexerError>{
+    ) -> Result<Vec<IncludeToken>, SourceError>{
 
         // Read in child file contents
         let (child_path, contents) = state.file_reader.read_file(state.parent_path, state.child_path).map_err(|err| {
-            LexerError::new(file_index, index, format!("File \"{}\" not found", err.path.display()))
+            SourceError::new(file_index, index, format!("File \"{}\" not found", err.path.display()))
         })?;
 
         // Create new file abstraction
@@ -119,7 +119,7 @@ impl IncludeStage {
         tokens: Vec<IncludeToken>,
         state: &mut IncludeLexerState<T>,
 
-    ) -> Result<Vec<IncludeToken>, LexerError> {
+    ) -> Result<Vec<IncludeToken>, SourceError> {
 
         let mut expanded = Vec::new();
 
@@ -187,7 +187,7 @@ impl IncludeStage {
         index: usize,
         include_stack: Vec<InnerToken>
 
-    ) -> Result<Vec<IncludeToken>, LexerError> {
+    ) -> Result<Vec<IncludeToken>, SourceError> {
         Self::include_child(state, include_stack, file_index, index)
     }
 
@@ -195,19 +195,19 @@ impl IncludeStage {
         state: IncludeLexerState<T>,
         token: InnerToken
 
-    ) -> Result<IncludeToken, LexerError> {
+    ) -> Result<IncludeToken, SourceError> {
         let (_, bytes) = state.file_reader.read_binary_file(state.parent_path, state.child_path).map_err(|err| {
-            LexerError::new(token.file_index, token.start_index, format!("File \"{}\" not found", err.path.display()))
+            SourceError::new(token.file_index, token.start_index, format!("File \"{}\" not found", err.path.display()))
         })?;
         Ok(IncludeToken::BinaryFile(token, bytes))
     }
 
-    fn tokenize(file: &LexerFile, text: &str) -> Result<Vec<IncludeToken>, LexerError> {
+    fn tokenize(file: &LexerFile, text: &str) -> Result<Vec<IncludeToken>, SourceError> {
         let mut iter = TokenGenerator::new(&file, text);
         Self::collect_tokens(&mut iter, false)
     }
 
-    fn collect_tokens(iter: &mut TokenGenerator, inside_token_group: bool) -> Result<Vec<IncludeToken>, LexerError> {
+    fn collect_tokens(iter: &mut TokenGenerator, inside_token_group: bool) -> Result<Vec<IncludeToken>, SourceError> {
         let mut tokens = Vec::new();
         while iter.peek().is_some() {
             let token = match iter.next() {
@@ -369,7 +369,7 @@ impl IncludeStage {
         Ok(tokens)
     }
 
-    fn collect_inner_string(iter: &mut TokenGenerator, delimeter: char) -> Result<InnerToken, LexerError> {
+    fn collect_inner_string(iter: &mut TokenGenerator, delimeter: char) -> Result<InnerToken, SourceError> {
         let t = iter.collect(false, |c, p| {
             // Ignore escape slashes
             if c == '\\' && p != '\\' {
@@ -399,7 +399,7 @@ impl IncludeStage {
         Ok(t)
     }
 
-    fn collect_inner_name(iter: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, LexerError> {
+    fn collect_inner_name(iter: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, SourceError> {
         Ok(iter.collect(inclusive, |c, _| {
             if let 'a'...'z' | 'A'...'Z' | '_' | '0'...'9' = c {
                 TokenChar::Valid(c)
@@ -410,7 +410,7 @@ impl IncludeStage {
         })?)
     }
 
-    fn collect_number_literal(iter: &mut TokenGenerator) -> Result<IncludeToken, LexerError> {
+    fn collect_number_literal(iter: &mut TokenGenerator) -> Result<IncludeToken, SourceError> {
         let mut float = false;
         Ok(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
             if let '_' = c {

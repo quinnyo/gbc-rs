@@ -165,7 +165,7 @@ macro_rules! lexer_token {
 mod error;
 mod file;
 pub mod stage;
-pub use self::error::LexerError;
+pub use self::error::SourceError;
 use self::file::LexerFile;
 
 

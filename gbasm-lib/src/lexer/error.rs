@@ -10,7 +10,7 @@ use super::stage::macros::MacroCall;
 
 // Lexer Error Abstraction -----------------------------------------------------
 #[derive(Debug)]
-pub struct LexerError {
+pub struct SourceError {
     pub file_index: usize,
     pub index: usize,
     pub message: String,
@@ -18,7 +18,7 @@ pub struct LexerError {
     reference: Option<(usize, usize, String)>
 }
 
-impl LexerError {
+impl SourceError {
 
     pub fn new(file_index: usize, index: usize, message: String) -> Self {
         Self {
@@ -51,15 +51,15 @@ impl LexerError {
         self
     }
 
-    pub fn extend_with_location_and_macros(self, files: &[LexerFile], macro_calls: &[MacroCall]) -> LexerError {
+    pub fn extend_with_location_and_macros(self, files: &[LexerFile], macro_calls: &[MacroCall]) -> SourceError {
         self.extend(files, Some(macro_calls))
     }
 
-    pub fn extend_with_location(self, files: &[LexerFile]) -> LexerError {
+    pub fn extend_with_location(self, files: &[LexerFile]) -> SourceError {
         self.extend(files, None)
     }
 
-    fn extend(self, files: &[LexerFile], macro_calls: Option<&[MacroCall]>) -> LexerError {
+    fn extend(self, files: &[LexerFile], macro_calls: Option<&[MacroCall]>) -> SourceError {
 
         let file = &files[self.file_index];
 
@@ -107,7 +107,7 @@ impl LexerError {
             false
         );
 
-        LexerError {
+        SourceError {
             file_index: self.file_index,
             index: self.index,
             macro_call_id: self.macro_call_id,
@@ -154,11 +154,11 @@ impl LexerError {
 
 }
 
-impl fmt::Display for LexerError {
+impl fmt::Display for SourceError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl Error for LexerError {}
+impl Error for SourceError {}
 

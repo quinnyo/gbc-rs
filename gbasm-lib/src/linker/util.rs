@@ -4,7 +4,7 @@ use gbasm_cpu::Instruction;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{InnerToken, LexerError};
+use crate::lexer::{InnerToken, SourceError};
 use crate::expression::ExpressionResult;
 
 // Statics --------------------------------------------------------------------
@@ -18,7 +18,7 @@ pub fn constant_value(
     result: ExpressionResult,
     msg: &'static str
 
-) -> Result<i32, LexerError> {
+) -> Result<i32, SourceError> {
     match result {
         ExpressionResult::Integer(i) => {
             Ok(i)
@@ -34,7 +34,7 @@ pub fn byte_value(
     result: ExpressionResult,
     msg: &'static str
 
-) -> Result<u8, LexerError> {
+) -> Result<u8, SourceError> {
     match result {
         ExpressionResult::Integer(i) => {
             if i >= -128 && i <= 255 {
@@ -55,7 +55,7 @@ pub fn word_value(
     result: ExpressionResult,
     msg: &'static str
 
-) -> Result<u16, LexerError> {
+) -> Result<u16, SourceError> {
     match result {
         ExpressionResult::Integer(i) => {
             if i >= -32768 && i <= 65535 {
@@ -76,7 +76,7 @@ pub fn address_word_value(
     result: ExpressionResult,
     msg: &'static str
 
-) -> Result<i32, LexerError> {
+) -> Result<i32, SourceError> {
     match result {
         ExpressionResult::Integer(i) => {
             if i >= -65536 && i <= 65535 {
@@ -97,7 +97,7 @@ pub fn signed_byte_value(
     value: i32,
     msg: &'static str
 
-) -> Result<u8, LexerError> {
+) -> Result<u8, SourceError> {
     if value >= -128 && value <= 127 {
         Ok(to_twos_byte(value))
 
@@ -111,7 +111,7 @@ pub fn opt_string(
     result: Option<ExpressionResult>,
     msg: &'static str
 
-) -> Result<Option<String>, LexerError> {
+) -> Result<Option<String>, SourceError> {
     match result {
         Some(ExpressionResult::String(s)) => {
             Ok(Some(s))
@@ -128,7 +128,7 @@ pub fn opt_integer(
     result: Option<ExpressionResult>,
     msg: &'static str
 
-) -> Result<Option<usize>, LexerError> {
+) -> Result<Option<usize>, SourceError> {
     match result {
         Some(ExpressionResult::Integer(i)) => {
             Ok(Some(positive_integer(inner, i, msg)?))
@@ -145,7 +145,7 @@ pub fn positive_integer(
     i: i32,
     msg: &'static str
 
-) -> Result<usize, LexerError> {
+) -> Result<usize, SourceError> {
     if i >= 0 {
         Ok(i as usize)
 

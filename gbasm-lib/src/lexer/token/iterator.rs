@@ -1,6 +1,6 @@
 // Internal Dependencies ------------------------------------------------------
 use super::{LexerToken, TokenType};
-use super::super::LexerError;
+use super::super::SourceError;
 
 
 // Token Iterator Implementation ----------------------------------------------
@@ -45,7 +45,7 @@ impl<T: LexerToken> TokenIterator<T> {
         self.tokens.peek()
     }
 
-    pub fn expect<S: Into<String>>(&mut self, typ: TokenType, value: Option<&str>, message: S) -> Result<T, LexerError> {
+    pub fn expect<S: Into<String>>(&mut self, typ: TokenType, value: Option<&str>, message: S) -> Result<T, SourceError> {
         match self.next() {
             Some(token) => {
                 if token.is(typ)  {
@@ -72,14 +72,14 @@ impl<T: LexerToken> TokenIterator<T> {
                 }
             },
             None => if let Some(value) = value {
-                Err(LexerError::new(
+                Err(SourceError::new(
                     self.file_index,
                     self.index,
                     format!("Unexpected end of input {}, expected \"{}\" instead.", message.into(), value)
                 ))
 
             } else {
-                Err(LexerError::new(
+                Err(SourceError::new(
                     self.file_index,
                     self.index,
                     format!("Unexpected end of input {}, expected a \"{:?}\" token instead.", message.into(), typ)
@@ -88,10 +88,10 @@ impl<T: LexerToken> TokenIterator<T> {
         }
     }
 
-    pub fn get<S: Into<String>>(&mut self, message: S) -> Result<T, LexerError> {
+    pub fn get<S: Into<String>>(&mut self, message: S) -> Result<T, SourceError> {
         match self.next() {
             Some(token) => Ok(token),
-            None => Err(LexerError::new(
+            None => Err(SourceError::new(
                 self.file_index,
                 self.index,
                 message.into()

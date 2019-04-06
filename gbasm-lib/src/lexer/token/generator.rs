@@ -1,6 +1,6 @@
 // Internal Dependencies ------------------------------------------------------
 use super::InnerToken;
-use super::super::{LexerError, LexerFile};
+use super::super::{SourceError, LexerFile};
 
 
 // Types ----------------------------------------------------------------------
@@ -35,8 +35,8 @@ impl TokenGenerator {
         }
     }
 
-    pub fn error(&self) -> LexerError {
-        LexerError::new(
+    pub fn error(&self) -> SourceError {
+        SourceError::new(
             self.file_index,
             self.index - 1,
             format!("Unexpected character \"{}\".", self.current)
@@ -47,9 +47,9 @@ impl TokenGenerator {
         self.index
     }
 
-    pub fn assert_char(&self, c: char, message: String) -> Result<(), LexerError> {
+    pub fn assert_char(&self, c: char, message: String) -> Result<(), SourceError> {
         if self.current != c || self.input_exhausted {
-            Err(LexerError::new(
+            Err(SourceError::new(
                 self.file_index,
                 self.index,
                 message
@@ -60,9 +60,9 @@ impl TokenGenerator {
         }
     }
 
-    pub fn assert_index_changed(&self, previous: usize, message: String) -> Result<(), LexerError> {
+    pub fn assert_index_changed(&self, previous: usize, message: String) -> Result<(), SourceError> {
         if self.index == previous {
-            Err(LexerError::new(
+            Err(SourceError::new(
                 self.file_index,
                 self.index,
                 message
@@ -95,7 +95,7 @@ impl TokenGenerator {
         )
     }
 
-    pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, LexerError> {
+    pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, SourceError> {
         self.start = self.index - 1;
         if inclusive {
             self.collect_with(vec![self.current], cb)
@@ -105,7 +105,7 @@ impl TokenGenerator {
         }
     }
 
-    fn collect_with<C: FnMut(char, char) -> TokenChar>(&mut self, mut parsed: Vec<char>, mut cb: C) -> Result<InnerToken, LexerError> {
+    fn collect_with<C: FnMut(char, char) -> TokenChar>(&mut self, mut parsed: Vec<char>, mut cb: C) -> Result<InnerToken, SourceError> {
 
         let mut last = '\0';
         let mut end_index = self.index;

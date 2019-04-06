@@ -10,7 +10,7 @@ mod util;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{Lexer, LexerError, LexerToken, EntryStage, EntryToken};
+use crate::lexer::{Lexer, SourceError, LexerToken, EntryStage, EntryToken};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
 use self::section::Section;
 
@@ -40,7 +40,7 @@ impl Linker {
         strip_debug: bool,
         optimize: bool
 
-    ) -> Result<Self, LexerError> {
+    ) -> Result<Self, SourceError> {
 
         let mut context = EvaluatorContext::new();
 
@@ -171,7 +171,7 @@ impl Linker {
         sections: &mut [Section],
         context: &mut EvaluatorContext
 
-    ) -> Result<(), LexerError> {
+    ) -> Result<(), SourceError> {
         for s in sections.iter_mut() {
             s.resolve_addresses(context)?;
         }
@@ -182,7 +182,7 @@ impl Linker {
     }
 
 
-    fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), LexerError> {
+    fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), SourceError> {
         for s in sections.iter_mut() {
             s.strip_debug();
         }
@@ -197,7 +197,7 @@ impl Linker {
         optimzations_applied
     }
 
-    fn verify_sections(sections: &[Section]) -> Result<(), LexerError> {
+    fn verify_sections(sections: &[Section]) -> Result<(), SourceError> {
         for s in sections.iter() {
             s.validate_jump_targets(&sections)?;
             s.validate_bounds()?;

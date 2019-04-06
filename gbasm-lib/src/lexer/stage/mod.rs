@@ -12,7 +12,7 @@ pub mod value;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
-use super::{LexerFile, LexerToken, LexerError};
+use super::{LexerFile, LexerToken, SourceError};
 use macros::MacroCall;
 
 
@@ -27,7 +27,7 @@ pub trait LexerStage {
         _: &PathBuf,
         _: &mut Vec<LexerFile>
 
-    ) -> Result<Vec<Self::Output>, LexerError> {
+    ) -> Result<Vec<Self::Output>, SourceError> {
         Ok(Vec::new())
     }
 
@@ -36,7 +36,7 @@ pub trait LexerStage {
         _: &mut Vec<MacroCall>,
         _: &mut Vec<Self::Data>
 
-    ) -> Result<Vec<Self::Output>, LexerError> {
+    ) -> Result<Vec<Self::Output>, SourceError> {
         Ok(Vec::new())
     }
 }

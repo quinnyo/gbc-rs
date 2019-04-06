@@ -11,7 +11,7 @@ use ordered_float::OrderedFloat;
 use crate::lexer::MacroStage;
 use crate::expression::Operator;
 use super::macros::{MacroCall, MacroToken};
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, SourceError};
 
 
 // Value Specific Tokens ------------------------------------------------------
@@ -71,7 +71,7 @@ impl LexerStage for ValueStage {
         _macro_calls: &mut Vec<MacroCall>,
         _data: &mut Vec<Self::Data>
 
-    ) -> Result<Vec<Self::Output>, LexerError> {
+    ) -> Result<Vec<Self::Output>, SourceError> {
         let mut global_labels: HashMap<(String, Option<usize>), (InnerToken, usize)> = HashMap::new();
         let mut global_labels_names: Vec<String> = Vec::new();
         let mut unique_label_id = 0;
@@ -95,7 +95,7 @@ impl ValueStage {
         is_argument: bool,
         tokens: Vec<MacroToken>
 
-    ) -> Result<Vec<ValueToken>, LexerError> {
+    ) -> Result<Vec<ValueToken>, SourceError> {
 
         let mut local_labels: HashMap<String, InnerToken> = HashMap::new();
 
@@ -281,7 +281,7 @@ impl ValueStage {
         local_labels: &mut HashMap<String, InnerToken>,
         mut inner: InnerToken
 
-    ) -> Result<ValueToken, LexerError> {
+    ) -> Result<ValueToken, SourceError> {
         // For local labels all kinds of names are allowed
         let name_token = if tokens.peek_is(TokenType::Instruction, None) {
             tokens.expect(TokenType::Instruction, None, "when parsing local label")?.into_inner()
@@ -342,7 +342,7 @@ impl ValueStage {
         }
     }
 
-    fn parse_number_literal(inner: InnerToken) -> Result<ValueToken, LexerError> {
+    fn parse_number_literal(inner: InnerToken) -> Result<ValueToken, SourceError> {
         Ok(match inner.value.chars().next().unwrap() {
             '$' => ValueToken::Integer {
                 value: Self::parse_integer(&inner, 1, 16)?,
@@ -367,19 +367,19 @@ impl ValueStage {
         })
     }
 
-    fn parse_integer(inner: &InnerToken, from: usize, radix: u32) -> Result<i32, LexerError> {
+    fn parse_integer(inner: &InnerToken, from: usize, radix: u32) -> Result<i32, SourceError> {
         i32::from_str_radix(&inner.value[from..], radix).map_err(|_| {
             inner.error("Failed to parse integer value.".to_string())
         })
     }
 
-    fn parse_float(inner: &InnerToken) -> Result<f32, LexerError> {
+    fn parse_float(inner: &InnerToken) -> Result<f32, SourceError> {
         inner.value.parse::<f32>().map_err(|_| {
             inner.error("Failed to parse float value.".to_string())
         })
     }
 
-    fn parse_operator_single(inner: &InnerToken) -> Result<Operator, LexerError> {
+    fn parse_operator_single(inner: &InnerToken) -> Result<Operator, SourceError> {
         match inner.value.chars().next().unwrap() {
             '<' => Ok(Operator::LessThan),
             '>' => Ok(Operator::GreaterThan),
@@ -439,7 +439,7 @@ type LocalCallIndex = Option<(usize, usize)>;
 type LocalLabelError = (usize, usize, LocalCallIndex);
 
 impl ValueStage {
-    fn convert_local_labels_refs(mut tokens: Vec<ValueToken>) -> Result<Vec<ValueToken>, LexerError> {
+    fn convert_local_labels_refs(mut tokens: Vec<ValueToken>) -> Result<Vec<ValueToken>, SourceError> {
 
         let mut global_label_map = HashMap::new();
         let mut local_label_refs = Vec::new();

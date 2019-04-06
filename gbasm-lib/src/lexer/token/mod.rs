@@ -1,5 +1,5 @@
 // Internal Dependencies ------------------------------------------------------
-use super::LexerError;
+use super::SourceError;
 
 
 // Modules --------------------------------------------------------------------
@@ -20,7 +20,7 @@ pub trait LexerToken {
 
     fn into_inner(self) -> InnerToken;
 
-    fn error(&self, message: String) -> LexerError {
+    fn error(&self, message: String) -> SourceError {
         self.inner().error(message)
     }
 
@@ -126,8 +126,8 @@ impl InnerToken {
         self.macro_call_id = Some(id);
     }
 
-    pub fn error(&self, message: String) -> LexerError {
-        LexerError::with_macro_call_id(
+    pub fn error(&self, message: String) -> SourceError {
+        SourceError::with_macro_call_id(
             self.file_index,
             self.start_index,
             message,

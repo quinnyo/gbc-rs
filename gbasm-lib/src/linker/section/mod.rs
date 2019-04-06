@@ -16,7 +16,7 @@ pub mod entry;
 
 // Internal Dependencies ------------------------------------------------------
 use super::util::{self, instruction};
-use crate::lexer::{InnerToken, LexerError, EntryToken};
+use crate::lexer::{InnerToken, SourceError, EntryToken};
 use crate::expression::ExpressionResult;
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
@@ -130,7 +130,7 @@ impl Section {
         segment_size: Option<usize>,
         segment_bank: Option<usize>
 
-    ) -> Result<Self, LexerError> {
+    ) -> Result<Self, SourceError> {
 
         let defaults = SECTION_DEFAULTS.get(segment.as_str()).expect("Invalid segment name");
 
@@ -220,7 +220,7 @@ impl Section {
         (&self.segment, self.bank)
     }
 
-    pub fn add_entry(&mut self, context: &mut EvaluatorContext, token: EntryToken) -> Result<(), LexerError> {
+    pub fn add_entry(&mut self, context: &mut EvaluatorContext, token: EntryToken) -> Result<(), SourceError> {
         match token {
             EntryToken::Instruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
@@ -377,7 +377,7 @@ impl Section {
         }));
     }
 
-    pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), LexerError> {
+    pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
         let mut offset = 0;
         for e in &mut self.entries {
 
@@ -410,7 +410,7 @@ impl Section {
         Ok(())
     }
 
-    pub fn resolve_arguments(&mut self, context: &mut EvaluatorContext) -> Result<(), LexerError> {
+    pub fn resolve_arguments(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
         for entry in &mut self.entries {
 
             // Set context rom_offset for relative offset calculation
@@ -535,7 +535,7 @@ impl Section {
         });
     }
 
-    pub fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), LexerError> {
+    pub fn validate_jump_targets(&self, sections: &[Section]) -> Result<(), SourceError> {
         for entry in &self.entries {
             if let EntryData::Instruction { ref bytes, .. } = entry.data {
                 if let Some(address) = instruction::jump_address(entry.offset + entry.size, bytes) {
@@ -559,7 +559,7 @@ impl Section {
         Ok(())
     }
 
-    pub fn validate_bounds(&self) -> Result<(), LexerError> {
+    pub fn validate_bounds(&self) -> Result<(), SourceError> {
         if self.start_address + self.bytes_in_use > self.end_address + 1 {
             Err(self.inner.error(format!(
                 "Section contents exceeds allocated area ${:0>4x}-${:0>4x} by {} byte(s)",
@@ -582,7 +582,7 @@ impl Section {
         }
     }
 
-    fn check_rom(&self, inner: &InnerToken, msg: &str) -> Result<(), LexerError> {
+    fn check_rom(&self, inner: &InnerToken, msg: &str) -> Result<(), SourceError> {
         if self.is_rom {
             Ok(())
 
@@ -591,7 +591,7 @@ impl Section {
         }
     }
 
-    fn check_ram(&self, inner: &InnerToken, msg: &str) -> Result<(), LexerError> {
+    fn check_ram(&self, inner: &InnerToken, msg: &str) -> Result<(), SourceError> {
         if self.is_rom {
             Err(inner.error(format!("Unexpected {} outside of RAM segment.", msg)))
 

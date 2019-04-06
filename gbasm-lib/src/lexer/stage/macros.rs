@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use crate::lexer::IncludeStage;
 use crate::expression::ExpressionArgumenType;
 use super::include::IncludeToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, LexerError, TokenType};
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, SourceError, TokenType};
 
 
 // Statics --------------------------------------------------------------------
@@ -162,7 +162,7 @@ pub struct MacroCall {
 }
 
 impl MacroCall {
-    pub fn error(&self, message: String) -> LexerError {
+    pub fn error(&self, message: String) -> SourceError {
         self.name.error(message)
     }
 }
@@ -181,7 +181,7 @@ impl LexerStage for MacroStage {
         macro_calls: &mut Vec<MacroCall>,
         data: &mut Vec<Self::Data>
 
-    ) -> Result<Vec<Self::Output>, LexerError> {
+    ) -> Result<Vec<Self::Output>, SourceError> {
         let (mut macro_defs, tokens) = Self::parse_tokens(tokens, macro_calls)?;
         data.append(&mut macro_defs);
         Ok(tokens)
@@ -195,7 +195,7 @@ impl MacroStage {
         tokens: Vec<IncludeToken>,
         macro_calls: &mut Vec<MacroCall>
 
-    ) -> Result<(Vec<MacroDefinition>, Vec<MacroToken>), LexerError> {
+    ) -> Result<(Vec<MacroDefinition>, Vec<MacroToken>), SourceError> {
 
         let mut user_macro_defs = Vec::new();
         let mut tokens_without_macro_defs = Vec::with_capacity(tokens.len());
@@ -304,7 +304,7 @@ impl MacroStage {
         builtin_macro_defs: &[MacroDefinition],
         user_macro_defs: &[MacroDefinition],
 
-    ) -> Result<Vec<IncludeToken>, LexerError> {
+    ) -> Result<Vec<IncludeToken>, SourceError> {
 
         let mut tokens_without_macro_calls = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
@@ -409,7 +409,7 @@ impl MacroStage {
         builtin_macro_defs: &[MacroDefinition],
         user_macro_defs: &[MacroDefinition],
 
-    ) -> Result<IncludeToken, LexerError> {
+    ) -> Result<IncludeToken, SourceError> {
 
         let mut arguments = Vec::with_capacity(arg_tokens.len());
         for tokens in arg_tokens {
@@ -451,7 +451,7 @@ impl MacroStage {
         builtin_macro_defs: &[MacroDefinition],
         user_macro_defs: &[MacroDefinition],
 
-    ) -> Result<Vec<IncludeToken>, LexerError> {
+    ) -> Result<Vec<IncludeToken>, SourceError> {
         let mut expanded = Vec::new();
         token.inner_mut().set_macro_call_id(*macro_call_id);
         if token.is(TokenType::Parameter) {
@@ -526,7 +526,7 @@ impl MacroStage {
         None
     }
 
-    fn parse_macro_def_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<IncludeToken>, LexerError> {
+    fn parse_macro_def_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<IncludeToken>, SourceError> {
 
         let mut arguments = Vec::new();
         tokens.expect(TokenType::OpenParen, None, "when parsing arguments list")?;
@@ -544,7 +544,7 @@ impl MacroStage {
 
     }
 
-    fn parse_macro_call_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<Vec<IncludeToken>>, LexerError> {
+    fn parse_macro_call_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<Vec<IncludeToken>>, SourceError> {
 
         let mut arguments = Vec::new();
         tokens.expect(TokenType::OpenParen, None, "when parsing argument list")?;

@@ -11,7 +11,7 @@ use super::macros::MacroCall;
 use crate::lexer::ValueStage;
 use crate::expression::{Expression, ExpressionValue};
 use super::value::ValueToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, LexerError};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, SourceError};
 
 
 // Expression Specific Tokens -------------------------------------------------
@@ -81,7 +81,7 @@ impl LexerStage for ExpressionStage {
         _macro_calls: &mut Vec<MacroCall>,
         _data: &mut Vec<Self::Data>
 
-    ) -> Result<Vec<Self::Output>, LexerError> {
+    ) -> Result<Vec<Self::Output>, SourceError> {
         let mut expression_id = 0;
         let parsed_tokens = Self::parse_expression(tokens, &mut expression_id, false)?;
         Ok(parsed_tokens)
@@ -91,7 +91,7 @@ impl LexerStage for ExpressionStage {
 
 impl ExpressionStage {
 
-    fn parse_expression(tokens: Vec<ValueToken>, expression_id: &mut usize, is_argument: bool) -> Result<Vec<ExpressionToken>, LexerError> {
+    fn parse_expression(tokens: Vec<ValueToken>, expression_id: &mut usize, is_argument: bool) -> Result<Vec<ExpressionToken>, SourceError> {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
@@ -115,7 +115,7 @@ impl ExpressionStage {
         is_argument: bool,
         expression_id: &mut usize
 
-    ) -> Result<ExpressionToken, LexerError> {
+    ) -> Result<ExpressionToken, SourceError> {
         // Check for start of expression
         let mut current_typ = token.typ();
         if ExpressionParser::is_start_token(current_typ) {
@@ -163,7 +163,7 @@ impl ExpressionStage {
         }
     }
 
-    fn parse_expression_argument(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
+    fn parse_expression_argument(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, SourceError> {
         let mut expression_tokens = Self::parse_expression(tokens, expression_id, true)?;
         if expression_tokens.len() > 1 {
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
@@ -189,11 +189,11 @@ struct ExpressionParser {
 
 impl ExpressionParser {
 
-    fn parse_tokens(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, LexerError> {
+    fn parse_tokens(tokens: Vec<ValueToken>, expression_id: &mut usize) -> Result<Expression, SourceError> {
         ExpressionParser::new(tokens)?.parse_binary(expression_id, 0)
     }
 
-    fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, LexerError> {
+    fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, SourceError> {
         let mut tokens = TokenIterator::new(tokens);
         let first = tokens.next();
         let mut parser = Self {
@@ -206,7 +206,7 @@ impl ExpressionParser {
         Ok(parser)
     }
 
-    fn parse_binary(&mut self, expression_id: &mut usize, prec: usize) -> Result<Expression, LexerError> {
+    fn parse_binary(&mut self, expression_id: &mut usize, prec: usize) -> Result<Expression, SourceError> {
 
         // Every potential binary expression starts with one unary
         let mut left = self.parse_unary(expression_id)?;
@@ -241,12 +241,12 @@ impl ExpressionParser {
         self.update(next)
     }
 
-    fn expect<S: Into<String>>(&mut self, msg: S) -> Result<ValueToken, LexerError> {
+    fn expect<S: Into<String>>(&mut self, msg: S) -> Result<ValueToken, SourceError> {
         let next =self.tokens.get(msg.into())?;
         Ok(self.update(Some(next)).expect("ExpressionParser::expect failed"))
     }
 
-    fn assert_typ<S: Into<String>>(&mut self, typ: TokenType, msg: S) -> Result<ValueToken, LexerError> {
+    fn assert_typ<S: Into<String>>(&mut self, typ: TokenType, msg: S) -> Result<ValueToken, SourceError> {
         let next = self.tokens.next();
         match self.update(next) {
             Some(token) => if token.is(typ) {
@@ -267,7 +267,7 @@ impl ExpressionParser {
         mem::replace(&mut self.token, token)
     }
 
-    fn parse_unary(&mut self, expression_id: &mut usize) -> Result<Expression, LexerError> {
+    fn parse_unary(&mut self, expression_id: &mut usize) -> Result<Expression, SourceError> {
 
         // Parse unary operator and combine with it's right hand side value
         if self.is_unary() {
@@ -332,7 +332,7 @@ impl ExpressionParser {
                 Some(token) => {
                     Err(token.error(format!("Unexpected \"{}\" token in incomplete expression.", token.value())))
                 },
-                _ => Err(LexerError::new(self.last_file_index, self.last_index, "Unexpected end of expression.".to_string()))
+                _ => Err(SourceError::new(self.last_file_index, self.last_index, "Unexpected end of expression.".to_string()))
             }
 
         }

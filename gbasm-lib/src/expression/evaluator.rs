@@ -8,7 +8,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{InnerToken, LexerError, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
+use crate::lexer::{InnerToken, SourceError, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
 use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionResult, OptionalDataExpression, Operator};
 
 
@@ -39,7 +39,7 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn resolve_constants(&mut self) -> Result<(), LexerError> {
+    pub fn resolve_constants(&mut self) -> Result<(), SourceError> {
         let mut names: Vec<String> = self.raw_constants.keys().cloned().collect();
         names.sort_by(|a, b| {
             a.cmp(&b)
@@ -62,7 +62,7 @@ impl EvaluatorContext {
         constant_stack: &[usize],
         name: &str
 
-    ) -> Result<ExpressionResult, LexerError> {
+    ) -> Result<ExpressionResult, SourceError> {
         if let Some(result) = self.constants.get(name) {
             Ok(result.clone())
 
@@ -92,7 +92,7 @@ impl EvaluatorContext {
         &mut self,
         expression: DataExpression
 
-    ) -> Result<ExpressionResult, LexerError> {
+    ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::new();
         self.resolve_expression_inner(&stack, expression.1)
     }
@@ -101,7 +101,7 @@ impl EvaluatorContext {
         &mut self,
         expression: OptionalDataExpression
 
-    ) -> Result<Option<ExpressionResult>, LexerError> {
+    ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some((_, expr)) = expression {
             let stack = Vec::new();
             Ok(Some(self.resolve_expression_inner(&stack, expr)?))
@@ -116,7 +116,7 @@ impl EvaluatorContext {
         constant_stack: &[usize],
         expression: Expression
 
-    ) -> Result<ExpressionResult, LexerError> {
+    ) -> Result<ExpressionResult, SourceError> {
         Ok(match expression {
             Expression::Binary { inner, op, left, right } => {
                 let left = self.resolve_expression_inner(
@@ -179,7 +179,7 @@ impl EvaluatorContext {
         name: &str,
         args: Vec<ExpressionResult>
 
-    ) -> Result<ExpressionResult, LexerError> {
+    ) -> Result<ExpressionResult, SourceError> {
         let def = BUILTIN_MACRO_DEFS.get(*BUILTIN_MACRO_INDEX.get(name).unwrap()).unwrap();
 
         // Check argument types
@@ -343,7 +343,7 @@ impl EvaluatorContext {
         left: ExpressionResult,
         right: ExpressionResult
 
-    ) -> Result<ExpressionResult, LexerError> {
+    ) -> Result<ExpressionResult, SourceError> {
         match (&op, &left, &right) {
             // Integer
             (Operator::ShiftRight, ExpressionResult::Integer(l), ExpressionResult::Integer(r)) => {
@@ -558,7 +558,7 @@ impl EvaluatorContext {
         op: Operator,
         right: ExpressionResult
 
-    ) -> Result<ExpressionResult, LexerError> {
+    ) -> Result<ExpressionResult, SourceError> {
         match (&op, &right) {
             // Integer
             (Operator::Plus, ExpressionResult::Integer(i)) => {
@@ -627,7 +627,7 @@ fn i2b(i: i32) -> bool {
 mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::stage::mocks::expr_lex;
-    use crate::lexer::{ExpressionToken, LexerError};
+    use crate::lexer::{ExpressionToken, SourceError};
     use super::{EvaluatorContext, ExpressionResult};
 
     fn const_expression<S: Into<String>>(s: S) -> ExpressionResult {
@@ -638,7 +638,7 @@ mod test {
         const_expression_result(s).err().unwrap().to_string()
     }
 
-    fn const_expression_result<S: Into<String>>(s: S) -> Result<ExpressionResult, LexerError> {
+    fn const_expression_result<S: Into<String>>(s: S) -> Result<ExpressionResult, SourceError> {
         let token = expr_lex(s).tokens.remove(0);
         if let ExpressionToken::ConstExpression(_, _, expr) = token {
             let mut context = EvaluatorContext::new();
