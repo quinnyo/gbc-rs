@@ -15,12 +15,13 @@ pub mod entry;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::util::{self, instruction};
-use crate::lexer::{InnerToken, SourceError, EntryToken};
+use crate::error::SourceError;
+use crate::lexer::{InnerToken, EntryToken};
 use crate::expression::ExpressionResult;
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
 use self::entry::{EntryData, SectionEntry};
+use super::util::{self, instruction};
 
 
 // Statics --------------------------------------------------------------------

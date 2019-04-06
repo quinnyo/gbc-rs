@@ -1,6 +1,6 @@
 // Internal Dependencies ------------------------------------------------------
+use crate::error::SourceError;
 use super::{LexerToken, TokenType};
-use super::super::SourceError;
 
 
 // Token Iterator Implementation ----------------------------------------------

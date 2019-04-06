@@ -8,7 +8,8 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{InnerToken, SourceError, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
+use crate::error::SourceError;
+use crate::lexer::{InnerToken, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
 use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionResult, OptionalDataExpression, Operator};
 
 
@@ -626,8 +627,9 @@ fn i2b(i: i32) -> bool {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
+    use crate::error::SourceError;
+    use crate::lexer::ExpressionToken;
     use crate::lexer::stage::mocks::expr_lex;
-    use crate::lexer::{ExpressionToken, SourceError};
     use super::{EvaluatorContext, ExpressionResult};
 
     fn const_expression<S: Into<String>>(s: S) -> ExpressionResult {

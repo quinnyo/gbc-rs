@@ -184,7 +184,6 @@ mod test {
     use super::EntryData;
     use crate::lexer::InnerToken;
     use crate::expression::{Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
-    use pretty_assertions::assert_eq;
 
     macro_rules! itk {
         ($start:expr, $end:expr, $parsed:expr) => {

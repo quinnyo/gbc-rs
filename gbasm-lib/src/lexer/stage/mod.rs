@@ -12,7 +12,8 @@ pub mod value;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
-use super::{LexerFile, LexerToken, SourceError};
+use crate::error::SourceError;
+use super::{LexerFile, LexerToken};
 use macros::MacroCall;
 
 

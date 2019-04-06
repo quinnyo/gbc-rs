@@ -1,11 +1,10 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
-use std::error::Error;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::{LexerFile, InnerToken};
-use super::stage::macros::MacroCall;
+use crate::lexer::{LexerFile, InnerToken};
+use crate::lexer::stage::macros::MacroCall;
 
 
 // Lexer Error Abstraction -----------------------------------------------------
@@ -160,5 +159,5 @@ impl fmt::Display for SourceError {
     }
 }
 
-impl Error for SourceError {}
+//impl Error for SourceError {}
 

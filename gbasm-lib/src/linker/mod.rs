@@ -1,6 +1,5 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
-use std::error::Error;
 
 
 // Modules --------------------------------------------------------------------
@@ -10,7 +9,8 @@ mod util;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{Lexer, SourceError, LexerToken, EntryStage, EntryToken};
+use crate::error::SourceError;
+use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
 use self::section::Section;
 
@@ -27,7 +27,7 @@ impl Linker {
         strip_debug: bool,
         optimize: bool
 
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, SourceError> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
         Ok(Self::new(lexer.tokens, strip_debug, optimize).map_err(|err| {

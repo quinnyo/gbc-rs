@@ -9,9 +9,10 @@ use gbasm_cpu::{Flag, Register};
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
 use crate::lexer::ValueStage;
+use crate::error::SourceError;
 use crate::expression::{Expression, ExpressionValue};
 use super::value::ValueToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, SourceError};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
 // Expression Specific Tokens -------------------------------------------------

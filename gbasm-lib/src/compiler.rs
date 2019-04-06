@@ -1,10 +1,11 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
-use std::error::Error;
 use std::path::PathBuf;
+
 
 // Internal Dependencies ------------------------------------------------------
 use crate::generator::Generator;
+use crate::error::SourceError;
 use crate::linker::Linker;
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 use crate::traits::FileReader;
@@ -14,17 +15,17 @@ use crate::traits::FileReader;
 pub struct Compiler;
 
 impl Compiler {
-    pub fn compile<T: FileReader>(reader: T, entry: PathBuf) -> Result<(), Box<dyn Error>> {
+    pub fn compile<T: FileReader>(reader: T, entry: PathBuf) -> Result<(), CompilerError> {
 
-        let include_lexer = Lexer::<IncludeStage>::from_file(&reader, &entry).map_err(|e| CompilerError::new("INCLUDE", e))?;
-        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilerError::new("MACRO EXPANSION", e))?;
-        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilerError::new("VALUE CONVERSION", e))?;
-        let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| CompilerError::new("EXPRESSION CONSTRUCTION", e))?;
-        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("ENTRY CONSTRUCTION", e))?;
+        let include_lexer = Lexer::<IncludeStage>::from_file(&reader, &entry).map_err(|e| CompilerError::new("file inclusion", e))?;
+        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilerError::new("macro expansion", e))?;
+        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilerError::new("value construction", e))?;
+        let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| CompilerError::new("expression construction", e))?;
+        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("entry construction", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
         // TODO report sections and their entry counts
-        let linker = Linker::from_lexer(entry_lexer, true, true).map_err(|e| CompilerError::new("LINKER", e))?;
+        let linker = Linker::from_lexer(entry_lexer, true, true).map_err(|e| CompilerError::new("section linking", e))?;
 
         let _generator = Generator::from_linker(linker);
 
@@ -37,11 +38,11 @@ impl Compiler {
 #[derive(Debug)]
 pub struct CompilerError {
     stage: String,
-    source: Box<Error>
+    source: SourceError
 }
 
 impl CompilerError {
-    fn new(stage: &str, source: Box<Error>) -> Self {
+    fn new(stage: &str, source: SourceError) -> Self {
         Self {
             stage: stage.to_string(),
             source
@@ -52,9 +53,8 @@ impl CompilerError {
 
 impl fmt::Display for CompilerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // TODO add "During file inclusion phase" / "During macro expansion phase" to message
         write!(f, "CompilerError: {}", self.source)
     }
 }
-
-impl Error for CompilerError {}
 

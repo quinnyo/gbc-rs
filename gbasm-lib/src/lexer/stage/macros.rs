@@ -9,9 +9,10 @@ use lazy_static::lazy_static;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::IncludeStage;
+use crate::error::SourceError;
 use crate::expression::ExpressionArgumenType;
 use super::include::IncludeToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, SourceError, TokenType};
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, TokenType};
 
 
 // Statics --------------------------------------------------------------------
@@ -33,7 +34,7 @@ lazy_static! {
         MacroDefinition::builtin("EXP", vec![(ExpressionArgumenType::Number, "value")]),
         MacroDefinition::builtin("SQRT", vec![(ExpressionArgumenType::Number, "value")]),
         MacroDefinition::builtin("ABS", vec![(ExpressionArgumenType::Number, "value")]),
-        MacroDefinition::builtin("RAND", vec![(ExpressionArgumenType::Number, "from"), (ExpressionArgumenType::Number, "to")]),
+        // MacroDefinition::builtin("RAND", vec![(ExpressionArgumenType::Number, "from"), (ExpressionArgumenType::Number, "to")]),
 
         // String Operations
         MacroDefinition::builtin("STRUPR", vec![(ExpressionArgumenType::String, "text")]),

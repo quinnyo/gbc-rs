@@ -4,9 +4,10 @@ use std::path::PathBuf;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
+use crate::error::SourceError;
 use super::super::LexerStage;
 use super::super::token::{TokenGenerator, TokenChar};
-use super::super::{InnerToken, SourceError, LexerFile, LexerToken, TokenType};
+use super::super::{InnerToken, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------

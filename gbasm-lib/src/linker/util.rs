@@ -4,7 +4,8 @@ use gbasm_cpu::Instruction;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{InnerToken, SourceError};
+use crate::error::SourceError;
+use crate::lexer::InnerToken;
 use crate::expression::ExpressionResult;
 
 // Statics --------------------------------------------------------------------

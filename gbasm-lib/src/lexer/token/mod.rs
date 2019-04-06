@@ -1,5 +1,5 @@
 // Internal Dependencies ------------------------------------------------------
-use super::SourceError;
+use crate::error::SourceError;
 
 
 // Modules --------------------------------------------------------------------

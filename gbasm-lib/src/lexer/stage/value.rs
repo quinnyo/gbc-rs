@@ -9,9 +9,10 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::MacroStage;
+use crate::error::SourceError;
 use crate::expression::Operator;
 use super::macros::{MacroCall, MacroToken};
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, SourceError};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
 // Value Specific Tokens ------------------------------------------------------

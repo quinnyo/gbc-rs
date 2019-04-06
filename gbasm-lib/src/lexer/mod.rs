@@ -1,5 +1,4 @@
 // STD Dependencies -----------------------------------------------------------
-use std::error::Error;
 use std::path::PathBuf;
 
 
@@ -162,11 +161,9 @@ macro_rules! lexer_token {
 
 
 // Modules --------------------------------------------------------------------
-mod error;
 mod file;
 pub mod stage;
-pub use self::error::SourceError;
-use self::file::LexerFile;
+pub use self::file::LexerFile;
 
 
 // Re-Exports --------------------------------------------------------------------
@@ -180,6 +177,7 @@ use self::stage::macros::MacroCall;
 
 
 // Internal Dependencies ------------------------------------------------------
+use crate::error::SourceError;
 use crate::traits::FileReader;
 
 
@@ -193,7 +191,7 @@ pub struct Lexer<T: LexerStage> {
 
 impl<T: LexerStage> Lexer<T> {
 
-    pub fn from_file<R: FileReader>(file_reader: &R, child_path: &PathBuf) -> Result<Self, Box<dyn Error>>{
+    pub fn from_file<R: FileReader>(file_reader: &R, child_path: &PathBuf) -> Result<Self, SourceError>{
         let mut files = Vec::new();
         let tokens = T::from_file(file_reader, child_path, &mut files).map_err(|err| {
             err.extend_with_location(&files)
@@ -206,7 +204,7 @@ impl<T: LexerStage> Lexer<T> {
         })
     }
 
-    pub fn from_lexer(lexer: Lexer<T::Input>) -> Result<Self, Box<dyn Error>> {
+    pub fn from_lexer(lexer: Lexer<T::Input>) -> Result<Self, SourceError> {
         let files = lexer.files;
         let mut data = Vec::new();
         let mut macro_calls = lexer.macro_calls;

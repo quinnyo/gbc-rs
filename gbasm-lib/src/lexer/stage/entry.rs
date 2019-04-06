@@ -8,11 +8,12 @@ use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
+use crate::error::SourceError;
 use crate::lexer::ExpressionStage;
 use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use super::expression::ExpressionToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken, SourceError};
+use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
 // Entry Specific Tokens ------------------------------------------------------
@@ -1361,7 +1362,6 @@ mod test {
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage};
     use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
     use super::super::mocks::{expr_lex, expr_lex_binary};
-    use pretty_assertions::assert_eq;
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
         Lexer::<EntryStage>::from_lexer(expr_lex(s)).expect("EntryStage failed")
