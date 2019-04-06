@@ -92,6 +92,7 @@ lazy_static! {
     };
 }
 
+// Section Abstraction --------------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
 pub struct Section {
     pub id: usize,
@@ -106,7 +107,7 @@ pub struct Section {
     pub bank: usize,
 
     pub entries: Vec<SectionEntry>,
-    bytes_in_use: usize
+    pub bytes_in_use: usize
 }
 
 impl fmt::Display for Section {
@@ -198,12 +199,11 @@ impl Section {
         }
 
         debug_assert!(start_address < end_address);
-
-        Ok(Self {
+        let mut section = Self {
             id,
-            name: name.unwrap_or_else(|| "".to_string()),
+            name: name.clone().unwrap_or_else(|| "".to_string()),
             segment,
-            inner,
+            inner: inner.clone(),
 
             start_address,
             end_address: end_address - 1,
@@ -213,7 +213,12 @@ impl Section {
 
             entries: Vec::with_capacity(256),
             bytes_in_use: 0
-        })
+        };
+        if let Some(name) = name {
+            section.add_marker(inner, name);
+        }
+
+        Ok(section)
 
     }
 
@@ -381,7 +386,7 @@ impl Section {
         Ok(())
     }
 
-    pub fn add_marker(&mut self, inner: InnerToken, name: Option<String>) {
+    pub fn add_marker(&mut self, inner: InnerToken, name: String) {
         self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Marker {
             name
         }));
@@ -614,6 +619,55 @@ impl Section {
         }).collect()
     }
 
+    pub fn usage_list(&self) -> Vec<(bool, Option<String>, usize, usize)> {
+        let mut ranges = Vec::new();
+
+        let mut next_address = self.start_address;
+        let mut current_name: Option<String> = None;
+        let mut last_name: Option<String> = None;
+        let mut current_range_bytes = 0;
+
+        for entry in &self.entries {
+
+            let mut changed = next_address != entry.offset;
+            if let EntryData::Marker { ref name } = entry.data {
+                changed = true;
+                last_name = current_name;
+                current_name = Some(name.to_string());
+            }
+
+            // Check if either name changed or a gap was detected
+            if changed {
+                if current_range_bytes > 0 {
+                    // println!("used: {} ({:?})", current_range_bytes, last_name);
+                    ranges.push((true, last_name.clone(), next_address - current_range_bytes, next_address));
+                }
+                if next_address != entry.offset {
+                    // println!("gap: {:0>4x}-{:0>4x}", next_address, entry.offset);
+                    ranges.push((false, None, next_address, entry.offset));
+                }
+                current_range_bytes = 0;
+            }
+
+            // Update current range data
+            current_range_bytes += entry.size;
+            next_address = entry.offset + entry.size;
+        }
+
+        // Check for final gap between last range and end of section
+        if next_address != self.end_address {
+            if current_range_bytes > 0 {
+                // println!("used: {} ({:?})", current_range_bytes, current_name);
+                ranges.push((true, current_name.clone(), next_address - current_range_bytes, next_address));
+            }
+            if next_address < self.end_address {
+                // println!("end gap: {:0>4x}-{:0>4x}", next_address, self.end_address + 1);
+                ranges.push((false, None, next_address, self.end_address + 1));
+            }
+        }
+        ranges
+    }
+
     fn check_rom(&self, inner: &InnerToken, msg: &str) -> Result<(), SourceError> {
         if self.is_rom {
             Ok(())
@@ -669,21 +723,24 @@ mod test {
     // Markers ----------------------------------------------------------------
     #[test]
     fn test_section_markers() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nSECTION 'B',ROM0\nSECTION 'C',ROM0\nSECTION ROM0\nSECTION WRAM0\nSECTION 'R',WRAM0")), vec![
+        assert_eq!(linker_section_entries(linker("SECTION 'A',ROM0\nSECTION 'B',ROM0\nSECTION 'C',ROM0\nSECTION ROM0\nSECTION 'R',WRAM0\nSECTION 'R2',WRAM0")), vec![
             vec![
                 (0, EntryData::Marker {
-                    name: Some("B".to_string())
+                    name: "A".to_string()
                 }),
                 (0, EntryData::Marker {
-                    name: Some("C".to_string())
+                    name: "B".to_string()
                 }),
                 (0, EntryData::Marker {
-                    name: None
+                    name: "C".to_string()
                 })
             ],
             vec![
                 (0, EntryData::Marker {
-                    name: Some("R".to_string())
+                    name: "R".to_string()
+                }),
+                (0, EntryData::Marker {
+                    name: "R2".to_string()
                 })
             ]
         ]);

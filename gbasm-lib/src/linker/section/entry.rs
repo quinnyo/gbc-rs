@@ -8,7 +8,7 @@ use crate::expression::data::{DataAlignment, DataEndianess};
 #[derive(Debug, Eq, PartialEq)]
 pub enum EntryData {
     Marker {
-        name: Option<String>
+        name: String
     },
     Label {
         id: usize,

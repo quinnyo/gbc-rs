@@ -24,10 +24,11 @@ impl Compiler {
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilerError::new("entry construction", e))?;
         println!("{} token(s) after entry construction.", entry_lexer.len());
 
-        // TODO report sections and their entry counts
         let linker = Linker::from_lexer(entry_lexer, true, true).map_err(|e| CompilerError::new("section linking", e))?;
+        // TODO report section usage and write out symbol map if required
 
         let _generator = Generator::from_linker(linker);
+        // TODO show rom warnings and write to output file if required
 
         Ok(())
     }

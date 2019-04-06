@@ -168,7 +168,7 @@ fn optimize_instructions(
                 debug_only: false
             }))
         },
-        // TODO combine adjancent b/c c/b d/e e/d h/l l/h loads into a single ld bc etc.
+        // TODO combine adjacent b/c c/b d/e e/d h/l l/h loads into a single ld bc etc.
         _ => None
     }
 }

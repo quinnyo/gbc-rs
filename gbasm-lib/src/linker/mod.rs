@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
+use std::mem;
 
 
 // Modules --------------------------------------------------------------------
@@ -13,6 +14,18 @@ use crate::error::SourceError;
 use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
 use self::section::Section;
+
+
+// Structs --------------------------------------------------------------------
+#[derive(Debug, Eq, PartialEq, Default)]
+pub struct SegmentUsage {
+    name: String,
+    bank: usize,
+    start_address: usize,
+    end_address: usize,
+    bytes_in_use: usize,
+    ranges: Vec<(bool, Option<String>, usize, usize)>
+}
 
 
 // Linker Implementation ------------------------------------------------------
@@ -86,7 +99,9 @@ impl Linker {
 
                         // Insert a marker within the section
                         if let Some(section) = sections.get_mut(section_index) {
-                            section.add_marker(inner, name);
+                            if let Some(name) = name {
+                                section.add_marker(inner, name);
+                            }
                         }
 
                     // If no section is found create a new section
@@ -134,8 +149,40 @@ impl Linker {
         symbols
     }
 
-    pub fn to_section_layout(&self) {
-        // TODO return section layout and usage information
+    pub fn to_usage_list(&self) -> Vec<SegmentUsage> {
+        let mut segments = Vec::new();
+        let mut current_segment = SegmentUsage::default();
+        for section in &self.sections {
+            if (&current_segment.name, current_segment.bank) != (&section.segment, section.bank) {
+
+                // Append existing segment
+                if !current_segment.name.is_empty() {
+                    let mut segment = mem::replace(&mut current_segment, SegmentUsage::default());
+                    segment.name = if segment.bank > 0 {
+                        format!("{}[{}]", segment.name, segment.bank)
+
+                    } else {
+                        segment.name
+                    };
+                    segments.push(segment);
+                }
+
+                // Setup next segment
+                current_segment.name = section.segment.clone();
+                current_segment.bank = section.bank;
+                current_segment.start_address = section.start_address;
+            }
+
+            current_segment.ranges.append(&mut section.usage_list());
+            current_segment.end_address = section.end_address + 1;
+            current_segment.bytes_in_use += section.bytes_in_use;
+        }
+
+        // Append last segment
+        if !current_segment.name.is_empty() {
+            segments.push(current_segment);
+        }
+        segments
     }
 
     pub fn into_rom_buffer(self) -> Vec<u8> {
@@ -246,7 +293,7 @@ impl Linker {
 #[cfg(test)]
 mod test {
 
-    use super::Linker;
+    use super::{Linker, SegmentUsage};
     use super::section::entry::EntryData;
     use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
 
@@ -493,6 +540,63 @@ mod test {
         assert_eq!(s, vec![
             (0, 0, "global".to_string()),
             (0, 256, "local".to_string()),
+        ]);
+    }
+
+    // Usage ------------------------------------------------------------------
+    #[test]
+    fn test_usage() {
+        let u = linker("SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'Vars',WRAM0\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128").to_usage_list();
+        assert_eq!(u, vec![
+            SegmentUsage {
+                name: "ROM0".to_string(),
+                bank: 0,
+                start_address: 0,
+                end_address: 16384,
+                bytes_in_use: 369,
+                ranges: vec![
+                    (true, Some("Data".to_string()), 0, 288),
+                    (true, Some("Data1".to_string()), 288, 300),
+                    (true, Some("Data2".to_string()), 300, 364),
+                    (false, None, 364, 512),
+                    (true, Some("Extra".to_string()), 512, 517),
+                    (false, None, 517, 16384)
+                ]
+            },
+            SegmentUsage {
+                name: "ROMX[1]".to_string(),
+                bank: 1,
+                start_address: 16384,
+                end_address: 32768,
+                bytes_in_use: 160,
+                ranges: vec![
+                    (true, None, 16384, 16512),
+                    (true, Some("X".to_string()), 16512, 16544),
+                    (false, None, 16544, 32768)
+                ]
+            },
+            SegmentUsage {
+                name: "WRAM0".to_string(),
+                bank: 0,
+                start_address: 49152,
+                end_address: 53248,
+                bytes_in_use: 513,
+                ranges: vec![
+                    (true, Some("Vars".to_string()), 49152, 49153),
+                    (true, Some("Buffer".to_string()), 49153, 49665),
+                    (false, None, 49665, 53248)
+                ]
+            },
+            SegmentUsage {
+                name: "HRAM".to_string(),
+                bank: 0,
+                start_address: 65408,
+                end_address: 65536,
+                bytes_in_use: 128,
+                ranges: vec![
+                    (true, Some("Vars".to_string()), 65408, 65536)
+                ]
+            }
         ]);
     }
 
