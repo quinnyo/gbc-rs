@@ -52,7 +52,7 @@ pub mod mocks {
     use std::io::{Error as IOError, ErrorKind};
 
     // Internal Dependencies --------------------------------------------------
-    use crate::traits::{FileReader, FileError};
+    use crate::traits::{FileReader, FileWriter, FileError};
     use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 
     #[derive(Default)]
@@ -66,8 +66,17 @@ pub mod mocks {
         pub fn add_file<S: Into<String>>(&mut self, path: S, content: S) {
             self.files.insert(PathBuf::from(path.into()), content.into());
         }
+
         pub fn add_binary_file<S: Into<String>>(&mut self, path: S, bytes: Vec<u8>) {
             self.binary_files.insert(PathBuf::from(path.into()), bytes);
+        }
+
+        pub fn get_file<S: Into<String>>(&mut self, path: S) -> Option<String> {
+            self.files.remove(&PathBuf::from(path.into()))
+        }
+
+        pub fn get_binary_file<S: Into<String>>(&mut self, path: S) -> Option<Vec<u8>> {
+            self.binary_files.remove(&PathBuf::from(path.into()))
         }
     }
 
@@ -95,6 +104,18 @@ pub mod mocks {
             Ok((path, contents))
         }
 
+    }
+
+    impl FileWriter for MockFileReader {
+        fn write_file(&mut self, path: &PathBuf, data: String) -> Result<(), FileError> {
+            self.files.insert(path.clone(), data);
+            Ok(())
+        }
+
+        fn write_binary_file(&mut self, path: &PathBuf, data: Vec<u8>) -> Result<(), FileError> {
+            self.binary_files.insert(path.clone(), data);
+            Ok(())
+        }
     }
 
     pub fn include_lex<S: Into<String>>(s: S) -> Lexer<IncludeStage> {

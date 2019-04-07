@@ -5,11 +5,11 @@ use std::time::Instant;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::generator::Generator;
+use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
 use crate::linker::{Linker, SegmentUsage};
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
-use crate::traits::FileReader;
+use crate::traits::{FileReader, FileWriter};
 
 
 // Compiler Pipeline Implementation -------------------------------------------
@@ -18,8 +18,9 @@ pub struct Compiler {
     strip_debug_code: bool,
     optimize_instructions: bool,
     print_segment_map: bool,
+    print_rom_info: bool,
     generate_symbols: Option<PathBuf>,
-    generata_rom: Option<PathBuf>,
+    generate_rom: Option<PathBuf>,
     output: Vec<String>
 }
 
@@ -27,11 +28,12 @@ impl Compiler {
     pub fn new() -> Self {
         Self {
             silent: false,
-            strip_debug_code: true,
-            optimize_instructions: true,
+            strip_debug_code: false,
+            optimize_instructions: false,
             print_segment_map: false,
+            print_rom_info: false,
             generate_symbols: None,
-            generata_rom: None,
+            generate_rom: None,
             output: Vec::new()
         }
     }
@@ -44,21 +46,40 @@ impl Compiler {
         self.print_segment_map = true;
     }
 
-    pub fn compile<T: FileReader>(&mut self, reader: T, entry: PathBuf) -> Result<String, (String, CompilerError)> {
+    pub fn set_print_rom_info(&mut self) {
+        self.print_rom_info = true;
+    }
+
+    pub fn set_generate_rom(&mut self, path: PathBuf) {
+        self.generate_rom = Some(path);
+    }
+
+    pub fn set_generate_symbols(&mut self, path: PathBuf) {
+        self.generate_symbols = Some(path);
+    }
+
+    pub fn set_strip_debug_code(&mut self) {
+        self.strip_debug_code = true;
+    }
+
+    pub fn set_optimize_instructions(&mut self) {
+        self.optimize_instructions = true;
+    }
+
+    pub fn compile<T: FileReader + FileWriter>(&mut self, files: &mut T, entry: PathBuf) -> Result<String, (String, CompilerError)> {
         self.log(format!("Compiling \"{}\"...", entry.display()));
-        let entry_lexer = self.parse(reader, entry)?;
-        let linker = self.link(entry_lexer)?;
-        self.generate(linker)?;
+        let entry_lexer = self.parse(files, entry)?;
+        let linker = self.link(files, entry_lexer)?;
+        self.generate(files, linker)?;
         Ok(self.output.join("\n"))
     }
 }
 
 impl Compiler {
 
-    // TODO FileWriter
-    fn parse<T: FileReader>(&mut self, reader: T, entry: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilerError)> {
+    fn parse<T: FileReader>(&mut self, reader: &T, entry: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilerError)> {
         let start = Instant::now();
-        let include_lexer = Lexer::<IncludeStage>::from_file(&reader, &entry).map_err(|e| self.error("file inclusion", e))?;
+        let include_lexer = Lexer::<IncludeStage>::from_file(reader, &entry).map_err(|e| self.error("file inclusion", e))?;
         let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| self.error("macro expansion", e))?;
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| self.error("value construction", e))?;
         let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| self.error("expression construction", e))?;
@@ -67,7 +88,7 @@ impl Compiler {
         Ok(entry_lexer)
     }
 
-    fn link(&mut self, entry_lexer: Lexer<EntryStage>) -> Result<Linker, (String, CompilerError)> {
+    fn link<T: FileWriter>(&mut self, writer: &mut T, entry_lexer: Lexer<EntryStage>) -> Result<Linker, (String, CompilerError)> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
             entry_lexer,
@@ -83,17 +104,25 @@ impl Compiler {
         }
 
         // Generate symbol file for BGB debugger
-        if let Some(_output_file) = self.generate_symbols.take() {
-            // TODO write to file
-            let _symbols = linker.to_symbol_list();
+        if let Some(output_file) = self.generate_symbols.take() {
+            let symbols = linker.to_symbol_list().into_iter().map(|(bank, address, name)| {
+                format!("{:0>2}:{:0>4x} {}", bank, address, name)
+
+            }).collect::<Vec<String>>().join("\n");
+            writer.write_file(&output_file, symbols).map_err(|err| {
+                (self.output.join("\n"), CompilerError::from_string(
+                    format!("Failed to write symbols to file \"{}\"", err.path.display())
+                ))
+            })?;
         }
         Ok(linker)
     }
 
-    fn generate(&mut self, linker: Linker) -> Result<(), (String, CompilerError)> {
+    fn generate<T: FileWriter>(&mut self, writer: &mut T, linker: Linker) -> Result<(), (String, CompilerError)> {
         let start = Instant::now();
-        let generator = Generator::from_linker(linker);
+        let mut generator = Generator::from_linker(linker);
 
+        // Validate ROM
         match generator.validate_rom() {
             Ok(_warnings) => {
                 // TODO push warnings into output
@@ -101,13 +130,32 @@ impl Compiler {
             Err(err) => return Err((self.output.join("\n"), CompilerError::from_string(err)))
         }
 
-        // TODO print ROM info
+        // Apply checksum etc.
+        generator.finalize_rom();
 
-        if let Some(_output_file) = self.generata_rom.take() {
-            // TODO write buffer to file
+        if !self.silent && self.print_rom_info {
+            self.print_rom_info(generator.rom_info());
+        }
+
+        if let Some(output_file) = self.generate_rom.take() {
+            writer.write_binary_file(&output_file, generator.buffer).map_err(|err| {
+                (self.output.join("\n"), CompilerError::from_string(
+                    format!("Failed to write ROM to file \"{}\"", err.path.display())
+                ))
+            })?;
         }
         self.log(format!("ROM generated in {}ms.", start.elapsed().as_millis()));
         Ok(())
+    }
+
+    fn print_rom_info(&mut self, _info: ROMInfo) {
+        // println!("{:?}", info);
+        // TODO print rom info
+        // [gbasm] Title: SPRITE
+        // [gbasm] Mapper: MBC1
+        // [gbasm] ROM: 32768 bytes ( standard ROM only, 32768 bytes )
+        // [gbasm] RAM: 10240 bytes ( internal 8192 bytes, 2048 bytes in 1 bank(s) )
+        // [gbasm] BATTERY: None
     }
 
     fn print_segment_usage(&mut self, segments: Vec<SegmentUsage>) {
@@ -186,11 +234,11 @@ impl CompilerError {
         }
     }
 
-    fn from_string(message: String) -> Self {
+    fn from_string<S: Into<String>>(message: S) -> Self {
         Self {
             stage: "rom generation".to_string(),
             source: None,
-            message: Some(message)
+            message: Some(message.into())
         }
     }
 
@@ -222,16 +270,27 @@ mod test {
     fn compiler<S: Into<String>>(mut compiler: Compiler, s: S) -> String {
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
-        let re = Regex::new(r"([0-9+]ms)").unwrap();
-        let output = compiler.compile(reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
+        let re = Regex::new(r"([0-9]+)ms").unwrap();
+        let output = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
         re.replace_all(output.as_str(), "XXms").to_string()
+    }
+
+    fn compiler_writer<S: Into<String>>(mut compiler: Compiler, s: S) -> MockFileReader {
+        let mut reader = MockFileReader::default();
+        reader.add_file("main.gb.s", s.into().as_str());
+        let re = Regex::new(r"([0-9]+)ms").unwrap();
+        compiler.set_silent();
+        compiler.set_generate_rom(PathBuf::from("rom.gb"));
+        let output = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
+        re.replace_all(output.as_str(), "XXms").to_string();
+        reader
     }
 
     fn compiler_error<S: Into<String>>(mut compiler: Compiler, s: S) -> (String, String) {
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
-        let re = Regex::new(r"([0-9+]ms)").unwrap();
-        let err = compiler.compile(reader, PathBuf::from("main.gb.s")).err().expect("Expected a CompilerError");
+        let re = Regex::new(r"([0-9]+)ms").unwrap();
+        let err = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).err().expect("Expected a CompilerError");
         (re.replace_all(err.0.as_str(), "XXms").to_string(), err.1.to_string())
     }
 
@@ -292,6 +351,52 @@ Segment Usage Report:
 
 ROM generated in XXms."#
         );
+    }
+
+    // Symbol Map -------------------------------------------------------------
+    #[test]
+    fn test_symbol_map() {
+        let mut c = Compiler::new();
+        c.set_generate_symbols(PathBuf::from("rom.sym"));
+        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
+        let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
+        assert_eq!(file, "00:0150 global\n00:0151 global.local");
+    }
+
+    // Debug Stripping --------------------------------------------------------
+    #[test]
+    fn test_no_debug_strip() {
+        let c = Compiler::new();
+        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nbrk");
+        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        assert_eq!(file[336..340].to_vec(), vec![64, 0, 0, 0])
+    }
+
+    #[test]
+    fn test_debug_strip() {
+        let mut c = Compiler::new();
+        c.set_strip_debug_code();
+        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nbrk");
+        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        assert_eq!(file[336..340].to_vec(), vec![0, 0, 0, 0])
+    }
+
+    // Optimizations ----------------------------------------------------------
+    #[test]
+    fn test_no_optimize_instructions() {
+        let c = Compiler::new();
+        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nld a,[$ff41]");
+        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        assert_eq!(file[336..340].to_vec(), vec![250, 65, 255, 0])
+    }
+
+    #[test]
+    fn test_optimize_instructions() {
+        let mut c = Compiler::new();
+        c.set_optimize_instructions();
+        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nld a,[$ff41]");
+        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        assert_eq!(file[336..340].to_vec(), vec![240, 65, 0, 0])
     }
 
     // Errors -----------------------------------------------------------------

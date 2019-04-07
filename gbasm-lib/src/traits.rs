@@ -1,6 +1,5 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
-use std::error::Error;
 use std::path::PathBuf;
 use std::io::Error as IOError;
 
@@ -17,8 +16,6 @@ impl fmt::Display for FileError {
         write!(f, "FileError: {}", self.path.display())
     }
 }
-
-impl Error for FileError {}
 
 pub trait FileReader {
 
@@ -42,5 +39,10 @@ pub trait FileReader {
         full_path
     }
 
+}
+
+pub trait FileWriter {
+    fn write_file(&mut self, path: &PathBuf, data: String) -> Result<(), FileError>;
+    fn write_binary_file(&mut self, path: &PathBuf, data: Vec<u8>) -> Result<(), FileError>;
 }
 

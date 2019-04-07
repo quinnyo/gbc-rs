@@ -318,7 +318,8 @@ impl ExpressionParser {
                     Expression::Value(ExpressionValue::LocalLabelAddress(inner, id)),
                 ),
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
-                    // TODO handle TokenGroups and forward tokens to EntryStage so they
+                    // TODO handle TokenGroups and forward tokens to EntryStage so they can be used
+                    // in macro calls
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
                         args.push(ExpressionStage::parse_expression_argument(tokens, expression_id)?);
