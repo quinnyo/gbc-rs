@@ -203,7 +203,7 @@ impl Generator {
     }
 
     pub fn validate_rom(&self) -> Result<Vec<String>, String> {
-        let info = self.rom_info();
+        let _info = self.rom_info();
         // TODO validate logo
         // TODO validate cart type
         // TODO check if current cart_type supports configured rom size

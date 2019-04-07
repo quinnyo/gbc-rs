@@ -132,19 +132,21 @@ impl Compiler {
 
         // Apply checksum etc.
         generator.finalize_rom();
+        self.log(format!("ROM validated in {}ms.", start.elapsed().as_millis()));
 
         if !self.silent && self.print_rom_info {
             self.print_rom_info(generator.rom_info());
         }
 
         if let Some(output_file) = self.generate_rom.take() {
+            let start = Instant::now();
             writer.write_binary_file(&output_file, generator.buffer).map_err(|err| {
                 (self.output.join("\n"), CompilerError::from_string(
                     format!("Failed to write ROM to file \"{}\"", err.path.display())
                 ))
             })?;
+            self.log(format!("ROM written in {}ms.", start.elapsed().as_millis()));
         }
-        self.log(format!("ROM generated in {}ms.", start.elapsed().as_millis()));
         Ok(())
     }
 
@@ -305,7 +307,7 @@ mod test {
     #[test]
     fn test_empty_input() {
         let c = Compiler::new();
-        assert_eq!(compiler(c, ""), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM generated in XXms.");
+        assert_eq!(compiler(c, ""), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM validated in XXms.");
     }
 
     #[test]
@@ -349,7 +351,7 @@ Segment Usage Report:
 
     $ff80..=$ffff ######## (  128 bytes) (Vars)
 
-ROM generated in XXms."#
+ROM validated in XXms."#
         );
     }
 

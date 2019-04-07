@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use std::io::{Error as IOError, Read, Write};
 
 
+// External Dependencies ------------------------------------------------------
+use clap::{Arg, App};
+
+
 // Internal Dependencies ------------------------------------------------------
 use gbasm_lib::compiler::Compiler;
 use gbasm_lib::traits::{FileError, FileReader, FileWriter};
@@ -12,8 +16,58 @@ use gbasm_lib::traits::{FileError, FileReader, FileWriter};
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
-    // TODO clap usage if no file is specified (should be automatic if file is a required argument)
-    for file in env::args().skip(1) {
+
+    let matches = App::new("gbasm")
+        .version("0.1")
+        .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
+        .about("GameBoy Assembler")
+        .arg(Arg::with_name("SOURCE_FILE")
+            .help("Sets the input source file to use")
+            .required(true)
+            .index(1)
+        )
+        .arg(Arg::with_name("ROM_FILE")
+            .long("output-rom")
+            .short("o")
+            .value_name("FILE")
+            .takes_value(true)
+            .help("ROM file to generate")
+        )
+        .arg(Arg::with_name("MAP_FILE")
+            .long("symbol-map")
+            .short("m")
+            .value_name("FILE")
+            .takes_value(true)
+            .help("Output symbol mapping for BGB debugger")
+        )
+        .arg(Arg::with_name("info")
+            .long("info")
+            .short("i")
+            .help("Display ROM info")
+        )
+        .arg(Arg::with_name("segments")
+            .long("segments")
+            .short("S")
+            .help("Display segments usage")
+        )
+        .arg(Arg::with_name("silent")
+            .long("silent")
+            .short("s")
+            .help("Surpresses all output")
+        )
+        .arg(Arg::with_name("optimize")
+            .long("optimize")
+            .short("O")
+            .help("Apply instruction optimizations")
+        )
+        .arg(Arg::with_name("debug")
+            .long("debug")
+            .short("D")
+            .help("Enable debug instructions for BGB debugger")
+        )
+        .get_matches();
+
+    if let Some(file) = matches.value_of("SOURCE_FILE") {
 
         // Create a project reader with the directory of the supplied argument file as the project
         // base so includes can be relative to the base directory by prefixing them with "/"
@@ -23,23 +77,29 @@ fn main() {
 
         let mut compiler = Compiler::new();
 
-        // Default
-        compiler.set_print_segment_map();
+        if matches.occurrences_of("segments") > 0 {
+            compiler.set_print_segment_map();
+        }
 
-        // Default
-        compiler.set_strip_debug_code();
+        if matches.occurrences_of("debug") == 0 {
+            compiler.set_strip_debug_code();
+        }
 
-        // Default
-        compiler.set_optimize_instructions();
+        if matches.occurrences_of("optimize") > 0 {
+            compiler.set_optimize_instructions();
+        }
 
-        // Default
-        compiler.set_print_rom_info();
+        if matches.occurrences_of("info") > 0 {
+            compiler.set_print_rom_info();
+        }
 
-        // Required
-        compiler.set_generate_rom(PathBuf::from("foo.gbc"));
+        if let Some(rom) = matches.value_of("ROM_FILE") {
+            compiler.set_generate_rom(PathBuf::from(rom));
+        }
 
-        // Optional
-        compiler.set_generate_symbols(PathBuf::from("foo.sym"));
+        if let Some(map) = matches.value_of("MAP_FILE") {
+            compiler.set_generate_symbols(PathBuf::from(map));
+        }
 
         match compiler.compile(&mut reader, main_file) {
             Ok(output) => println!("{}", output),
