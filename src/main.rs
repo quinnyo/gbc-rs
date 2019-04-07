@@ -12,6 +12,7 @@ use gbasm_lib::traits::{FileError, FileReader};
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
+    // TODO clap usage if no file is specified (should be automatic if file is a required argument)
     for file in env::args().skip(1) {
 
         // Create a project reader with the directory of the supplied argument file as the project
@@ -20,8 +21,13 @@ fn main() {
         let reader = ProjectReader::new(main.clone());
         let main_file = PathBuf::from(main.file_name().unwrap());
 
-        if let Err(msg) = Compiler::compile(reader, main_file) {
-            eprintln!("{}", msg)
+        let mut compiler = Compiler::new();
+        match compiler.compile(reader, main_file) {
+            Ok(output) => println!("{}", output),
+            Err((output, err)) => {
+                println!("{}", output);
+                eprintln!("{}", err);
+            }
         }
 
     }

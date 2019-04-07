@@ -171,8 +171,9 @@ impl Generator {
         }
     }
 
-    pub fn validate_rom(&self) {
-        // TODO return a list of warnings / errors
+    pub fn validate_rom(&self) -> Result<Vec<String>, String> {
+        // TODO return a list of warnings or an error
+        Ok(Vec::new())
     }
 
     #[allow(unused)]
