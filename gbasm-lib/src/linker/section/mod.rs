@@ -1421,10 +1421,10 @@ mod test {
         ]);
         assert_eq!(linker_section_entries(linker("SECTION ROM0\nvsync")), vec![
             vec![
-                (3, EntryData::Instruction {
-                    op_code: 250,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(65345)))),
-                    bytes: vec![250, 65, 255],
+                (2, EntryData::Instruction {
+                    op_code: 240,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(65)))),
+                    bytes: vec![240, 65],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
@@ -1435,8 +1435,8 @@ mod test {
                 }),
                 (2, EntryData::Instruction {
                     op_code: 32,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -4)))),
-                    bytes: vec![32, 252],
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -6)))),
+                    bytes: vec![32, 250],
                     debug_only: false
                 })
             ]

@@ -541,12 +541,12 @@ impl EntryStage {
             // VBlank Wait Shorthand
             "vsync" => {
                 vec![
-                    // ld      a,[$FF41]
-                    EntryToken::InstructionWithArg(inner.clone(), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0xFF41)))),
+                    // ldh     a,[$FF41]
+                    EntryToken::InstructionWithArg(inner.clone(), 0xF0, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x41)))),
                     // and     %00000010
                     EntryToken::InstructionWithArg(inner.clone(), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
                     // jr      nz,@-4
-                    EntryToken::InstructionWithArg(inner.clone(), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(inner, -4)))),
+                    EntryToken::InstructionWithArg(inner.clone(), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(inner, -6)))),
                 ]
             },
             _ => unreachable!()
@@ -2553,9 +2553,9 @@ mod test {
     #[test]
     fn test_meta_instruction_vsync() {
         assert_eq!(tfe("vsync"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0xFF41)))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xF0, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x41)))),
             EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
-            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -4)))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -6)))),
         ]);
     }
 
