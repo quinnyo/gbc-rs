@@ -110,7 +110,6 @@ impl IncludeStage {
             file.index,
             child_tokens,
             &mut state,
-
         )?)
 
     }
@@ -379,6 +378,7 @@ impl IncludeStage {
             // Handle escaped characters
             } else if p == '\\' {
                 match c {
+                    '0' => TokenChar::Valid('\0'),
                     'n' => TokenChar::Valid('\n'),
                     'r' => TokenChar::Valid('\r'),
                     't' => TokenChar::Valid('\t'),
@@ -719,6 +719,9 @@ mod test {
         ]);
         assert_eq!(include_lexer("\"'\""), vec![
             tk!(StringLiteral, 0, 3, "'")
+        ]);
+        assert_eq!(include_lexer("'\0\t\n\r'"), vec![
+            tk!(StringLiteral, 0, 6, "\0\t\n\r")
         ]);
     }
 
