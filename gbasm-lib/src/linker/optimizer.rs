@@ -27,7 +27,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
         if let Some((op_code, offset, expression, bytes)) = get_instruction(&entries, i) {
             let b = get_instruction(&entries, i + 1);
             let c = get_instruction(&entries, i + 2);
-            if let Some((remove_count, EntryData::Instruction { op_code, expression, bytes, .. })) = optimize_instructions(
+            if let Some((remove_count, new_entries)) = optimize_instructions(
                 op_code,
                 offset,
                 expression,
@@ -40,15 +40,25 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                     entries.remove(i + 1);
                 }
 
-                // Modify the current instruction
-                let entry = &mut entries[i];
-                entry.size = instruction::size(op_code);
-                entry.data = EntryData::Instruction {
-                    op_code,
-                    expression,
-                    bytes,
-                    debug_only: false
-                };
+                let old_entry = entries.remove(i);
+
+                // Insert new instructions
+                for e in new_entries.into_iter().rev() {
+                    if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
+                        entries.insert(i, SectionEntry::new_with_size(
+                            old_entry.section_id,
+                            old_entry.inner.clone(),
+                            instruction::size(op_code),
+                            EntryData::Instruction {
+                                op_code,
+                                expression,
+                                bytes,
+                                debug_only: false
+                            }
+                        ))
+                    }
+                }
+
                 any_optimizations = true;
             }
         }
@@ -65,50 +75,50 @@ fn optimize_instructions(
     b: Option<(usize, i32, &OptionalDataExpression, &[u8])>,
     c: Option<(usize, i32, &OptionalDataExpression, &[u8])>
 
-) -> Option<(usize, EntryData)> {
+) -> Option<(usize, Vec<EntryData>)> {
     match (op_code, b, c) {
         // ld a,0 -> xor a
         //
         // -> save 1 byte and 3 T-states
         (0x3E, _, _) if bytes[1] == 0x00 => {
-            Some((0, EntryData::Instruction {
+            Some((0, vec![EntryData::Instruction {
                 op_code: 175,
                 expression: None,
                 bytes: instruction::bytes(175),
                 debug_only: false
-            }))
+            }]))
         },
 
         // cp 0 -> or a
         //
         // save 1 byte and 3 T-states
         (0xFE , _, _) if bytes[1] == 0x00 => {
-            Some((0, EntryData::Instruction {
+            Some((0, vec![EntryData::Instruction {
                 op_code: 183,
                 expression: None,
                 bytes: instruction::bytes(183),
                 debug_only: false
-            }))
+            }]))
         },
 
         // ld a,[someLabel] -> ldh a,$XX
         (0xFA, _, _) if bytes[2] == 0xFF => {
-            Some((0, EntryData::Instruction {
+            Some((0, vec![EntryData::Instruction {
                 op_code: 0xF0,
                 expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(i32::from(bytes[1]))))),
                 bytes: instruction::bytes(0xF0),
                 debug_only: false
-            }))
+            }]))
         },
 
         // ld [someLabel],a -> ldh $XX,a
         (0xEA, _, _) if bytes[2] == 0xFF => {
-            Some((0, EntryData::Instruction {
+            Some((0, vec![EntryData::Instruction {
                 op_code: 0xE0,
                 expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(i32::from(bytes[1]))))),
                 bytes: instruction::bytes(0xE0),
                 debug_only: false
-            }))
+            }]))
         },
 
         // jp c,label  -> jr c,label
@@ -133,21 +143,21 @@ fn optimize_instructions(
             if relative > -128 && relative < 127 {
                 // Without flags
                 if op_code == 0xC3 {
-                    Some((0, EntryData::Instruction {
+                    Some((0, vec![EntryData::Instruction {
                         op_code: 0x18,
                         expression: expression.clone(),
                         bytes: instruction::bytes(0x18),
                         debug_only: false
-                    }))
+                    }]))
 
                 // With flags
                 } else {
-                    Some((0, EntryData::Instruction {
+                    Some((0, vec![EntryData::Instruction {
                         op_code: op_code - 0xA2,
                         expression: expression.clone(),
                         bytes: instruction::bytes(op_code - 0xA2),
                         debug_only: false
-                    }))
+                    }]))
                 }
             } else {
                 None
@@ -161,14 +171,90 @@ fn optimize_instructions(
         //
         // save 1 byte and 17 T-states
         (0xCD, Some((0xC9, _, _, _)), _) => {
-            Some((1, EntryData::Instruction {
+            Some((1, vec![EntryData::Instruction {
                 op_code: 0xC3,
                 expression: expression.clone(),
                 bytes: instruction::bytes(0xC3),
                 debug_only: false
-            }))
+            }]))
         },
+        /*
         // TODO combine adjacent b/c c/b d/e e/d h/l l/h loads into a single ld bc etc.
+        // ld b,$XX
+        // ld c,$XX
+        // ->
+        // ld bc,$XXXX
+        //
+        // -> save 1 byte and 4 T-states
+        (0x06, Some((0x0E, _, _, _)), _) => {
+            // TODO 0x01
+            println!("opti bc");
+            None
+        },
+
+        // ld d,$XX
+        // ld e,$XX
+        // ->
+        // ld de,$XXXX
+        //
+        // -> save 1 byte and 4 T-states
+        (0x16, Some((0x1E, _, _, _)), _) => {
+            // TODO 0x11
+            println!("opti de");
+            None
+        },
+
+        // ld h,$XX
+        // ld l,$XX
+        // ->
+        // ld hl,$XXXX
+        //
+        // -> save 1 byte and 4 T-states
+        (0x26, Some((0x2E, _, _, _)), _) => {
+            // TODO 0x21
+            println!("opti hl");
+            None
+        },
+        */
+
+        // srl a
+        // srl a
+        // srl a
+        // ->
+        // rrca
+        // rrca
+        // rrca
+        // and %00011111
+        //
+        // save 1 byte and 5 T-states
+        (319, Some((319, _, _, _)), Some((319, _, _, _))) => {
+            Some((2, vec![
+                EntryData::Instruction {
+                    op_code: 0x0F,
+                    expression: None,
+                    bytes: instruction::bytes(0x0F),
+                    debug_only: false
+                },
+                EntryData::Instruction {
+                    op_code: 0x0F,
+                    expression: None,
+                    bytes: instruction::bytes(0x0F),
+                    debug_only: false
+                },
+                EntryData::Instruction {
+                    op_code: 0x0F,
+                    expression: None,
+                    bytes: instruction::bytes(0x0F),
+                    debug_only: false
+                },
+                EntryData::Instruction {
+                    op_code: 0xE6,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x1F)))),
+                    bytes: instruction::bytes(0xE6),
+                    debug_only: false
+                }
+            ]))
+        },
         _ => None
     }
 }
@@ -194,7 +280,7 @@ mod test {
 
     // Optimizations ----------------------------------------------------------
     #[test]
-    fn test_section_no_optimization_across_labels() {
+    fn test_no_optimization_across_labels() {
         let l = linker_optimize("SECTION ROM0\ncall global\nfoo:\nret\nld a,a\nSECTION ROM0[130]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -234,7 +320,7 @@ mod test {
 
 
     #[test]
-    fn test_section_optimize_lda0_to_xora() {
+    fn test_optimize_lda0_to_xora() {
         let l = linker_optimize("SECTION ROM0\nld a,0\nld a,a");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -255,7 +341,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_optimize_cp0_to_ora() {
+    fn test_optimize_cp0_to_ora() {
         let l = linker_optimize("SECTION ROM0\ncp 0\nld a,a");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -276,7 +362,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_optimize_ldaffxx_to_ldhaxx() {
+    fn test_optimize_ldaffxx_to_ldhaxx() {
         let l = linker_optimize("SECTION ROM0\nld a,[$FF05]\nld a,a");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -297,7 +383,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_optimize_ldffxxa_to_ldhxxa() {
+    fn test_optimize_ldffxxa_to_ldhxxa() {
         let l = linker_optimize("SECTION ROM0\nld [$FF05],a\nld a,a");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -318,7 +404,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_optimize_callret_to_jp() {
+    fn test_optimize_callret_to_jp() {
         let l = linker_optimize("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[130]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -346,7 +432,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_optimize_callret_to_jp_to_jr() {
+    fn test_optimize_callret_to_jp_to_jr() {
         let l = linker_optimize("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[129]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -374,7 +460,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_optimize_jp_to_jr() {
+    fn test_optimize_jp_to_jr() {
         let l = linker_optimize("SECTION ROM0\njp global\nSECTION ROM0[129]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -487,7 +573,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_no_optimization_jp_when_followed_by_nop() {
+    fn test_no_optimization_jp_when_followed_by_nop() {
         let l = linker_optimize("SECTION ROM0\njp global\nnop\nSECTION ROM0[129]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -515,7 +601,7 @@ mod test {
     }
 
     #[test]
-    fn test_section_no_optimization_jp_when_out_of_range() {
+    fn test_no_optimization_jp_when_out_of_range() {
         let l = linker_optimize("SECTION ROM0\njp global\nSECTION ROM0[130]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -548,6 +634,45 @@ mod test {
                     op_code: 195,
                     expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
                     bytes: vec![195, 0, 0],
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_optimize_srla() {
+        let l = linker_optimize("SECTION ROM0\nsrl a\nsrl a\nsrl a\nsrl a");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 15,
+                    expression: None,
+                    bytes: vec![15],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 15,
+                    expression: None,
+                    bytes: vec![15],
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 15,
+                    expression: None,
+                    bytes: vec![15],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 230,
+                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x1F)))),
+                    bytes: vec![230, 31],
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 319,
+                    expression: None,
+                    bytes: vec![203, 63],
                     debug_only: false
                 })
             ]
