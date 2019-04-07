@@ -19,12 +19,12 @@ use self::section::Section;
 // Structs --------------------------------------------------------------------
 #[derive(Debug, Eq, PartialEq, Default)]
 pub struct SegmentUsage {
-    name: String,
+    pub name: String,
     bank: usize,
-    start_address: usize,
-    end_address: usize,
-    bytes_in_use: usize,
-    ranges: Vec<(bool, Option<String>, usize, usize)>
+    pub start_address: usize,
+    pub end_address: usize,
+    pub bytes_in_use: usize,
+    pub ranges: Vec<(bool, Option<String>, usize, usize)>
 }
 
 
@@ -546,7 +546,7 @@ mod test {
     // Usage ------------------------------------------------------------------
     #[test]
     fn test_usage() {
-        let u = linker("SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'Vars',WRAM0\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128").to_usage_list();
+        let u = linker("SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'GameRam',WRAM0[$C3B0]\nSECTION 'Vars',WRAM0[$C000]\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128").to_usage_list();
         assert_eq!(u, vec![
             SegmentUsage {
                 name: "ROM0".to_string(),
@@ -584,7 +584,9 @@ mod test {
                 ranges: vec![
                     (true, Some("Vars".to_string()), 49152, 49153),
                     (true, Some("Buffer".to_string()), 49153, 49665),
-                    (false, None, 49665, 53248)
+                    (false, None, 49665, 50096),
+                    (true, Some("GameRam".to_string()), 50096, 50096),
+                    (false, None, 50096, 53248)
                 ]
             },
             SegmentUsage {

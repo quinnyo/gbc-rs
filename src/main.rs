@@ -22,6 +22,7 @@ fn main() {
         let main_file = PathBuf::from(main.file_name().unwrap());
 
         let mut compiler = Compiler::new();
+        compiler.set_print_segment_map();
         match compiler.compile(reader, main_file) {
             Ok(output) => println!("{}", output),
             Err((output, err)) => {

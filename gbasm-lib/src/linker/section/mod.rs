@@ -638,12 +638,10 @@ impl Section {
 
             // Check if either name changed or a gap was detected
             if changed {
-                if current_range_bytes > 0 {
-                    // println!("used: {} ({:?})", current_range_bytes, last_name);
+                if current_range_bytes > 0 || last_name.is_some() {
                     ranges.push((true, last_name.clone(), next_address - current_range_bytes, next_address));
                 }
                 if next_address != entry.offset {
-                    // println!("gap: {:0>4x}-{:0>4x}", next_address, entry.offset);
                     ranges.push((false, None, next_address, entry.offset));
                 }
                 current_range_bytes = 0;
@@ -655,13 +653,11 @@ impl Section {
         }
 
         // Check for final gap between last range and end of section
-        if next_address != self.end_address {
-            if current_range_bytes > 0 {
-                // println!("used: {} ({:?})", current_range_bytes, current_name);
+        if next_address != self.end_address || current_range_bytes > 0 {
+            if current_range_bytes > 0 || current_name.is_some() {
                 ranges.push((true, current_name.clone(), next_address - current_range_bytes, next_address));
             }
-            if next_address < self.end_address {
-                // println!("end gap: {:0>4x}-{:0>4x}", next_address, self.end_address + 1);
+            if next_address < self.end_address + 1{
                 ranges.push((false, None, next_address, self.end_address + 1));
             }
         }
