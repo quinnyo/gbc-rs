@@ -111,9 +111,10 @@ impl Compiler {
             }).collect::<Vec<String>>().join("\n");
             writer.write_file(&output_file, symbols).map_err(|err| {
                 (self.output.join("\n"), CompilerError::from_string(
-                    format!("Failed to write symbols to file \"{}\"", err.path.display())
+                    format!("Failed to write symbol map to file \"{}\"", err.path.display())
                 ))
             })?;
+            self.log(format!("Symbol map written to \"{}\".", output_file.display()));
         }
         Ok(linker)
     }
@@ -139,13 +140,12 @@ impl Compiler {
         }
 
         if let Some(output_file) = self.generate_rom.take() {
-            let start = Instant::now();
             writer.write_binary_file(&output_file, generator.buffer).map_err(|err| {
                 (self.output.join("\n"), CompilerError::from_string(
                     format!("Failed to write ROM to file \"{}\"", err.path.display())
                 ))
             })?;
-            self.log(format!("ROM written in {}ms.", start.elapsed().as_millis()));
+            self.log(format!("ROM written to \"{}\".", output_file.display()));
         }
         Ok(())
     }
@@ -277,15 +277,14 @@ mod test {
         re.replace_all(output.as_str(), "XXms").to_string()
     }
 
-    fn compiler_writer<S: Into<String>>(mut compiler: Compiler, s: S) -> MockFileReader {
+    fn compiler_writer<S: Into<String>>(mut compiler: Compiler, s: S) -> (String, MockFileReader) {
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
-        compiler.set_silent();
         compiler.set_generate_rom(PathBuf::from("rom.gb"));
         let output = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
-        re.replace_all(output.as_str(), "XXms").to_string();
-        reader
+        let output = re.replace_all(output.as_str(), "XXms").to_string();
+        (output, reader)
     }
 
     fn compiler_error<S: Into<String>>(mut compiler: Compiler, s: S) -> (String, String) {
@@ -360,16 +359,18 @@ ROM validated in XXms."#
     fn test_symbol_map() {
         let mut c = Compiler::new();
         c.set_generate_symbols(PathBuf::from("rom.sym"));
-        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
+        let (output, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
         assert_eq!(file, "00:0150 global\n00:0151 global.local");
+        assert_eq!(output, "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nSymbol map written to \"rom.sym\".\nROM validated in XXms.\nROM written to \"rom.gb\".");
     }
 
     // Debug Stripping --------------------------------------------------------
     #[test]
     fn test_no_debug_strip() {
-        let c = Compiler::new();
-        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nbrk");
+        let mut c = Compiler::new();
+        c.set_silent();
+        let (_, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nbrk");
         let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![64, 0, 0, 0])
     }
@@ -377,8 +378,9 @@ ROM validated in XXms."#
     #[test]
     fn test_debug_strip() {
         let mut c = Compiler::new();
+        c.set_silent();
         c.set_strip_debug_code();
-        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nbrk");
+        let (_, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nbrk");
         let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![0, 0, 0, 0])
     }
@@ -386,8 +388,9 @@ ROM validated in XXms."#
     // Optimizations ----------------------------------------------------------
     #[test]
     fn test_no_optimize_instructions() {
-        let c = Compiler::new();
-        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nld a,[$ff41]");
+        let mut c = Compiler::new();
+        c.set_silent();
+        let (_, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nld a,[$ff41]");
         let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![250, 65, 255, 0])
     }
@@ -395,8 +398,9 @@ ROM validated in XXms."#
     #[test]
     fn test_optimize_instructions() {
         let mut c = Compiler::new();
+        c.set_silent();
         c.set_optimize_instructions();
-        let mut writer = compiler_writer(c, "SECTION ROM0[$150]\nld a,[$ff41]");
+        let (_, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nld a,[$ff41]");
         let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![240, 65, 0, 0])
     }
