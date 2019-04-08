@@ -6,4 +6,5 @@ pub mod generator;
 pub mod lexer;
 pub mod linker;
 pub mod traits;
+#[cfg(test)] mod mocks;
 

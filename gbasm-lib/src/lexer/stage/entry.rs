@@ -1359,9 +1359,9 @@ impl EntryStage {
 #[cfg(test)]
 mod test {
     use crate::lexer::Lexer;
+    use crate::mocks::{expr_lex, expr_lex_binary};
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage};
     use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
-    use super::super::mocks::{expr_lex, expr_lex_binary};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
         Lexer::<EntryStage>::from_lexer(expr_lex(s)).expect("EntryStage failed")

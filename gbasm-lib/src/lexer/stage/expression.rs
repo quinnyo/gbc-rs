@@ -408,9 +408,9 @@ impl ExpressionParser {
 mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::Lexer;
+    use crate::mocks::value_lex;
     use crate::expression::{Expression, ExpressionValue, Operator};
     use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag};
-    use super::super::mocks::value_lex;
 
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
         Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")

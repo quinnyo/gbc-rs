@@ -596,8 +596,8 @@ impl ValueStage {
 mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::Lexer;
+    use crate::mocks::{macro_lex, macro_lex_child};
     use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag};
-    use super::super::mocks::{macro_lex, macro_lex_child};
 
     fn value_lexer<S: Into<String>>(s: S) -> Lexer<ValueStage> {
         Lexer::<ValueStage>::from_lexer(macro_lex(s)).expect("ValueLexer failed")

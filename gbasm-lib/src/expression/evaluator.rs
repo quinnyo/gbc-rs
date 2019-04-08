@@ -627,9 +627,9 @@ fn i2b(i: i32) -> bool {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
+    use crate::mocks::expr_lex;
     use crate::error::SourceError;
     use crate::lexer::ExpressionToken;
-    use crate::lexer::stage::mocks::expr_lex;
     use super::{EvaluatorContext, ExpressionResult};
 
     fn const_expression<S: Into<String>>(s: S) -> ExpressionResult {

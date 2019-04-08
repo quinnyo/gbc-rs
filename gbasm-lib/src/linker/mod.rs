@@ -295,7 +295,7 @@ mod test {
 
     use super::{Linker, SegmentUsage};
     use super::section::entry::EntryData;
-    use crate::lexer::stage::mocks::{entry_lex, entry_lex_binary};
+    use crate::mocks::{entry_lex, entry_lex_binary};
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
         Linker::from_lexer(entry_lex(s.into()), false, false).expect("Linker failed")

@@ -588,9 +588,9 @@ impl MacroStage {
 #[cfg(test)]
 mod test {
     use crate::lexer::Lexer;
+    use crate::mocks::include_lex;
     use crate::expression::ExpressionArgumenType;
     use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken};
-    use super::super::mocks::include_lex;
 
     fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
         Lexer::<MacroStage>::from_lexer(include_lex(s)).expect("MacroLexer failed")

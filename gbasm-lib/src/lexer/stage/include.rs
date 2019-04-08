@@ -440,8 +440,8 @@ impl IncludeStage {
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
+    use crate::mocks::{MockFileReader, include_lex};
     use crate::lexer::Lexer;
-    use crate::lexer::stage::mocks::{MockFileReader, include_lex};
     use super::{IncludeStage, IncludeToken, InnerToken};
 
     fn include_lexer<S: Into<String>>(s: S) -> Vec<IncludeToken> {

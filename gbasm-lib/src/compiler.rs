@@ -266,7 +266,7 @@ mod test {
     use regex::Regex;
     use std::path::PathBuf;
 
-    use crate::lexer::stage::mocks::MockFileReader;
+    use crate::mocks::MockFileReader;
     use super::Compiler;
 
     fn compiler<S: Into<String>>(mut compiler: Compiler, s: S) -> String {
