@@ -1,6 +1,6 @@
 # A Gameboy Assembler 
 
-gbasm is a (Rust)[https://rust-lang.org] based compiler for Gameboy z80 assembly code.
+gbasm is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
 
 ## Compatibility Notes
 
