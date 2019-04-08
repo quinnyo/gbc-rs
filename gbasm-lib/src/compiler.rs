@@ -127,6 +127,7 @@ impl Compiler {
         match generator.validate_rom() {
             Ok(_warnings) => {
                 // TODO push warnings into output
+                // "Warning Invalid ROM size in header, size does not match CartType"
             },
             Err(err) => return Err((self.output.join("\n"), CompilerError::from_string(err)))
         }

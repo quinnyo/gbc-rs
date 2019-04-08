@@ -21,31 +21,34 @@ static NINTENDO_LOGO: [u8; 48] = [
 ];
 
 lazy_static! {
-    static ref ROM_KB_SIZES: HashMap<u8, [u16; 2]> = {
+    static ref ROM_KB_SIZES: HashMap<(u8, u8), [u16; 2]> = {
         let mut sizes = HashMap::new();
-        //                    KB    Banks
-        sizes.insert(0x00, [  32,   0]);
-        sizes.insert(0x01, [  64,   4]);
-        sizes.insert(0x02, [ 128,   8]);
-        sizes.insert(0x03, [ 256,  16]);
-        sizes.insert(0x04, [ 512,  32]);
-        sizes.insert(0x05, [1024,  64]); // Only 63 banks used by MBC1
-        sizes.insert(0x06, [2048, 128]); // Only 125 banks used by MBC1
-        sizes.insert(0x07, [4096, 256]);
-        sizes.insert(0x52, [1152,  72]);
-        sizes.insert(0x53, [1280,  80]);
-        sizes.insert(0x54, [1536,  96]);
+        //                         KB    Banks
+        sizes.insert((0x00, 0), [  32,   0]);
+        sizes.insert((0x01, 0), [  64,   4]);
+        sizes.insert((0x02, 0), [ 128,   8]);
+        sizes.insert((0x03, 0), [ 256,  16]);
+        sizes.insert((0x04, 0), [ 512,  32]);
+        sizes.insert((0x05, 0), [1024,  64]);
+        sizes.insert((0x05, 1), [1008,  63]); // Only 63 banks used by MBC1
+        sizes.insert((0x06, 0), [2048, 128]);
+        sizes.insert((0x06, 1), [2000, 125]); // Only 125 banks used by MBC1
+        sizes.insert((0x07, 0), [4096, 256]);
+        sizes.insert((0x52, 0), [1152,  72]);
+        sizes.insert((0x53, 0), [1280,  80]);
+        sizes.insert((0x54, 0), [1536,  96]);
         sizes
     };
 
-    static ref RAM_KB_SIZES: HashMap<u8, [u8; 2]> = {
+    static ref RAM_KB_SIZES: HashMap<(u8, u8), [u16; 2]> = {
         let mut sizes = HashMap::new();
-        //                   KB   Banks
-        sizes.insert(0x00, [  0,  0]); // None (must always be set with MBC2 even though it has 512x4 bits RAM)
-        sizes.insert(0x01, [  2,  1]); // 1 Bank (only one quarter is used)
-        sizes.insert(0x02, [  8,  1]); // 1 Bank (Full)
-        sizes.insert(0x03, [ 32,  4]); // 4 Banks
-        sizes.insert(0x04, [128, 16]); // 16 Banks
+        //                        KB   Banks
+        sizes.insert((0x00, 0), [  0,  0]);
+        sizes.insert((0x00, 2), [  0,  0]); // None (must always be set with MBC2 even though it has 512x4 bits RAM)
+        sizes.insert((0x01, 0), [  2,  1]); // 1 Bank (only one quarter is used)
+        sizes.insert((0x02, 0), [  8,  1]); // 1 Bank (Full)
+        sizes.insert((0x03, 0), [ 32,  4]); // 4 Banks
+        sizes.insert((0x04, 0), [128, 16]); // 16 Banks
         sizes
     };
 
@@ -67,9 +70,9 @@ lazy_static! {
         types.insert(0x11, CartType::from_str("MBC3"));
         types.insert(0x12, CartType::from_str("MBC3+RAM"));
         types.insert(0x13, CartType::from_str("MBC3+RAM+BATTERY"));
-        types.insert(0x15, CartType::from_str("MBC4"));
-        types.insert(0x16, CartType::from_str("MBC4+RAM"));
-        types.insert(0x17, CartType::from_str("MBC4+RAM+BATTERY"));
+        //types.insert(0x15, CartType::from_str("MBC4"));
+        //types.insert(0x16, CartType::from_str("MBC4+RAM"));
+        //types.insert(0x17, CartType::from_str("MBC4+RAM+BATTERY"));
         types.insert(0x19, CartType::from_str("MBC5"));
         types.insert(0x1A, CartType::from_str("MBC5+RAM"));
         types.insert(0x1B, CartType::from_str("MBC5+RAM+BATTERY"));
@@ -89,8 +92,10 @@ lazy_static! {
 #[derive(Debug, Clone)]
 pub struct CartType {
     mapper: String,
-    max_ram_size: u8,
-    max_rom_size: u8,
+    max_rom_size: u16,
+    max_ram_size: u16,
+    max_rom_banks: u16,
+    max_ram_banks: u16,
     has_ram: bool,
     has_battery: bool,
     has_timer: bool,
@@ -102,25 +107,31 @@ pub struct CartType {
 impl CartType {
     fn from_str(s: &str) -> Self {
         let mapper = s.split('+').next().unwrap().to_string();
+        let rom_size_index = match mapper.as_str() {
+            "ROM"  => (0x00, 0),
+            "MBC1" => (0x06, 0),
+            "MBC2" => (0x03, 0),
+            "MBC3" => (0x06, 0),
+            //"MBC4" => (0xFF, 0), // ???
+            "MBC5" => (0x07, 0),
+            _ => (0x00, 0)
+        };
+        let ram_size_index = match mapper.as_str() {
+            "ROM" =>  (0x00, 0),
+            "MBC1" => (0x03, 0),
+            "MBC2" => (0x00, 2), // 512x4 bits RAM built into the MBC2 chip, only the lower 4 bits can be read
+            "MBC3" => (0x03, 0),
+            //"MBC4" => (0xFF, 0), // ???
+            "MBC5" => (0x04, 0),
+            _ => (0x00, 0)
+        };
+        let rom_size = ROM_KB_SIZES.get(&rom_size_index).unwrap_or(&[0, 0]);
+        let ram_size = RAM_KB_SIZES.get(&ram_size_index).unwrap_or(&[0, 0]);
         Self {
-            max_rom_size: match mapper.as_str() {
-                "ROM" =>  0x00,
-                "MBC1" => 0x06,
-                "MBC2" => 0x03,
-                "MBC3" => 0x06,
-                "MBC4" => 0xFF, // ???
-                "MBC5" => 0x07,
-                _ => 0x00
-            },
-            max_ram_size: match mapper.as_str() {
-                "ROM" =>  0x00,
-                "MBC1" => 0x03,
-                "MBC2" => 0x00, // 512x4 bits RAM built into the MBC2 chip, only the lower 4 bits can be read
-                "MBC3" => 0x03,
-                "MBC4" => 0xFF, // ???
-                "MBC5" => 0x04,
-                _ => 0x00
-            },
+            max_rom_size: rom_size[0],
+            max_ram_size: ram_size[0],
+            max_rom_banks: rom_size[1],
+            max_ram_banks: ram_size[1],
             mapper,
             has_ram: s.contains("RAM"),
             has_battery: s.contains("BATTERY"),
@@ -137,7 +148,7 @@ pub struct ROMInfo {
     // 0x104..=0x133
     logo: Vec<u8>,
     // 0x134..=0x13E
-    title: [u8; 11],
+    title: String,
     // 0x13F..=0x142
     designation: [u8; 4],
     // 0x143,
@@ -166,11 +177,10 @@ pub struct ROMInfo {
 
 impl ROMInfo {
     fn from_buffer(buffer: &[u8]) -> Self {
-        let mut title = [0; 11];
-        title.copy_from_slice(&buffer[0x134..=0x13E]);
+        let title = buffer[0x134..=0x13E].iter().map(|c| *c).take_while(|c| *c > 0).collect();
         Self {
             logo: buffer[0x104..=0x133].to_vec(),
-            title,
+            title: String::from_utf8(title).unwrap_or_else(|_| "".to_string()),
             designation: [buffer[0x13F], buffer[0x140], buffer[0x141], buffer[0x142]],
             cgb_flag: buffer[0x143],
             sgb_license_code: [buffer[0x144], buffer[0x145]],
