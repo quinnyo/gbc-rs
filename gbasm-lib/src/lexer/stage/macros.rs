@@ -83,6 +83,7 @@ lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     StringLiteral(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<MacroToken>>)),
+    IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -129,6 +130,34 @@ impl From<IncludeToken> for MacroToken {
             }
         }
     }
+}
+
+
+// Statements -----------------------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub struct IfStatementBranch<T: LexerToken> {
+    pub condition: Option<Vec<T>>,
+    pub body: Vec<T>
+}
+
+impl<T: LexerToken> IfStatementBranch<T> {
+    pub fn into_other<U: LexerToken, C: FnMut(Vec<T>) -> Result<Vec<U>, SourceError>>(self, mut convert: C) -> Result<IfStatementBranch<U>, SourceError> {
+        Ok(IfStatementBranch {
+            condition: if let Some(condition) = self.condition {
+                Some(convert(condition)?)
+
+            } else {
+                None
+            },
+            body: convert(self.body)?
+        })
+    }
+}
+
+enum IfBranch {
+    None,
+    Else,
+    If
 }
 
 
@@ -290,11 +319,52 @@ impl MacroStage {
             }
         }
 
+        let tokens_with_statements = Self::parse_statements(
+            tokens_without_macro_calls
+        )?;
+
         Ok((
             user_macro_defs,
-            tokens_without_macro_calls.into_iter().map(MacroToken::from).collect()
+            tokens_with_statements
         ))
 
+    }
+
+    fn parse_statements(tokens: Vec<IncludeToken>) -> Result<Vec<MacroToken>, SourceError> {
+        let mut tokens_with_statements = Vec::with_capacity(tokens.len());
+        let mut tokens = TokenIterator::new(tokens);
+        while let Some(token) = tokens.next() {
+
+            // Parse IF Statements
+            if token.is(TokenType::Reserved) && (token.has_value("THEN") || token.has_value("ELSE") || token.has_value("ENDIF")) {
+                return Err(token.error(format!("Unexpected \"{}\" token outside of if statement.", token.value())));
+
+            } else if token.is(TokenType::Reserved) && token.has_value("IF") {
+                let inner = token.inner().clone();
+                let mut branches: Vec<IfStatementBranch<MacroToken>> = Vec::new();
+                let mut condition_tokens = Some(Self::parse_if_condition(&mut tokens, token)?);
+                loop {
+                    let (body_tokens, branch) = Self::parse_if_body(&mut tokens)?;
+                    branches.push(IfStatementBranch {
+                        condition: condition_tokens.take(),
+                        body: body_tokens
+                    });
+                    match branch {
+                        IfBranch::None => break,
+                        IfBranch::Else => continue,
+                        IfBranch::If => {
+                            let token = tokens.expect(TokenType::Reserved, Some("IF"), "when parsing IF statement")?;
+                            condition_tokens = Some(Self::parse_if_condition(&mut tokens, token)?);
+                        }
+                    }
+                }
+                tokens_with_statements.push(MacroToken::IfStatement(inner, branches));
+
+            } else {
+                tokens_with_statements.push(MacroToken::from(token));
+            }
+        }
+        Ok(tokens_with_statements)
     }
 
     fn expand_macro_calls(
@@ -581,6 +651,74 @@ impl MacroStage {
 
     }
 
+    fn parse_if_condition(
+        tokens: &mut TokenIterator<IncludeToken>,
+        token: IncludeToken
+
+    ) -> Result<Vec<MacroToken>, SourceError> {
+
+        let mut condition_tokens = Vec::new();
+        while !tokens.peek_is(TokenType::Reserved, Some("THEN")) {
+            let token = tokens.get("Unexpected end of input while parsing IF statement condition.")?;
+            if token.is(TokenType::Reserved) && (token.has_value("IF") || token.has_value("ELSE") || token.has_value("ENDIF")) {
+                return Err(token.error(format!("Unexpected \"{}\" token inside of IF statement condition.", token.value())));
+
+            } else {
+                condition_tokens.push(MacroToken::from(token));
+            }
+        }
+        tokens.expect(TokenType::Reserved, Some("THEN"), "when parsing IF statement condition")?;
+
+        if condition_tokens.is_empty() {
+            return Err(token.error("Empty IF statement condition.".to_string()));
+        }
+
+        Ok(condition_tokens)
+    }
+
+    fn parse_if_body(
+        tokens: &mut TokenIterator<IncludeToken>
+
+    ) -> Result<(Vec<MacroToken>, IfBranch), SourceError> {
+
+        let mut body_tokens = Vec::new();
+        let mut if_depth = 0;
+        while if_depth > 0 || !(tokens.peek_is(TokenType::Reserved, Some("ELSE")) || tokens.peek_is(TokenType::Reserved, Some("ENDIF"))) {
+
+            let token = tokens.get("Unexpected end of input while parsing IF statement body.")?;
+
+            // Check for nested statements
+            if token.is(TokenType::Reserved) && token.has_value("IF") {
+                if_depth += 1;
+
+            } else if token.is(TokenType::Reserved) && token.has_value("ENDIF") {
+                if_depth -= 1;
+            }
+
+            body_tokens.push(token);
+
+        }
+
+        // Parse nested if statements
+        let body_tokens = Self::parse_statements(body_tokens)?;
+
+        // Check for branches
+        if tokens.peek_is(TokenType::Reserved, Some("ELSE")) {
+            tokens.expect(TokenType::Reserved, Some("ELSE"), "when parsing IF statement body")?;
+            if tokens.peek_is(TokenType::Reserved, Some("IF")) {
+                Ok((body_tokens, IfBranch::If))
+
+            } else {
+                Ok((body_tokens, IfBranch::Else))
+            }
+
+        } else {
+            tokens.expect(TokenType::Reserved, Some("ENDIF"), "when parsing IF statement body")?;
+            Ok((body_tokens, IfBranch::None))
+        }
+
+    }
+
 }
 
 
@@ -590,7 +728,7 @@ mod test {
     use crate::lexer::Lexer;
     use crate::mocks::include_lex;
     use crate::expression::ExpressionArgumenType;
-    use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken};
+    use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, IfStatementBranch};
 
     fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
         Lexer::<MacroStage>::from_lexer(include_lex(s)).expect("MacroLexer failed")
@@ -1177,6 +1315,125 @@ mod test {
             mtke!(NumberLiteral, 12, 13, "4", 2),
         ]);
         assert_eq!(lexer.macro_calls_count(), 3);
+    }
+
+    // IF Statements ----------------------------------------------------------
+    #[test]
+    fn test_if_statement_endif() {
+        let lexer = macro_lexer("IF foo THEN bar ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![MacroToken::Name(itk!(12, 15, "bar"))]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_endif_nested() {
+        let lexer = macro_lexer("IF foo THEN IF bar THEN baz ENDIF ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![
+                        MacroToken::IfStatement(itk!(12, 14, "IF"), vec![
+                            IfStatementBranch {
+                                condition: Some(vec![MacroToken::Name(itk!(15, 18, "bar"))]),
+                                body: vec![
+                                    MacroToken::Name(itk!(24, 27, "baz"))
+                                ]
+                            }
+                        ])
+                    ]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_else() {
+        let lexer = macro_lexer("IF foo THEN bar ELSE baz ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![MacroToken::Name(itk!(12, 15, "bar"))]
+                },
+                IfStatementBranch {
+                    condition: None,
+                    body: vec![MacroToken::Name(itk!(21, 24, "baz"))]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_else_if_endif() {
+        let lexer = macro_lexer("IF foo THEN bar ELSE IF fuz THEN baz ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![MacroToken::Name(itk!(12, 15, "bar"))]
+                },
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(24, 27, "fuz"))]),
+                    body: vec![MacroToken::Name(itk!(33, 36, "baz"))]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_else_if_else_endif() {
+        let lexer = macro_lexer("IF foo THEN bar ELSE IF fuz THEN baz ELSE fub ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![MacroToken::Name(itk!(12, 15, "bar"))]
+                },
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::Name(itk!(24, 27, "fuz"))]),
+                    body: vec![MacroToken::Name(itk!(33, 36, "baz"))]
+                },
+                IfStatementBranch {
+                    condition: None,
+                    body: vec![MacroToken::Name(itk!(42, 45, "fub"))]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_error_if_keywords() {
+        assert_eq!(macro_lexer_error("THEN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"THEN\" token outside of if statement.\n\nTHEN\n^--- Here");
+        assert_eq!(macro_lexer_error("ELSE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ELSE\" token outside of if statement.\n\nELSE\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDIF"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDIF\" token outside of if statement.\n\nENDIF\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_if_condition() {
+        assert_eq!(macro_lexer_error("IF"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing IF statement condition.\n\nIF\n^--- Here");
+        assert_eq!(macro_lexer_error("IF IF"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"IF\" token inside of IF statement condition.\n\nIF IF\n   ^--- Here");
+        assert_eq!(macro_lexer_error("IF ELSE"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"ELSE\" token inside of IF statement condition.\n\nIF ELSE\n   ^--- Here");
+        assert_eq!(macro_lexer_error("IF ENDIF"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"ENDIF\" token inside of IF statement condition.\n\nIF ENDIF\n   ^--- Here");
+        assert_eq!(macro_lexer_error("IF THEN"), "In file \"main.gb.s\" on line 1, column 1: Empty IF statement condition.\n\nIF THEN\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_if_body() {
+        assert_eq!(macro_lexer_error("IF foo THEN"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN\n       ^--- Here");
+        assert_eq!(macro_lexer_error("IF foo THEN ELSE"), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN ELSE\n            ^--- Here");
+        assert_eq!(macro_lexer_error("IF foo THEN ELSE IF bar THEN "), "In file \"main.gb.s\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN ELSE IF bar THEN \n                        ^--- Here");
+    }
+
+    #[test]
+    fn test_error_if_nested() {
+        assert_eq!(macro_lexer_error("IF foo THEN IF bar THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN IF bar THEN ENDIF\n                        ^--- Here");
     }
 
 }

@@ -12,6 +12,7 @@ use crate::lexer::ValueStage;
 use crate::error::SourceError;
 use crate::expression::{Expression, ExpressionValue};
 use super::value::ValueToken;
+use super::macros::IfStatementBranch;
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
@@ -30,6 +31,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     Expression((usize, Expression)),
     // TODO remove id and use name for constant evaluation loop detection?
     ConstExpression((usize, Expression)),
+    IfStatement((Vec<IfStatementBranch<ExpressionToken>>)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))
 
@@ -43,7 +45,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
 });
 
 impl ExpressionToken {
-    fn try_from(token: ValueToken) -> Result<ExpressionToken, ValueToken> {
+    fn try_from(token: ValueToken, expression_id: &mut usize) -> Result<ExpressionToken, SourceError> {
         match token {
             ValueToken::Segment(inner) => Ok(ExpressionToken::Segment(inner)),
             ValueToken::Reserved(inner) => Ok(ExpressionToken::Reserved(inner)),
@@ -63,7 +65,21 @@ impl ExpressionToken {
                 inner,
                 typ
             }),
-            token => Err(token)
+            ValueToken::IfStatement(inner, branches) => {
+                let mut expr_branches = Vec::new();
+                for branch in branches {
+                    expr_branches.push(branch.into_other(|tokens| {
+                        ExpressionStage::parse_expression(tokens, expression_id, false)
+                    })?);
+                }
+                Ok(ExpressionToken::IfStatement(
+                    inner,
+                    expr_branches
+                ))
+            },
+            token => Err(token.error(
+                format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
+            ))
         }
     }
 }
@@ -146,16 +162,8 @@ impl ExpressionStage {
             }
 
         } else if !is_argument {
-
             // Forward all non-expression tokens
-            match ExpressionToken::try_from(token) {
-                Ok(token) => Ok(token),
-                Err(token) => {
-                    Err(token.error(
-                        format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
-                    ))
-                }
-            }
+            ExpressionToken::try_from(token, expression_id)
 
         } else {
             Err(token.error(
@@ -410,7 +418,7 @@ mod test {
     use crate::lexer::Lexer;
     use crate::mocks::value_lex;
     use crate::expression::{Expression, ExpressionValue, Operator};
-    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag};
+    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch};
 
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
         Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")
@@ -1123,6 +1131,33 @@ mod test {
                     left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
                 }
             )
+        ]);
+    }
+
+    // If Statements ----------------------------------------------------------
+    #[test]
+    fn test_if_statment_forwarding() {
+        let lexer = expr_lexer("IF 1 THEN IF 0 THEN nop ENDIF ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            ExpressionToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![
+                        ExpressionToken::ConstExpression(itk!(3, 4, "1"), 0, Expression::Value(ExpressionValue::Integer(1)))
+                    ]),
+                    body: vec![
+                        ExpressionToken::IfStatement(itk!(10, 12, "IF"), vec![
+                            IfStatementBranch {
+                                condition: Some(vec![
+                                    ExpressionToken::ConstExpression(itk!(13, 14, "0"), 1, Expression::Value(ExpressionValue::Integer(0)))
+                                ]),
+                                body: vec![
+                                    ExpressionToken::Instruction(itk!(20, 23, "nop"))
+                                ]
+                            }
+                        ])
+                    ]
+                }
+            ])
         ]);
     }
 
