@@ -52,6 +52,18 @@ impl EvaluatorContext {
                 &stack,
                 constant.expression.1
             )?;
+
+            // Check result matches desired type
+            match (constant.is_string, &c) {
+                (true, &ExpressionResult::String(_)) => (),
+                (true, _) => return Err(constant.inner.error(
+                    format!("Constant declaration expected a String but got a {} instead.", c.as_str())
+                )),
+                (false, &ExpressionResult::String(_)) => return Err(constant.inner.error(
+                    format!("Constant declaration expected a Number but got a {} instead.", c.as_str())
+                )),
+                (false, _) => ()
+            }
             self.constants.insert(name, c);
         }
         Ok(())

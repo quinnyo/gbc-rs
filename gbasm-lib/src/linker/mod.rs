@@ -371,6 +371,16 @@ mod test {
         assert_eq!(linker_error("A EQU B\nB EQU C\nC EQU D"), "In file \"main.gb.s\" on line 3, column 7: Reference to undeclared constant \"D\".\n\nC EQU D\n      ^--- Here");
     }
 
+    #[test]
+    fn test_error_constant_eval_equs_not_string() {
+        assert_eq!(linker_error("A EQUS 2"), "In file \"main.gb.s\" on line 1, column 1: Constant declaration expected a String but got a Integer instead.\n\nA EQUS 2\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_constant_eval_equ_string() {
+        assert_eq!(linker_error("A EQU 'A'"), "In file \"main.gb.s\" on line 1, column 1: Constant declaration expected a Number but got a String instead.\n\nA EQU \'A\'\n^--- Here");
+    }
+
     // Section Mapping --------------------------------------------------------
     #[test]
     fn test_error_entry_before_any_section() {

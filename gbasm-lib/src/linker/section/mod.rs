@@ -745,13 +745,13 @@ mod test {
     // Constant Evaluation ----------------------------------------------------
     #[test]
     fn test_section_entry_constant_eval() {
-        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQU 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
+        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQUS 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, (3, Expression::Value(ExpressionValue::ConstantValue(itk!(66, 69, "int"), "int".to_string()))))]),
+                    expressions: Some(vec![(1, (3, Expression::Value(ExpressionValue::ConstantValue(itk!(67, 70, "int"), "int".to_string()))))]),
                     bytes: Some(vec![1]),
                     debug_only: false
                 }),
@@ -759,9 +759,9 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![(1, (5, Expression::BuiltinCall {
-                        inner: itk!(73, 78, "FLOOR"),
+                        inner: itk!(74, 79, "FLOOR"),
                         name: "FLOOR".to_string(),
-                        args: vec![Expression::Value(ExpressionValue::ConstantValue(itk!(79, 84, "float"), "float".to_string()))]
+                        args: vec![Expression::Value(ExpressionValue::ConstantValue(itk!(80, 85, "float"), "float".to_string()))]
 
                     }))]),
                     bytes: Some(vec![3]),
