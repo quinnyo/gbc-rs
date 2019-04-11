@@ -16,6 +16,14 @@ use super::expression::ExpressionToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
+// Entry Specific Structs -----------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub struct IfStatementBranch {
+    condition: OptionalDataExpression,
+    body: Vec<EntryToken>
+}
+
+
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
     Instruction((usize)),
@@ -23,7 +31,9 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
     DebugInstruction((usize)),
     DebugInstructionWithArg((usize, DataExpression)),
     GlobalLabelDef((usize)),
-    LocalLabelDef((usize))
+    LocalLabelDef((usize)),
+    // IF [ConstExpression] THEN .. ELSE .. ENDIF
+    IfStatement((Vec<IfStatementBranch>))
 
 }, {
     // Constant + EQU|EQUS + ConstExpression
@@ -86,6 +96,41 @@ impl EntryStage {
                 // Passthrough Label Defs
                 ExpressionToken::GlobalLabelDef(inner, id) => EntryToken::GlobalLabelDef(inner, id),
                 ExpressionToken::LocalLabelDef(inner, id) => EntryToken::LocalLabelDef(inner, id),
+
+                // If Statements
+                ExpressionToken::IfStatement(inner, branches) => {
+                    let mut entry_branches = Vec::new();
+                    for branch in branches {
+                        entry_branches.push(IfStatementBranch {
+                            condition: if let Some(mut tokens) = branch.condition {
+                                if tokens.len() != 1 {
+                                    return Err(inner.error(
+                                        "IF condition must consist of a single ConstExpression.".to_string()
+                                    ));
+
+                                } else {
+                                    let token = tokens.pop().unwrap();
+                                    if let ExpressionToken::ConstExpression(_, id, expr) = token {
+                                        Some((id, expr))
+
+                                    } else {
+                                        let t = token.typ();
+                                        let inner = token.into_inner();
+                                        return Err(inner.error(format!(
+                                            "Unexpected \"{:?}\", expected a ConstExpression as IF condition instead.",
+                                            t
+                                        )));
+                                    }
+                                }
+
+                            } else {
+                                None
+                            },
+                            body: Self::parse_entry_tokens(branch.body, layouts)?
+                        });
+                    }
+                    EntryToken::IfStatement(inner, entry_branches)
+                },
 
                 // Constant Declarations
                 ExpressionToken::Constant(inner) => {
@@ -1360,7 +1405,7 @@ impl EntryStage {
 mod test {
     use crate::lexer::Lexer;
     use crate::mocks::{expr_lex, expr_lex_binary};
-    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage};
+    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch};
     use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
@@ -1373,7 +1418,7 @@ mod test {
     }
 
     fn entry_lexer_error<S: Into<String>>(s: S) -> String {
-        Lexer::<EntryStage>::from_lexer(expr_lex(s)).err().unwrap().to_string()
+        Lexer::<EntryStage>::from_lexer(expr_lex(s)).err().expect("Expected a SourceError").to_string()
     }
 
     fn tfe<S: Into<String>>(s: S) -> Vec<EntryToken> {
@@ -1465,7 +1510,6 @@ mod test {
             )))
         }]);
     }
-
     #[test]
     fn test_error_const_redeclaration() {
         assert_eq!(entry_lexer_error("foo EQU 2 foo EQU 2"), "In file \"main.gb.s\" on line 1, column 11: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 2 foo EQU 2\n          ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo EQU 2 foo EQU 2\n^--- Here");
@@ -2993,6 +3037,38 @@ mod test {
         assert_eq!(entry_lexer_error("ldxa [4],["), "In file \"main.gb.s\" on line 1, column 10: Unexpected end of input while parsing instruction label argument.\n\nldxa [4],[\n         ^--- Here");
         assert_eq!(entry_lexer_error("ldxa [4],af"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"af\", expected one of the following registers: a, b, c, d, e, h, l, bc, de, hl.\n\nldxa [4],af\n         ^--- Here");
         assert_eq!(entry_lexer_error("ldxa 4,a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"ConstExpression\" while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa 4,a\n     ^--- Here");
+    }
+
+    // If Statements ----------------------------------------------------------
+    #[test]
+    fn test_error_if_statement_conditions() {
+        assert_eq!(entry_lexer_error("IF nop THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"Instruction\", expected a ConstExpression as IF condition instead.\n\nIF nop THEN ENDIF\n   ^--- Here");
+        assert_eq!(entry_lexer_error("IF 2 2 THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 1: IF condition must consist of a single ConstExpression.\n\nIF 2 2 THEN ENDIF\n^--- Here");
+        assert_eq!(entry_lexer_error("IF 2 nop THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 1: IF condition must consist of a single ConstExpression.\n\nIF 2 nop THEN ENDIF\n^--- Here");
+        assert_eq!(entry_lexer_error("global_label:\nIF global_label THEN ENDIF"), "In file \"main.gb.s\" on line 2, column 4: Unexpected \"Expression\", expected a ConstExpression as IF condition instead.\n\nIF global_label THEN ENDIF\n   ^--- Here");
+        assert_eq!(entry_lexer_error("IF 1 THEN ELSE IF nop THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 19: Unexpected \"Instruction\", expected a ConstExpression as IF condition instead.\n\nIF 1 THEN ELSE IF nop THEN ENDIF\n                  ^--- Here");
+    }
+
+    #[test]
+    fn test_if_statment_forwarding() {
+        let lexer = entry_lexer("IF 1 THEN IF 0 THEN nop ENDIF ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            EntryToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some((0, Expression::Value(ExpressionValue::Integer(1)))),
+                    body: vec![
+                        EntryToken::IfStatement(itk!(10, 12, "IF"), vec![
+                            IfStatementBranch {
+                                condition: Some((1, Expression::Value(ExpressionValue::Integer(0)))),
+                                body: vec![
+                                    EntryToken::Instruction(itk!(20, 23, "nop"), 0)
+                                ]
+                            }
+                        ]
+                    )]
+                }
+            ])
+        ]);
     }
 
 }

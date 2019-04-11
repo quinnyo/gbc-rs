@@ -69,6 +69,34 @@ lazy_static! {
 }
 
 
+// Macro Specific Structs  ----------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub struct IfStatementBranch<T: LexerToken> {
+    pub condition: Option<Vec<T>>,
+    pub body: Vec<T>
+}
+
+impl<T: LexerToken> IfStatementBranch<T> {
+    pub fn into_other<U: LexerToken, C: FnMut(Vec<T>) -> Result<Vec<U>, SourceError>>(self, mut convert: C) -> Result<IfStatementBranch<U>, SourceError> {
+        Ok(IfStatementBranch {
+            condition: if let Some(condition) = self.condition {
+                Some(convert(condition)?)
+
+            } else {
+                None
+            },
+            body: convert(self.body)?
+        })
+    }
+}
+
+enum IfBranch {
+    None,
+    Else,
+    If
+}
+
+
 // Macro Specific Tokens ------------------------------------------------------
 lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     Name(()),
@@ -130,34 +158,6 @@ impl From<IncludeToken> for MacroToken {
             }
         }
     }
-}
-
-
-// Statements -----------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
-pub struct IfStatementBranch<T: LexerToken> {
-    pub condition: Option<Vec<T>>,
-    pub body: Vec<T>
-}
-
-impl<T: LexerToken> IfStatementBranch<T> {
-    pub fn into_other<U: LexerToken, C: FnMut(Vec<T>) -> Result<Vec<U>, SourceError>>(self, mut convert: C) -> Result<IfStatementBranch<U>, SourceError> {
-        Ok(IfStatementBranch {
-            condition: if let Some(condition) = self.condition {
-                Some(convert(condition)?)
-
-            } else {
-                None
-            },
-            body: convert(self.body)?
-        })
-    }
-}
-
-enum IfBranch {
-    None,
-    Else,
-    If
 }
 
 
