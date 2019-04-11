@@ -59,18 +59,10 @@ impl Linker {
 
         // Extract and evaluate all constants
         let mut entry_tokens = Vec::new();
-        for token in tokens {
-            if let EntryToken::Constant { inner, is_string, value } = token {
-                context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
-                    inner,
-                    is_string,
-                    expression: value
-                });
+        Self::extract_constants(&mut context, tokens, &mut entry_tokens);
 
-            } else {
-                entry_tokens.push(token);
-            }
-        }
+        // Make sure that all constants are always evaluated even when they're not used by any
+        // other expressions
         context.resolve_constants()?;
 
         // Map entries to sections
@@ -192,6 +184,31 @@ impl Linker {
             s.write_to_rom_buffer(&mut buffer[..]);
         }
         buffer
+    }
+
+    fn extract_constants(
+        context: &mut EvaluatorContext,
+        tokens: Vec<EntryToken>,
+        remaining_tokens: &mut Vec<EntryToken>
+    ) {
+        // TODO put into functions, with input tokens and &mut entry_tokens
+        for token in tokens {
+            if let EntryToken::Constant { inner, is_string, value } = token {
+                context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
+                    inner,
+                    is_string,
+                    expression: value
+                });
+                // TODO when an if statement if discovered
+                    // TODO go through all branches
+                        // TODO take the first branch that either evaluates to != 0 or has no
+                        // condition at all
+                            // TODO insert those tokens into the output recursively
+
+            } else {
+                remaining_tokens.push(token);
+            }
+        }
     }
 
 }
