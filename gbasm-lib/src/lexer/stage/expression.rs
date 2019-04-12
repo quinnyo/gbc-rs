@@ -12,7 +12,7 @@ use crate::lexer::ValueStage;
 use crate::error::SourceError;
 use crate::expression::{Expression, ExpressionValue};
 use super::value::ValueToken;
-use super::macros::IfStatementBranch;
+use super::macros::{IfStatementBranch, ForStatement};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
@@ -32,6 +32,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     // TODO remove id and use name for constant evaluation loop detection?
     ConstExpression((usize, Expression)),
     IfStatement((Vec<IfStatementBranch<ExpressionToken>>)),
+    ForStatement((ForStatement<ExpressionToken>)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))
 
@@ -76,6 +77,21 @@ impl ExpressionToken {
                     inner,
                     expr_branches
                 ))
+            },
+            ValueToken::ForStatement(inner, for_statement) => {
+                let binding = if let ValueToken::Name(inner) = *for_statement.binding {
+                    Box::new(ExpressionToken::Constant(inner))
+
+                } else {
+                    unreachable!();
+                };
+
+                Ok(ExpressionToken::ForStatement(inner, ForStatement {
+                    binding,
+                    from: ExpressionStage::parse_expression(for_statement.from, expression_id, false)?,
+                    to: ExpressionStage::parse_expression(for_statement.to, expression_id, false)?,
+                    body: ExpressionStage::parse_expression(for_statement.body, expression_id, false)?
+                }))
             },
             token => Err(token.error(
                 format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
@@ -418,7 +434,7 @@ mod test {
     use crate::lexer::Lexer;
     use crate::mocks::value_lex;
     use crate::expression::{Expression, ExpressionValue, Operator};
-    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch};
+    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch, ForStatement};
 
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
         Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")
@@ -1158,6 +1174,30 @@ mod test {
                     ]
                 }
             ])
+        ]);
+    }
+
+    // FOR Statements ---------------------------------------------------------
+    #[test]
+    fn test_for_statment_forwarding() {
+        let lexer = expr_lexer("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
+        assert_eq!(lexer.tokens, vec![
+            ExpressionToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
+                binding: Box::new(ExpressionToken::Constant(itk!(4, 5, "x"))),
+                from: vec![
+                    ExpressionToken::ConstExpression(itk!(9, 10, "0"), 0, Expression::Value(ExpressionValue::Integer(0)))
+                ],
+                to: vec![
+                    ExpressionToken::ConstExpression(itk!(14, 16, "10"), 1, Expression::Value(ExpressionValue::Integer(10)))
+                ],
+                body: vec![
+                    ExpressionToken::ConstExpression(
+                        itk!(24, 27, "bar"),
+                        2,
+                        Expression::Value(ExpressionValue::ConstantValue(itk!(24, 27, "bar"), "bar".to_string()))
+                    )
+                ]
+            })
         ]);
     }
 
