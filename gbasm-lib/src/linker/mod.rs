@@ -687,6 +687,46 @@ mod test {
     }
 
     #[test]
+    fn test_if_statement_condition_types() {
+        let l = linker("SECTION ROM0\nIF 0.0 THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker("SECTION ROM0\nIF 1.0 THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (1, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+        let l = linker("SECTION ROM0\nIF '' THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker("SECTION ROM0\nIF 'A' THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (1, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
     fn test_error_if_statement_condition() {
         assert_eq!(linker_error("SECTION ROM0\nIF A THEN DB 1 ENDIF"), "In file \"main.gb.s\" on line 2, column 4: Reference to undeclared constant \"A\".\n\nIF A THEN DB 1 ENDIF\n   ^--- Here");
     }
