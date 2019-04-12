@@ -83,6 +83,15 @@ pub enum ExpressionResult {
 }
 
 impl ExpressionResult {
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            ExpressionResult::Integer(i) => *i != 0,
+            ExpressionResult::Float(f) => f.into_inner() != 0.0,
+            ExpressionResult::String(s) => !s.is_empty()
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             ExpressionResult::Integer(_) => "Integer",

@@ -219,9 +219,10 @@ impl IncludeStage {
                     let name = Self::collect_inner_name(iter, true)?;
                     match name.value.as_str() {
                         // Split into Reserved Words
-                        "DB" | "DW" | "BW" | "DS" |
+                        "DB" | "DW" | "BW" | "DS" | "IF" |
                         "DS8" | "EQU" |
                         "DS16" | "EQUS" | "BANK" |
+                        "THEN" | "ELSE" | "ENDIF" |
                         "MACRO" |
                         "INCBIN" | "SECTION" | "INCLUDE" | "SEGMENT" |
                         "ENDMACRO" => {
@@ -231,7 +232,7 @@ impl IncludeStage {
                         "ROM0" | "ROMX" | "WRAM0" | "WRAMX" | "HRAM" | "RAM" | "RAMX" => {
                             Some(IncludeToken::Segment(name))
                         },
-                        // Registers
+                        // Registers (c is later also treated as a flag)
                         "af" | "bc" | "de" | "hl" | "a" | "b" | "c" | "d" | "e" | "h" | "l" | "hld" | "hli" | "sp" => {
                             Some(IncludeToken::Register(name))
                         },
@@ -636,7 +637,7 @@ mod test {
 
     #[test]
     fn test_reserved() {
-        token_types!(Reserved, "DB", "DW", "BW", "DS8", "DS16", "EQU", "EQUS", "BANK", "MACRO", "SECTION", "ENDMACRO", "SEGMENT");
+        token_types!(Reserved, "DB", "DW", "BW", "IF", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE", "ENDIF", "MACRO", "SECTION", "ENDMACRO", "SEGMENT");
     }
 
     #[test]

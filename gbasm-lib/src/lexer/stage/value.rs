@@ -11,7 +11,7 @@ use ordered_float::OrderedFloat;
 use crate::lexer::MacroStage;
 use crate::error::SourceError;
 use crate::expression::Operator;
-use super::macros::{MacroCall, MacroToken};
+use super::macros::{MacroCall, MacroToken, IfStatementBranch};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
@@ -29,6 +29,7 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     OpenBracket(()),
     CloseBracket(()),
     BuiltinCall((Vec<Vec<ValueToken>>)),
+    IfStatement((Vec<IfStatementBranch<ValueToken>>)),
     GlobalLabelDef((usize)),
     GlobalLabelRef((usize)),
     LocalLabelDef((usize)),
@@ -115,7 +116,18 @@ impl ValueStage {
                 MacroToken::OpenParen(inner) => ValueToken::OpenParen(inner),
                 MacroToken::CloseParen(inner) => ValueToken::CloseParen(inner),
                 MacroToken::OpenBracket(inner) => ValueToken::OpenBracket(inner),
-                MacroToken::CloseBracket(inner)=> ValueToken::CloseBracket(inner),
+                MacroToken::CloseBracket(inner) => ValueToken::CloseBracket(inner),
+
+                // Convert Statements
+                MacroToken::IfStatement(inner, branches) => {
+                    let mut value_branches = Vec::new();
+                    for branch in branches {
+                        value_branches.push(branch.into_other(|tokens| {
+                            Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, tokens)
+                        })?);
+                    }
+                    ValueToken::IfStatement(inner, value_branches)
+                }
 
                 // Registers
                 MacroToken::Register(inner) => ValueToken::Register {
@@ -597,7 +609,7 @@ mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::Lexer;
     use crate::mocks::{macro_lex, macro_lex_child};
-    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag};
+    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag, IfStatementBranch};
 
     fn value_lexer<S: Into<String>>(s: S) -> Lexer<ValueStage> {
         Lexer::<ValueStage>::from_lexer(macro_lex(s)).expect("ValueLexer failed")
@@ -1206,6 +1218,29 @@ mod test {
     #[test]
     fn test_error_colon_standlone() {
         assert_eq!(value_lexer_error(":"), "In file \"main.gb.s\" on line 1, column 1: Unexpected standalone \":\", expected a \"Name\" token to preceed it.\n\n:\n^--- Here");
+    }
+
+    // If Statements ----------------------------------------------------------
+    #[test]
+    fn test_if_statment_forwarding() {
+        let lexer = value_lexer("IF foo THEN IF bar THEN baz ENDIF ENDIF");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![ValueToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![
+                        ValueToken::IfStatement(itk!(12, 14, "IF"), vec![
+                            IfStatementBranch {
+                                condition: Some(vec![ValueToken::Name(itk!(15, 18, "bar"))]),
+                                body: vec![
+                                    ValueToken::Name(itk!(24, 27, "baz"))
+                                ]
+                            }
+                        ])
+                    ]
+                }
+            ])
+        ]);
     }
 
 }
