@@ -19,8 +19,8 @@ use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken}
 // Entry Specific Structs -----------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
 pub struct IfStatementBranch {
-    condition: OptionalDataExpression,
-    body: Vec<EntryToken>
+    pub condition: OptionalDataExpression,
+    pub body: Vec<EntryToken>
 }
 
 

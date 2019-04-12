@@ -1409,6 +1409,19 @@ mod test {
     }
 
     #[test]
+    fn test_if_statement_macro() {
+        let lexer = macro_lexer("MACRO BAR(@a) IF @a THEN bar ENDIF ENDMACRO\nBAR(1)");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::IfStatement(itke!(14, 16, "IF", 0), vec![
+                IfStatementBranch {
+                    condition: Some(vec![MacroToken::NumberLiteral(itke!(48, 49, "1", 0))]),
+                    body: vec![MacroToken::Name(itke!(25, 28, "bar", 0))]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
     fn test_error_if_keywords() {
         assert_eq!(macro_lexer_error("THEN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"THEN\" token outside of if statement.\n\nTHEN\n^--- Here");
         assert_eq!(macro_lexer_error("ELSE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ELSE\" token outside of if statement.\n\nELSE\n^--- Here");

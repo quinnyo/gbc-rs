@@ -12,6 +12,7 @@ mod util;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
+use crate::expression::ExpressionResult;
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
 use self::section::Section;
 
@@ -59,7 +60,7 @@ impl Linker {
 
         // Extract and evaluate all constants
         let mut entry_tokens = Vec::new();
-        Self::extract_constants(&mut context, tokens, &mut entry_tokens);
+        Self::parse_entries(&mut context, tokens, &mut entry_tokens)?;
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
@@ -186,29 +187,42 @@ impl Linker {
         buffer
     }
 
-    fn extract_constants(
+    fn parse_entries(
         context: &mut EvaluatorContext,
         tokens: Vec<EntryToken>,
         remaining_tokens: &mut Vec<EntryToken>
-    ) {
-        // TODO put into functions, with input tokens and &mut entry_tokens
+
+    ) -> Result<(), SourceError> {
         for token in tokens {
+            // Record constants
             if let EntryToken::Constant { inner, is_string, value } = token {
                 context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
                     inner,
                     is_string,
                     expression: value
                 });
-                // TODO when an if statement if discovered
-                    // TODO go through all branches
-                        // TODO take the first branch that either evaluates to != 0 or has no
-                        // condition at all
-                            // TODO insert those tokens into the output recursively
+
+            // Evaluate if conditions and insert the corresponding branch into
+            // the output tokens
+            } else if let EntryToken::IfStatement(_, branches) = token {
+                for branch in branches {
+                    let result = if let Some(condition) = branch.condition {
+                        context.resolve_expression(condition)?
+
+                    } else {
+                        ExpressionResult::Integer(1)
+                    };
+                    if result.is_truthy() {
+                        Self::parse_entries(context, branch.body, remaining_tokens)?;
+                        break;
+                    }
+                }
 
             } else {
                 remaining_tokens.push(token);
             }
         }
+        Ok(())
     }
 
 }
@@ -312,6 +326,8 @@ mod test {
 
     use super::{Linker, SegmentUsage};
     use super::section::entry::EntryData;
+    use crate::expression::{Expression, ExpressionValue};
+    use crate::expression::data::{DataAlignment, DataEndianess};
     use crate::mocks::{entry_lex, entry_lex_binary};
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
@@ -626,6 +642,124 @@ mod test {
                     (true, Some("Vars".to_string()), 65408, 65536)
                 ]
             }
+        ]);
+    }
+
+    // If Statements ----------------------------------------------------------
+    #[test]
+    fn test_if_statement() {
+        let l = linker("SECTION ROM0\nIF 0 THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker("SECTION ROM0\nIF 0 + 1 THEN DB 1 ELSE IF 2 THEN DB 2 ELSE DB 3 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (1, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+        let l = linker("A EQU 0\nSECTION ROM0\nIF A THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker("A EQU 1\nSECTION ROM0\nIF A THEN DB 1 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_if_statement_condition() {
+        assert_eq!(linker_error("SECTION ROM0\nIF A THEN DB 1 ENDIF"), "In file \"main.gb.s\" on line 2, column 4: Reference to undeclared constant \"A\".\n\nIF A THEN DB 1 ENDIF\n   ^--- Here");
+    }
+
+    #[test]
+    fn test_if_statement_else() {
+        let l = linker("SECTION ROM0\nIF 0 THEN DB 1 ELSE DB 2 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(2))))
+                    ]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_else_if() {
+        let l = linker("SECTION ROM0\nIF 0 THEN DB 1 ELSE IF 0 THEN DB 2 ELSE DB 3 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (4, Expression::Value(ExpressionValue::Integer(3))))
+                    ]),
+                    bytes: Some(vec![3]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_nested() {
+        let l = linker("SECTION ROM0\nIF 1 THEN IF 2 THEN DB 2 ENDIF ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(2))))
+                    ]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_if_statement_constant_declare() {
+        let l = linker("SECTION ROM0\nIF 1 THEN A EQU 1 ENDIF\nIF A THEN DB 2 ENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (3, Expression::Value(ExpressionValue::Integer(2))))
+                    ]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
         ]);
     }
 
