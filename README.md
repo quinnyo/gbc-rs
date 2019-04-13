@@ -7,18 +7,62 @@ gbasm is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly
 **gbasm** is mostly compatible with [rgbds](https://github.com/bentley/rgbds) 
 but there are some deviations and additions:
 
-### General
-
-- *gbasm* is a multipass compiler, meaning the all sources files and definitions 
-are parsed before resolving any names or sizes. 
-
-### Syntax 
+### General Syntax 
 
 - The *load accumulator and increment/decrement hl* type instructions only take `hli` and `hld` as their second operand
 - Memory operands do only support `[` and `]` in their syntax
 - All names and labels which start with an underscore are treated as being local / private to the file they were defined in
 
-### Instructions
+### User defined Macros
+
+User Macros work by generating and substituting tokens.
+
+They can be defined by using the following syntax:
+
+```asm
+MACRO USER_MACRO_NAME(@reg, @value)
+ld  @reg,@value
+ENDMACRO
+```
+
+And called like this:
+
+```asm
+USER_MACRO_NAME(a, 2)
+```
+
+### IF statements
+
+Compile time if statements are supported, these can be nested and chained to any depth.
+
+> Note: There is no scoping, any constants declared inside an IF statement will be in the global scope.
+
+```asm
+IF 1 + 1 == 2 THEN 
+; Code or Data
+
+ELSE IF 1 + 1 == 4 THEN 
+; Code or Data
+
+ELSE
+; Code or Data
+
+ENDIF
+```
+
+### FOR statements
+
+Compile time for statements are supported, these can be nested and chained to any depth.
+
+> Note: It is not possible to declare constants inside of FOR statements.
+
+```asm
+FOR i IN 0 TO 10 REPEAT
+    DB i
+ENDFOR
+```
+
+### Meta Instructions
 
 **gbasm** supports additional meta instructions at the source level, 
 which are compiled down to multiple native instructions.
