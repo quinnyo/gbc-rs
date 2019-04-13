@@ -17,15 +17,23 @@ use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken}
 
 
 // Entry Specific Structs -----------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IfStatementBranch {
     pub condition: OptionalDataExpression,
     pub body: Vec<EntryToken>
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ForStatement {
+    pub binding: String,
+    pub from: DataExpression,
+    pub to: DataExpression,
+    pub body: Vec<EntryToken>
+}
+
 
 // Entry Specific Tokens ------------------------------------------------------
-lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
+lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     Instruction((usize)),
     InstructionWithArg((usize, DataExpression)),
     DebugInstruction((usize)),
@@ -33,7 +41,9 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
     GlobalLabelDef((usize)),
     LocalLabelDef((usize)),
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
-    IfStatement((Vec<IfStatementBranch>))
+    IfStatement((Vec<IfStatementBranch>)),
+    // FOR [Sring] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
+    ForStatement((ForStatement))
 
 }, {
     // Constant + EQU|EQUS + ConstExpression
@@ -58,6 +68,54 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
         bank_index => OptionalDataExpression
     }
 });
+
+impl EntryToken {
+    pub fn replace_constant(&mut self, constant: &str, new_value: &ExpressionValue) {
+        match self {
+            EntryToken::InstructionWithArg(_, _, expr) | EntryToken::DebugInstructionWithArg(_, _, expr) => {
+                expr.1.replace_constant(constant, new_value);
+            },
+            EntryToken::IfStatement(_, branches) => {
+                for branch in branches {
+                    if let Some(ref mut condition) = branch.condition {
+                        condition.1.replace_constant(constant, new_value);
+                    }
+                    for token in &mut branch.body {
+                        token.replace_constant(constant, new_value);
+                    }
+                }
+            },
+            EntryToken::ForStatement(_, for_statement) => {
+                for_statement.from.1.replace_constant(constant, new_value);
+                for_statement.to.1.replace_constant(constant, new_value);
+                for token in &mut for_statement.body {
+                    token.replace_constant(constant, new_value);
+                }
+            },
+            EntryToken::Constant { value, .. } => {
+                value.1.replace_constant(constant, new_value);
+            },
+            EntryToken::Data { storage, .. } => {
+                storage.replace_constant(constant, new_value);
+            },
+            EntryToken::SectionDeclaration { name, segment_offset, segment_size, bank_index, .. } => {
+                if let Some(ref mut name) = name {
+                    name.1.replace_constant(constant, new_value);
+                }
+                if let Some(ref mut segment_offset) = segment_offset {
+                    segment_offset.1.replace_constant(constant, new_value);
+                }
+                if let Some(ref mut segment_size) = segment_size {
+                    segment_size.1.replace_constant(constant, new_value);
+                }
+                if let Some(ref mut bank_index) = bank_index {
+                    bank_index.1.replace_constant(constant, new_value);
+                }
+            },
+            _ => {}
+        }
+    }
+}
 
 // Entry Level Lexer Implementation -------------------------------------------
 pub struct EntryStage;
@@ -130,6 +188,18 @@ impl EntryStage {
                         });
                     }
                     EntryToken::IfStatement(inner, entry_branches)
+                },
+
+                // For Statements
+                ExpressionToken::ForStatement(inner, for_statement) => {
+                    let from = Self::parse_for_range(&inner, for_statement.from)?;
+                    let to = Self::parse_for_range(&inner, for_statement.to)?;
+                    EntryToken::ForStatement(inner, ForStatement {
+                        binding: for_statement.binding.into_inner().value,
+                        from,
+                        to,
+                        body: Self::parse_entry_tokens(for_statement.body, layouts)?
+                    })
                 },
 
                 // Constant Declarations
@@ -257,6 +327,25 @@ impl EntryStage {
             entry_tokens.push(entry);
         }
         Ok(entry_tokens)
+    }
+
+    fn parse_for_range(inner: &InnerToken, mut tokens: Vec<ExpressionToken>) -> Result<DataExpression, SourceError> {
+        if tokens.len() != 1 {
+            return Err(inner.error(
+                "FOR range argument must consist of a single ConstExpression.".to_string()
+            ));
+        }
+
+        let token = tokens.remove(0);
+        if let ExpressionToken::ConstExpression(_, id, expr) = token {
+            Ok((id, expr))
+
+        } else {
+            Err(inner.error(format!(
+                "Unexpected \"{:?}\", expected a ConstExpression as FOR range argument instead.",
+                token
+            )))
+        }
     }
 
     fn parse_constant_declaration(
@@ -1405,7 +1494,7 @@ impl EntryStage {
 mod test {
     use crate::lexer::Lexer;
     use crate::mocks::{expr_lex, expr_lex_binary};
-    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch};
+    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement};
     use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
@@ -3068,6 +3157,22 @@ mod test {
                     )]
                 }
             ])
+        ]);
+    }
+
+    // FOR Statements ---------------------------------------------------------
+    #[test]
+    fn test_for_statment_forwarding() {
+        let lexer = entry_lexer("FOR x IN 0 TO 10 REPEAT nop ENDFOR");
+        assert_eq!(lexer.tokens, vec![
+            EntryToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
+                binding: "x".to_string(),
+                from: (0, Expression::Value(ExpressionValue::Integer(0))),
+                to: (1, Expression::Value(ExpressionValue::Integer(10))),
+                body: vec![
+                    EntryToken::Instruction(itk!(24, 27, "nop"), 0)
+                ]
+            })
         ]);
     }
 

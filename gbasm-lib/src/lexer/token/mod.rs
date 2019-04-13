@@ -72,6 +72,7 @@ pub enum TokenType {
     // Macro
     BuiltinCall,
     IfStatement,
+    ForStatement,
 
     // Value Tokens
     Offset,

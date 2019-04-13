@@ -466,7 +466,7 @@ impl Section {
 
                         // Handle constant/offset -> op code mapping
                         if let Some(offsets) = instruction::offsets(*op_code) {
-                            let value = util::constant_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid constant argument")?;
+                            let value = util::integer_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid constant argument")?;
                             let mut mapped_op_code = None;
                             for (constant_value, constant_op_code) in offsets {
                                 if value == *constant_value as i32 {

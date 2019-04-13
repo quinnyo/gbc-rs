@@ -219,12 +219,12 @@ impl IncludeStage {
                     let name = Self::collect_inner_name(iter, true)?;
                     match name.value.as_str() {
                         // Split into Reserved Words
-                        "DB" | "DW" | "BW" | "DS" | "IF" |
-                        "DS8" | "EQU" |
+                        "DB" | "DW" | "BW" | "DS" | "IF" | "TO" | "IN" |
+                        "DS8" | "EQU" | "FOR" |
                         "DS16" | "EQUS" | "BANK" |
                         "THEN" | "ELSE" | "ENDIF" |
                         "MACRO" |
-                        "INCBIN" | "SECTION" | "INCLUDE" | "SEGMENT" |
+                        "ENDFOR" | "REPEAT" | "INCBIN" | "SECTION" | "INCLUDE" | "SEGMENT" |
                         "ENDMACRO" => {
                             Some(IncludeToken::Reserved(name))
                         },
@@ -637,7 +637,7 @@ mod test {
 
     #[test]
     fn test_reserved() {
-        token_types!(Reserved, "DB", "DW", "BW", "IF", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE", "ENDIF", "MACRO", "SECTION", "ENDMACRO", "SEGMENT");
+        token_types!(Reserved, "DB", "DW", "BW", "IF", "TO", "IN", "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE", "ENDIF", "MACRO", "ENDFOR", "REPEAT", "SECTION", "ENDMACRO", "SEGMENT");
     }
 
     #[test]

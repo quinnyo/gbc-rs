@@ -11,7 +11,7 @@ use ordered_float::OrderedFloat;
 use crate::lexer::MacroStage;
 use crate::error::SourceError;
 use crate::expression::Operator;
-use super::macros::{MacroCall, MacroToken, IfStatementBranch};
+use super::macros::{MacroCall, MacroToken, IfStatementBranch, ForStatement};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
@@ -30,6 +30,7 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     CloseBracket(()),
     BuiltinCall((Vec<Vec<ValueToken>>)),
     IfStatement((Vec<IfStatementBranch<ValueToken>>)),
+    ForStatement((ForStatement<ValueToken>)),
     GlobalLabelDef((usize)),
     GlobalLabelRef((usize)),
     LocalLabelDef((usize)),
@@ -128,6 +129,15 @@ impl ValueStage {
                     }
                     ValueToken::IfStatement(inner, value_branches)
                 }
+                MacroToken::ForStatement(inner, for_statement) => {
+                    let mut binding = Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, vec![*for_statement.binding])?;
+                    ValueToken::ForStatement(inner, ForStatement {
+                        binding: Box::new(binding.remove(0)),
+                        from: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.from)?,
+                        to: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.to)?,
+                        body: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.body)?
+                    })
+                },
 
                 // Registers
                 MacroToken::Register(inner) => ValueToken::Register {
@@ -609,7 +619,7 @@ mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::Lexer;
     use crate::mocks::{macro_lex, macro_lex_child};
-    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag, IfStatementBranch};
+    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag, IfStatementBranch, ForStatement};
 
     fn value_lexer<S: Into<String>>(s: S) -> Lexer<ValueStage> {
         Lexer::<ValueStage>::from_lexer(macro_lex(s)).expect("ValueLexer failed")
@@ -1240,6 +1250,26 @@ mod test {
                     ]
                 }
             ])
+        ]);
+    }
+
+    // FOR Statements ---------------------------------------------------------
+    #[test]
+    fn test_for_statment_forwarding() {
+        let lexer = value_lexer("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
+                binding: Box::new(ValueToken::Name(itk!(4, 5, "x"))),
+                from: vec![ValueToken::Integer {
+                    inner: itk!(9, 10, "0"),
+                    value: 0
+                }],
+                to: vec![ValueToken::Integer {
+                    inner: itk!(14, 16, "10"),
+                    value: 10
+                }],
+                body: vec![ValueToken::Name(itk!(24, 27, "bar"))]
+            })
         ]);
     }
 

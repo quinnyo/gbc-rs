@@ -96,6 +96,14 @@ enum IfBranch {
     If
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct ForStatement<T: LexerToken> {
+    pub binding: Box<T>,
+    pub from: Vec<T>,
+    pub to: Vec<T>,
+    pub body: Vec<T>
+}
+
 
 // Macro Specific Tokens ------------------------------------------------------
 lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
@@ -112,6 +120,7 @@ lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<MacroToken>>)),
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
+    ForStatement((ForStatement<MacroToken>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -337,7 +346,7 @@ impl MacroStage {
 
             // Parse IF Statements
             if token.is(TokenType::Reserved) && (token.has_value("THEN") || token.has_value("ELSE") || token.has_value("ENDIF")) {
-                return Err(token.error(format!("Unexpected \"{}\" token outside of if statement.", token.value())));
+                return Err(token.error(format!("Unexpected \"{}\" token outside of IF statement.", token.value())));
 
             } else if token.is(TokenType::Reserved) && token.has_value("IF") {
                 let inner = token.inner().clone();
@@ -359,6 +368,30 @@ impl MacroStage {
                     }
                 }
                 tokens_with_statements.push(MacroToken::IfStatement(inner, branches));
+
+            // Parse REPEAT Statements
+            } else if token.is(TokenType::Reserved) && (token.has_value("IN") || token.has_value("TO") || token.has_value("REPEAT") || token.has_value("ENDFOR")) {
+                return Err(token.error(format!("Unexpected \"{}\" token outside of FOR statement.", token.value())));
+
+            } else if token.is(TokenType::Reserved) && token.has_value("FOR") {
+                let inner = token.into_inner();
+                let binding = MacroToken::from(tokens.expect(TokenType::Name, None, "when parsing FOR statement")?);
+
+                let token = tokens.expect(TokenType::Reserved, Some("IN"), "when parsing FOR statement")?;
+                let from = Self::parse_for_range(&mut tokens, token, "TO")?;
+
+                let token = tokens.expect(TokenType::Reserved, Some("TO"), "when parsing FOR statement range")?;
+                let to = Self::parse_for_range(&mut tokens, token, "REPEAT")?;
+
+                tokens.expect(TokenType::Reserved, Some("REPEAT"), "when parsing FOR statement range")?;
+                let body = Self::parse_for_body(&mut tokens)?;
+
+                tokens_with_statements.push(MacroToken::ForStatement(inner, ForStatement {
+                    binding: Box::new(binding),
+                    from,
+                    to,
+                    body,
+                }));
 
             } else {
                 tokens_with_statements.push(MacroToken::from(token));
@@ -660,7 +693,7 @@ impl MacroStage {
         let mut condition_tokens = Vec::new();
         while !tokens.peek_is(TokenType::Reserved, Some("THEN")) {
             let token = tokens.get("Unexpected end of input while parsing IF statement condition.")?;
-            if token.is(TokenType::Reserved) && (token.has_value("IF") || token.has_value("ELSE") || token.has_value("ENDIF")) {
+            if token.is(TokenType::Reserved) {
                 return Err(token.error(format!("Unexpected \"{}\" token inside of IF statement condition.", token.value())));
 
             } else {
@@ -699,7 +732,7 @@ impl MacroStage {
 
         }
 
-        // Parse nested if statements
+        // Parse nested statements
         let body_tokens = Self::parse_statements(body_tokens)?;
 
         // Check for branches
@@ -719,6 +752,57 @@ impl MacroStage {
 
     }
 
+    fn parse_for_range(
+        tokens: &mut TokenIterator<IncludeToken>,
+        token: IncludeToken,
+        delimiter: &str
+
+    ) -> Result<Vec<MacroToken>, SourceError> {
+        let mut range_tokens = Vec::new();
+        while !tokens.peek_is(TokenType::Reserved, Some(delimiter)) {
+            let token = tokens.get("Unexpected end of input while parsing FOR statement range argument.")?;
+            if token.is(TokenType::Reserved) {
+                return Err(token.error(format!("Unexpected \"{}\" token inside of FOR statement range argument.", token.value())));
+
+            } else {
+                range_tokens.push(MacroToken::from(token));
+            }
+        }
+
+        if range_tokens.is_empty() {
+            return Err(token.error("Empty FOR statement range argument.".to_string()));
+        }
+
+        Ok(range_tokens)
+    }
+
+    fn parse_for_body(
+        tokens: &mut TokenIterator<IncludeToken>
+
+    ) -> Result<Vec<MacroToken>, SourceError> {
+        let mut body_tokens = Vec::new();
+        let mut for_depth = 0;
+        while for_depth > 0 || !tokens.peek_is(TokenType::Reserved, Some("ENDFOR")) {
+
+            let token = tokens.get("Unexpected end of input while parsing FOR statement body.")?;
+
+            // Check for nested statements
+            if token.is(TokenType::Reserved) && token.has_value("FOR") {
+                for_depth += 1;
+
+            } else if token.is(TokenType::Reserved) && token.has_value("ENDFOR") {
+                for_depth -= 1;
+            }
+
+            body_tokens.push(token);
+
+        }
+        tokens.expect(TokenType::Reserved, Some("ENDFOR"), "when parsing FOR statement body")?;
+
+        // Parse nested statements
+        Self::parse_statements(body_tokens)
+    }
+
 }
 
 
@@ -728,7 +812,16 @@ mod test {
     use crate::lexer::Lexer;
     use crate::mocks::include_lex;
     use crate::expression::ExpressionArgumenType;
-    use super::{MacroStage, MacroToken, MacroDefinition, MacroCall, InnerToken, IncludeToken, IfStatementBranch};
+    use super::{
+        MacroStage,
+        MacroToken,
+        MacroDefinition,
+        MacroCall,
+        InnerToken,
+        IncludeToken,
+        IfStatementBranch,
+        ForStatement
+    };
 
     fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
         Lexer::<MacroStage>::from_lexer(include_lex(s)).expect("MacroLexer failed")
@@ -1423,9 +1516,9 @@ mod test {
 
     #[test]
     fn test_error_if_keywords() {
-        assert_eq!(macro_lexer_error("THEN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"THEN\" token outside of if statement.\n\nTHEN\n^--- Here");
-        assert_eq!(macro_lexer_error("ELSE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ELSE\" token outside of if statement.\n\nELSE\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDIF"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDIF\" token outside of if statement.\n\nENDIF\n^--- Here");
+        assert_eq!(macro_lexer_error("THEN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"THEN\" token outside of IF statement.\n\nTHEN\n^--- Here");
+        assert_eq!(macro_lexer_error("ELSE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ELSE\" token outside of IF statement.\n\nELSE\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDIF"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDIF\" token outside of IF statement.\n\nENDIF\n^--- Here");
     }
 
     #[test]
@@ -1447,6 +1540,39 @@ mod test {
     #[test]
     fn test_error_if_nested() {
         assert_eq!(macro_lexer_error("IF foo THEN IF bar THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN IF bar THEN ENDIF\n                        ^--- Here");
+    }
+
+    // FOR Statements ---------------------------------------------------------
+    #[test]
+    fn test_repeat_statement() {
+        let lexer = macro_lexer("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
+                binding: Box::new(MacroToken::Name(itk!(4, 5, "x"))),
+                from: vec![MacroToken::NumberLiteral(itk!(9, 10, "0"))],
+                to: vec![MacroToken::NumberLiteral(itk!(14, 16, "10"))],
+                body: vec![MacroToken::Name(itk!(24, 27, "bar"))]
+            })
+        ]);
+    }
+
+    #[test]
+    fn test_error_repeat_statement() {
+        assert_eq!(macro_lexer_error("FOR"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing FOR statement, expected a \"Name\" token instead.\n\nFOR\n^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input when parsing FOR statement, expected \"IN\" instead.\n\nFOR foo\n    ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN\n        ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0"), "In file \"main.gb.s\" on line 1, column 12: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0\n           ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0 TO"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0 TO\n             ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0 TO 10"), "In file \"main.gb.s\" on line 1, column 17: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0 TO 10\n                ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0 TO 10 REPEAT"), "In file \"main.gb.s\" on line 1, column 20: Unexpected end of input while parsing FOR statement body.\n\nFOR foo IN 0 TO 10 REPEAT\n                   ^--- Here");
+    }
+
+    #[test]
+    fn test_error_repeat_keywords() {
+        assert_eq!(macro_lexer_error("IN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"IN\" token outside of FOR statement.\n\nIN\n^--- Here");
+        assert_eq!(macro_lexer_error("TO"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"TO\" token outside of FOR statement.\n\nTO\n^--- Here");
+        assert_eq!(macro_lexer_error("REPEAT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"REPEAT\" token outside of FOR statement.\n\nREPEAT\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDFOR"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDFOR\" token outside of FOR statement.\n\nENDFOR\n^--- Here");
     }
 
 }
