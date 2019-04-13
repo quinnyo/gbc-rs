@@ -698,7 +698,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (1, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -716,7 +716,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -738,7 +738,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (1, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -756,7 +756,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (1, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -779,7 +779,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(2))))
+                        (1, Expression::Value(ExpressionValue::Integer(2)))
                     ]),
                     bytes: Some(vec![2]),
                     debug_only: false
@@ -797,7 +797,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (4, Expression::Value(ExpressionValue::Integer(3))))
+                        (1, Expression::Value(ExpressionValue::Integer(3)))
                     ]),
                     bytes: Some(vec![3]),
                     debug_only: false
@@ -815,7 +815,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(2))))
+                        (1, Expression::Value(ExpressionValue::Integer(2)))
                     ]),
                     bytes: Some(vec![2]),
                     debug_only: false
@@ -833,7 +833,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (3, Expression::Value(ExpressionValue::Integer(2))))
+                        (1, Expression::Value(ExpressionValue::Integer(2)))
                     ]),
                     bytes: Some(vec![2]),
                     debug_only: false
@@ -860,7 +860,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -869,7 +869,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -878,7 +878,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -896,7 +896,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(0))))
+                        (1, Expression::Value(ExpressionValue::Integer(0)))
                     ]),
                     bytes: Some(vec![0]),
                     debug_only: false
@@ -905,7 +905,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -914,7 +914,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::Integer(2))))
+                        (1, Expression::Value(ExpressionValue::Integer(2)))
                     ]),
                     bytes: Some(vec![2]),
                     debug_only: false
@@ -932,8 +932,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (4, Expression::Value(ExpressionValue::Integer(0)))),
-                        (1, (5, Expression::Value(ExpressionValue::Integer(0))))
+                        (1, Expression::Value(ExpressionValue::Integer(0))),
+                        (1, Expression::Value(ExpressionValue::Integer(0)))
                     ]),
                     bytes: Some(vec![0, 0]),
                     debug_only: false
@@ -942,8 +942,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (4, Expression::Value(ExpressionValue::Integer(0)))),
-                        (1, (5, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(0))),
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![0, 1]),
                     debug_only: false
@@ -952,8 +952,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (4, Expression::Value(ExpressionValue::Integer(1)))),
-                        (1, (5, Expression::Value(ExpressionValue::Integer(0))))
+                        (1, Expression::Value(ExpressionValue::Integer(1))),
+                        (1, Expression::Value(ExpressionValue::Integer(0)))
                     ]),
                     bytes: Some(vec![1, 0]),
                     debug_only: false
@@ -962,8 +962,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (4, Expression::Value(ExpressionValue::Integer(1)))),
-                        (1, (5, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1))),
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1, 1]),
                     debug_only: false
@@ -981,7 +981,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (3, Expression::Value(ExpressionValue::Integer(1))))
+                        (1, Expression::Value(ExpressionValue::Integer(1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false

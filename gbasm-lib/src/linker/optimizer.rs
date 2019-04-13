@@ -1,5 +1,5 @@
 // Internal Dependencies ------------------------------------------------------
-use crate::expression::{OptionalDataExpression, Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
+use crate::expression::{OptionalDataExpression, Expression, ExpressionValue};
 use super::section::entry::{EntryData, SectionEntry};
 use super::util::instruction;
 
@@ -105,7 +105,7 @@ fn optimize_instructions(
         (0xFA, _, _) if bytes[2] == 0xFF => {
             Some((0, vec![EntryData::Instruction {
                 op_code: 0xF0,
-                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(i32::from(bytes[1]))))),
+                expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),
                 bytes: instruction::bytes(0xF0),
                 debug_only: false
             }]))
@@ -115,7 +115,7 @@ fn optimize_instructions(
         (0xEA, _, _) if bytes[2] == 0xFF => {
             Some((0, vec![EntryData::Instruction {
                 op_code: 0xE0,
-                expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(i32::from(bytes[1]))))),
+                expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),
                 bytes: instruction::bytes(0xE0),
                 debug_only: false
             }]))
@@ -249,7 +249,7 @@ fn optimize_instructions(
                 },
                 EntryData::Instruction {
                     op_code: 0xE6,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x1F)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x1F))),
                     bytes: instruction::bytes(0xE6),
                     debug_only: false
                 }
@@ -269,7 +269,7 @@ mod test {
     };
     use super::EntryData;
     use crate::lexer::InnerToken;
-    use crate::expression::{Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
+    use crate::expression::{Expression, ExpressionValue};
 
     macro_rules! itk {
         ($start:expr, $end:expr, $parsed:expr) => {
@@ -286,7 +286,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 2)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 2))),
                     bytes: vec![205, 130, 0],
                     debug_only: false
                 }),
@@ -368,7 +368,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 240,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(5)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(5))),
                     bytes: vec![240, 5],
                     debug_only: false
                 }),
@@ -389,7 +389,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 224,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(5)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(5))),
                     bytes: vec![224, 5],
                     debug_only: false
                 }),
@@ -410,7 +410,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![195, 130, 0],
                     debug_only: false
                 }),
@@ -438,7 +438,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![24, 127],
                     debug_only: false
                 }),
@@ -466,7 +466,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![24, 127],
                     debug_only: false
                 })
@@ -491,7 +491,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1))),
                     bytes: vec![24, 130],
                     debug_only: false
                 })
@@ -503,7 +503,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 56,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![56, 127],
                     debug_only: false
                 })
@@ -521,7 +521,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 48,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1))),
                     bytes: vec![48, 127],
                     debug_only: false
                 })
@@ -539,7 +539,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 40,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![40, 127],
                     debug_only: false
                 })
@@ -557,7 +557,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 32,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1))),
                     bytes: vec![32, 127],
                     debug_only: false
                 })
@@ -579,7 +579,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![195, 129, 0],
                     debug_only: false
                 }),
@@ -607,7 +607,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![195, 130, 0],
                     debug_only: false
                 })
@@ -632,7 +632,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1))),
                     bytes: vec![195, 0, 0],
                     debug_only: false
                 })
@@ -665,7 +665,7 @@ mod test {
                 }),
                 (2, EntryData::Instruction {
                     op_code: 230,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x1F)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x1F))),
                     bytes: vec![230, 31],
                     debug_only: false
                 }),

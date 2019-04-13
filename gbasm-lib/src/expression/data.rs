@@ -42,13 +42,13 @@ impl DataStorage {
         match self {
             DataStorage::Bytes(expressions) | DataStorage::Words(expressions) => {
                 for expr in expressions {
-                    expr.1.replace_constant(constant, new_value);
+                    expr.replace_constant(constant, new_value);
                 }
             },
             DataStorage::Buffer(length, fill) => {
-                length.1.replace_constant(constant, new_value);
+                length.replace_constant(constant, new_value);
                 if let Some(ref mut fill) = fill {
-                    fill.1.replace_constant(constant, new_value);
+                    fill.replace_constant(constant, new_value);
                 }
             },
             _ => {}

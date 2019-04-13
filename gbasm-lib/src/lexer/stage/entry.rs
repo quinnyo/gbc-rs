@@ -10,7 +10,7 @@ use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 use super::macros::MacroCall;
 use crate::error::SourceError;
 use crate::lexer::ExpressionStage;
-use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
+use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use super::expression::ExpressionToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
@@ -73,12 +73,12 @@ impl EntryToken {
     pub fn replace_constant(&mut self, constant: &str, new_value: &ExpressionValue) {
         match self {
             EntryToken::InstructionWithArg(_, _, expr) | EntryToken::DebugInstructionWithArg(_, _, expr) => {
-                expr.1.replace_constant(constant, new_value);
+                expr.replace_constant(constant, new_value);
             },
             EntryToken::IfStatement(_, branches) => {
                 for branch in branches {
                     if let Some(ref mut condition) = branch.condition {
-                        condition.1.replace_constant(constant, new_value);
+                        condition.replace_constant(constant, new_value);
                     }
                     for token in &mut branch.body {
                         token.replace_constant(constant, new_value);
@@ -86,30 +86,30 @@ impl EntryToken {
                 }
             },
             EntryToken::ForStatement(_, for_statement) => {
-                for_statement.from.1.replace_constant(constant, new_value);
-                for_statement.to.1.replace_constant(constant, new_value);
+                for_statement.from.replace_constant(constant, new_value);
+                for_statement.to.replace_constant(constant, new_value);
                 for token in &mut for_statement.body {
                     token.replace_constant(constant, new_value);
                 }
             },
             EntryToken::Constant { value, .. } => {
-                value.1.replace_constant(constant, new_value);
+                value.replace_constant(constant, new_value);
             },
             EntryToken::Data { storage, .. } => {
                 storage.replace_constant(constant, new_value);
             },
             EntryToken::SectionDeclaration { name, segment_offset, segment_size, bank_index, .. } => {
                 if let Some(ref mut name) = name {
-                    name.1.replace_constant(constant, new_value);
+                    name.replace_constant(constant, new_value);
                 }
                 if let Some(ref mut segment_offset) = segment_offset {
-                    segment_offset.1.replace_constant(constant, new_value);
+                    segment_offset.replace_constant(constant, new_value);
                 }
                 if let Some(ref mut segment_size) = segment_size {
-                    segment_size.1.replace_constant(constant, new_value);
+                    segment_size.replace_constant(constant, new_value);
                 }
                 if let Some(ref mut bank_index) = bank_index {
-                    bank_index.1.replace_constant(constant, new_value);
+                    bank_index.replace_constant(constant, new_value);
                 }
             },
             _ => {}
@@ -168,8 +168,8 @@ impl EntryStage {
 
                                 } else {
                                     let token = tokens.pop().unwrap();
-                                    if let ExpressionToken::ConstExpression(_, id, expr) = token {
-                                        Some((id, expr))
+                                    if let ExpressionToken::ConstExpression(_, expr) = token {
+                                        Some(expr)
 
                                     } else {
                                         let t = token.typ();
@@ -242,8 +242,8 @@ impl EntryStage {
                             let name = if tokens.peek_is(TokenType::ConstExpression, None) {
                                 let name = tokens.expect(TokenType::ConstExpression, None, "when parsing section declaration")?;
                                 tokens.expect(TokenType::Comma, None, "after section name")?;
-                                if let ExpressionToken::ConstExpression(_, id, expr) = name {
-                                    Some((id, expr))
+                                if let ExpressionToken::ConstExpression(_, expr) = name {
+                                    Some(expr)
 
                                 } else {
                                     None
@@ -337,8 +337,8 @@ impl EntryStage {
         }
 
         let token = tokens.remove(0);
-        if let ExpressionToken::ConstExpression(_, id, expr) = token {
-            Ok((id, expr))
+        if let ExpressionToken::ConstExpression(_, expr) = token {
+            Ok(expr)
 
         } else {
             Err(inner.error(format!(
@@ -356,7 +356,7 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
         tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
-        if let ExpressionToken::ConstExpression(_, id, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
+        if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
             if let Some(constant_def) = constants.get(&inner.value) {
                 Err(inner.error(
                     format!("Re-definition of previously declared constant \"{}\".", inner.value)
@@ -368,7 +368,7 @@ impl EntryStage {
                 Ok(EntryToken::Constant {
                     inner,
                     is_string,
-                    value: (id, expr)
+                    value: expr
                 })
             }
 
@@ -440,9 +440,9 @@ impl EntryStage {
 
                 } else if tokens.peek_is(TokenType::ConstExpression, None) {
                     let expr = tokens.expect(TokenType::ConstExpression, None, "while parsing instruction memory argument")?;
-                    if let ExpressionToken::ConstExpression(_, id, expr) = expr {
+                    if let ExpressionToken::ConstExpression(_, expr) = expr {
                         layout.push(LexerArgument::MemoryLookupValue);
-                        expression = Some((id, expr));
+                        expression = Some(expr);
 
                     } else {
                         unreachable!();
@@ -450,9 +450,9 @@ impl EntryStage {
 
                 } else {
                     let expr = tokens.expect(TokenType::Expression, None, "while parsing instruction memory argument")?;
-                    if let ExpressionToken::Expression(_, id, expr) = expr {
+                    if let ExpressionToken::Expression(_, expr) = expr {
                         layout.push(LexerArgument::MemoryLookupValue);
-                        expression = Some((id, expr));
+                        expression = Some(expr);
 
                     } else {
                         unreachable!();
@@ -464,9 +464,9 @@ impl EntryStage {
             } else if tokens.peek_is(TokenType::Expression, None) | tokens.peek_is(TokenType::ConstExpression, None) {
                 trailing_comma = None;
                 let expr = tokens.get("while parsing instruction register argument")?;
-                if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
+                if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
                     layout.push(LexerArgument::Value);
-                    expression = Some((id, expr));
+                    expression = Some(expr);
 
                 } else {
                     unreachable!();
@@ -514,7 +514,7 @@ impl EntryStage {
             // BGB debugging support
             "msg" => {
                 let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
-                if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::String(s))) = &expr {
+                if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::String(s))) = &expr {
                     let bytes = s.clone().into_bytes();
                     if bytes.len() > 127 - 4 {
                         return Err(expr.error(
@@ -530,8 +530,8 @@ impl EntryStage {
                             EntryToken::DebugInstructionWithArg(
                                 inner.clone(),
                                 0x18,
-                                (TEMPORARY_EXPRESSION_ID, Expression::Value(
-                                    ExpressionValue::OffsetAddress(inner.clone(), 4 + bytes.len() as i32))
+                                Expression::Value(
+                                    ExpressionValue::OffsetAddress(inner.clone(), 4 + bytes.len() as i32)
                                 )
                             ),
 
@@ -676,11 +676,11 @@ impl EntryStage {
             "vsync" => {
                 vec![
                     // ldh     a,[$FF41]
-                    EntryToken::InstructionWithArg(inner.clone(), 0xF0, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x41)))),
+                    EntryToken::InstructionWithArg(inner.clone(), 0xF0, Expression::Value(ExpressionValue::Integer(0x41))),
                     // and     %00000010
-                    EntryToken::InstructionWithArg(inner.clone(), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
+                    EntryToken::InstructionWithArg(inner.clone(), 0xE6, Expression::Value(ExpressionValue::Integer(0b0000_0010))),
                     // jr      nz,@-4
-                    EntryToken::InstructionWithArg(inner.clone(), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(inner, -6)))),
+                    EntryToken::InstructionWithArg(inner.clone(), 0x20, Expression::Value(ExpressionValue::OffsetAddress(inner, -6))),
                 ]
             },
             _ => unreachable!()
@@ -748,7 +748,7 @@ impl EntryStage {
             instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + high.instruction_offset()));
 
             // sbc 0
-            instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))));
+            instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0xDE, Expression::Value(ExpressionValue::Integer(0))));
 
             // ld high,a
             instructions.push(EntryToken::Instruction(inner.clone(), 0x47 + double.instruction_offset()));
@@ -762,7 +762,7 @@ impl EntryStage {
         let reg = Self::parse_meta_byte_register(tokens)?;
         tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
         let expr = tokens.get("Unexpected end of input while parsing instruction arguments.")?;
-        if let ExpressionToken::ConstExpression(_, _, Expression::Value(ExpressionValue::Integer(i))) = expr {
+        if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::Integer(i))) = expr {
             if i > 0 && (i as u32).is_power_of_two() && i <= 128 {
 
                 let shifts = match i {
@@ -790,7 +790,7 @@ impl EntryStage {
                     let and_instruction = EntryToken::InstructionWithArg(
                         inner.clone(),
                         230,
-                        (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(and_constant)))
+                        Expression::Value(ExpressionValue::Integer(and_constant))
                     );
                     Ok(match shifts {
                         1 => vec![
@@ -911,8 +911,8 @@ impl EntryStage {
     fn parse_meta_optional_expression(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<DataExpression>, SourceError> {
         if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
             let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
-            if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
-                Ok(Some((id, expr)))
+            if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
+                Ok(Some(expr))
 
             } else {
                 Ok(None)
@@ -925,9 +925,9 @@ impl EntryStage {
 
     fn parse_meta_bracket_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, SourceError> {
         let expr = tokens.get("Unexpected end of input while parsing instruction label argument.")?;
-        if let ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) = expr {
+        if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
             tokens.expect(TokenType::CloseBracket, Some("]"), "while parsing instruction label argument")?;
-            Ok((id, expr))
+            Ok(expr)
 
         } else {
             Err(expr.error(format!("Unexpected \"{}\", expected a expression as the label argument instead.", expr.value())))
@@ -943,8 +943,8 @@ impl EntryStage {
         } else {
             let value = tokens.expect(TokenType::ConstExpression, None, msg)?;
             tokens.expect(TokenType::CloseBracket, Some("]"), msg)?;
-            if let ExpressionToken::ConstExpression(_, id, expr) = value {
-                Ok(Some((id, expr)))
+            if let ExpressionToken::ConstExpression(_, expr) = value {
+                Ok(Some(expr))
 
             } else {
                 Ok(None)
@@ -1028,15 +1028,15 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
         let token = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
-        if let ExpressionToken::ConstExpression(_, id, expr) = token {
+        if let ExpressionToken::ConstExpression(_, expr) = token {
             if tokens.peek_is(TokenType::ConstExpression, None) {
                 let data = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
-                if let ExpressionToken::ConstExpression(_, data_id, data_expr) = data {
+                if let ExpressionToken::ConstExpression(_, data_expr) = data {
                     Ok(EntryToken::Data {
                         inner,
                         alignment,
                         endianess: DataEndianess::Little,
-                        storage: DataStorage::Buffer((id, expr), Some((data_id, data_expr))),
+                        storage: DataStorage::Buffer(expr, Some(data_expr)),
                         debug_only: false
                     })
 
@@ -1049,7 +1049,7 @@ impl EntryStage {
                     inner,
                     alignment,
                     endianess: DataEndianess::Little,
-                    storage: DataStorage::Buffer((id, expr), None),
+                    storage: DataStorage::Buffer(expr, None),
                     debug_only: false
                 })
             }
@@ -1064,8 +1064,8 @@ impl EntryStage {
             while tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
                 let expr = tokens.get("when parsing expression list")?;
                 match expr {
-                    ExpressionToken::ConstExpression(_, id, expr) | ExpressionToken::Expression(_, id, expr) => {
-                        expressions.push((id, expr));
+                    ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) => {
+                        expressions.push(expr);
                     },
                     _ => unreachable!()
                 }
@@ -1194,12 +1194,12 @@ impl EntryStage {
                             // ld a,high
                             EntryToken::Instruction(inner.clone(), 0x78 + high.instruction_offset()),
                             // ld [someLabel+1],a
-                            EntryToken::InstructionWithArg(inner.clone(), 0xEA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+                            EntryToken::InstructionWithArg(inner.clone(), 0xEA, Expression::Binary {
                                 inner,
                                 op: Operator::Plus,
-                                left: Box::new(target.1),
+                                left: Box::new(target),
                                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-                            }))
+                            })
                         ]
                     }
                 }
@@ -1344,12 +1344,12 @@ impl EntryStage {
                     // ld low,a
                     EntryToken::Instruction(inner.clone(), 0x47 + low.instruction_offset_into_a()),
                     // ld a,[someLabel+1]
-                    EntryToken::InstructionWithArg(inner.clone(), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+                    EntryToken::InstructionWithArg(inner.clone(), 0xFA, Expression::Binary {
                         inner: inner.clone(),
                         op: Operator::Plus,
-                        left: Box::new(source.1),
+                        left: Box::new(source),
                         right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-                    })),
+                    }),
                     // ld high,a
                     EntryToken::Instruction(inner, 0x47 + high.instruction_offset_into_a())
                 ]
@@ -1495,7 +1495,7 @@ mod test {
     use crate::lexer::Lexer;
     use crate::mocks::{expr_lex, expr_lex_binary};
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement};
-    use crate::expression::{Expression, ExpressionValue, Operator, TEMPORARY_EXPRESSION_ID};
+    use crate::expression::{Expression, ExpressionValue, Operator};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
         Lexer::<EntryStage>::from_lexer(expr_lex(s)).expect("EntryStage failed")
@@ -1571,15 +1571,15 @@ mod test {
         assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: false,
-            value: (0, Expression::Value(ExpressionValue::Integer(2)))
+            value: Expression::Value(ExpressionValue::Integer(2))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: false,
-            value: (0, Expression::Value(ExpressionValue::ConstantValue(
+            value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
                 "bar".to_string()
-            )))
+            ))
         }]);
     }
 
@@ -1588,15 +1588,15 @@ mod test {
         assert_eq!(tfe("foo EQUS 'test'"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: true,
-            value: (0, Expression::Value(ExpressionValue::String("test".to_string())))
+            value: Expression::Value(ExpressionValue::String("test".to_string()))
         }]);
         assert_eq!(tfe("foo EQUS bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: true,
-            value: (0, Expression::Value(ExpressionValue::ConstantValue(
+            value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(9, 12, "bar"),
                 "bar".to_string()
-            )))
+            ))
         }]);
     }
     #[test]
@@ -1626,7 +1626,7 @@ mod test {
             inner: itk!(0, 2, "DB"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Bytes(vec![(0, Expression::Value(ExpressionValue::Integer(2)))]),
+            storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(2))]),
             debug_only: false
         }]);
         assert_eq!(tfe("DB 2 + 3, 1"), vec![EntryToken::Data {
@@ -1634,13 +1634,13 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Bytes(vec![
-                (0, Expression::Binary {
+                Expression::Binary {
                     inner: itk!(5, 6, "+"),
                     op: Operator::Plus,
                     left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-                }),
-                (1, Expression::Value(ExpressionValue::Integer(1)))
+                },
+                Expression::Value(ExpressionValue::Integer(1))
             ]),
             debug_only: false
         }]);
@@ -1649,10 +1649,10 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Bytes(vec![
-                (0, Expression::Value(ExpressionValue::Integer(2))),
-                (1, Expression::Value(ExpressionValue::Integer(3))),
-                (2, Expression::Value(ExpressionValue::Integer(4))),
-                (3, Expression::Value(ExpressionValue::Integer(5)))
+                Expression::Value(ExpressionValue::Integer(2)),
+                Expression::Value(ExpressionValue::Integer(3)),
+                Expression::Value(ExpressionValue::Integer(4)),
+                Expression::Value(ExpressionValue::Integer(5))
             ]),
             debug_only: false
         }]);
@@ -1671,7 +1671,7 @@ mod test {
             inner: itk!(0, 2, "DW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))]),
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
             debug_only: false
         }]);
         assert_eq!(tfe("DW 2 + 3, 1"), vec![EntryToken::Data {
@@ -1679,13 +1679,13 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Words(vec![
-                (0, Expression::Binary {
+                Expression::Binary {
                     inner: itk!(5, 6, "+"),
                     op: Operator::Plus,
                     left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-                }),
-                (1, Expression::Value(ExpressionValue::Integer(1)))
+                },
+                Expression::Value(ExpressionValue::Integer(1))
             ]),
             debug_only: false
         }]);
@@ -1694,10 +1694,10 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Words(vec![
-                (0, Expression::Value(ExpressionValue::Integer(2000))),
-                (1, Expression::Value(ExpressionValue::Integer(3000))),
-                (2, Expression::Value(ExpressionValue::Integer(4000))),
-                (3, Expression::Value(ExpressionValue::Integer(5000)))
+                Expression::Value(ExpressionValue::Integer(2000)),
+                Expression::Value(ExpressionValue::Integer(3000)),
+                Expression::Value(ExpressionValue::Integer(4000)),
+                Expression::Value(ExpressionValue::Integer(5000))
             ]),
             debug_only: false
         }]);
@@ -1716,7 +1716,7 @@ mod test {
             inner: itk!(0, 2, "BW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
-            storage: DataStorage::Words(vec![(0, Expression::Value(ExpressionValue::Integer(2000)))]),
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
             debug_only: false
         }]);
         assert_eq!(tfe("BW 2 + 3, 1"), vec![EntryToken::Data {
@@ -1724,13 +1724,13 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Words(vec![
-                (0, Expression::Binary {
+                Expression::Binary {
                     inner: itk!(5, 6, "+"),
                     op: Operator::Plus,
                     left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                     right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
-                }),
-                (1, Expression::Value(ExpressionValue::Integer(1)))
+                },
+                Expression::Value(ExpressionValue::Integer(1))
             ]),
             debug_only: false
         }]);
@@ -1739,10 +1739,10 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Words(vec![
-                (0, Expression::Value(ExpressionValue::Integer(2000))),
-                (1, Expression::Value(ExpressionValue::Integer(3000))),
-                (2, Expression::Value(ExpressionValue::Integer(4000))),
-                (3, Expression::Value(ExpressionValue::Integer(5000)))
+                Expression::Value(ExpressionValue::Integer(2000)),
+                Expression::Value(ExpressionValue::Integer(3000)),
+                Expression::Value(ExpressionValue::Integer(4000)),
+                Expression::Value(ExpressionValue::Integer(5000))
             ]),
             debug_only: false
         }]);
@@ -1754,13 +1754,13 @@ mod test {
             inner: itk!(0, 2, "DS"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Buffer((0, Expression::Binary {
+            storage: DataStorage::Buffer(Expression::Binary {
                 inner: itk!(5, 6, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }), None),
+            }, None),
             debug_only: false
         }]);
     }
@@ -1772,8 +1772,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Buffer(
-                (0, Expression::Value(ExpressionValue::Integer(15))),
-                Some((1, Expression::Value(ExpressionValue::String("Hello World".to_string()))))
+                Expression::Value(ExpressionValue::Integer(15)),
+                Some(Expression::Value(ExpressionValue::String("Hello World".to_string())))
             ),
             debug_only: false
         }]);
@@ -1786,7 +1786,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Buffer(
-                (0, Expression::Value(ExpressionValue::String("Hello World".to_string()))),
+                Expression::Value(ExpressionValue::String("Hello World".to_string())),
                 None
             ),
             debug_only: false
@@ -1799,13 +1799,13 @@ mod test {
             inner: itk!(0, 3, "DS8"),
             alignment: DataAlignment::WithinWord,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Buffer((0, Expression::Binary {
+            storage: DataStorage::Buffer(Expression::Binary {
                 inner: itk!(6, 7, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }), None),
+            }, None),
             debug_only: false
         }]);
     }
@@ -1816,13 +1816,13 @@ mod test {
             inner: itk!(0, 4, "DS16"),
             alignment: DataAlignment::Word,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Buffer((0, Expression::Binary {
+            storage: DataStorage::Buffer(Expression::Binary {
                 inner: itk!(7, 8, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }), None),
+            }, None),
             debug_only: false
         }]);
     }
@@ -1857,7 +1857,7 @@ mod test {
     fn test_section_with_name() {
         assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
-            name: Some((0, Expression::Value(ExpressionValue::String("Foo".to_string())))),
+            name: Some(Expression::Value(ExpressionValue::String("Foo".to_string()))),
             segment_name: "ROM0".to_string(),
             segment_offset: None,
             segment_size: None,
@@ -1871,7 +1871,7 @@ mod test {
             inner: itk!(0, 7, "SECTION"),
             name: None,
             segment_name: "ROM0".to_string(),
-            segment_offset: Some((0, Expression::Value(ExpressionValue::Integer(0)))),
+            segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
             segment_size: None,
             bank_index: None
         }]);
@@ -1883,8 +1883,8 @@ mod test {
             inner: itk!(0, 7, "SECTION"),
             name: None,
             segment_name: "ROM0".to_string(),
-            segment_offset: Some((0, Expression::Value(ExpressionValue::Integer(0)))),
-            segment_size: Some((1, Expression::Value(ExpressionValue::Integer(2048)))),
+            segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
+            segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
             bank_index: None
         }]);
     }
@@ -1896,7 +1896,7 @@ mod test {
             name: None,
             segment_name: "ROM0".to_string(),
             segment_offset: None,
-            segment_size: Some((0, Expression::Value(ExpressionValue::Integer(2048)))),
+            segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
             bank_index: None
         }]);
     }
@@ -1909,7 +1909,7 @@ mod test {
             segment_name: "ROM0".to_string(),
             segment_offset: None,
             segment_size: None,
-            bank_index: Some((0, Expression::Value(ExpressionValue::Integer(1)))),
+            bank_index: Some(Expression::Value(ExpressionValue::Integer(1))),
         }]);
     }
 
@@ -1929,7 +1929,7 @@ mod test {
             EntryToken::InstructionWithArg(
                 InnerToken::new(0, 0, $mnemonic.len(), $mnemonic.into()),
                 $op,
-                (0, Expression::Value(ExpressionValue::Integer($arg)))
+                Expression::Value(ExpressionValue::Integer($arg))
             )
         };
         ($mnemonic:expr, $op:expr) => {
@@ -2508,7 +2508,7 @@ mod test {
     fn test_meta_instruction_msg() {
         assert_eq!(tfe("msg 'Hello World'"), vec![
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x52),
-            EntryToken::DebugInstructionWithArg(itk!(0, 3, "msg"), 0x18, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 3, "msg"), 15)))),
+            EntryToken::DebugInstructionWithArg(itk!(0, 3, "msg"), 0x18, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 3, "msg"), 15))),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x64),
             EntryToken::DebugInstruction(itk!(0, 3, "msg"), 0x00),
@@ -2556,29 +2556,29 @@ mod test {
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
-            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(248))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, Expression::Value(ExpressionValue::Integer(248)))
         ]);
         assert_eq!(tfe("mul a,16"), vec![
             EntryToken::Instruction(itk!(0, 3, "mul"), 311),
-            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(240))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, Expression::Value(ExpressionValue::Integer(240)))
         ]);
         assert_eq!(tfe("mul a,32"), vec![
             EntryToken::Instruction(itk!(0, 3, "mul"), 311),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
-            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(224))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, Expression::Value(ExpressionValue::Integer(224)))
         ]);
         assert_eq!(tfe("mul a,64"), vec![
             EntryToken::Instruction(itk!(0, 3, "mul"), 311),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
-            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(192))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, Expression::Value(ExpressionValue::Integer(192)))
         ]);
         assert_eq!(tfe("mul a,128"), vec![
             EntryToken::Instruction(itk!(0, 3, "mul"), 311),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
             EntryToken::Instruction(itk!(0, 3, "mul"), 7),
-            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(128))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "mul"), 230, Expression::Value(ExpressionValue::Integer(128)))
         ]);
     }
 
@@ -2611,29 +2611,29 @@ mod test {
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
-            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(31))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, Expression::Value(ExpressionValue::Integer(31)))
         ]);
         assert_eq!(tfe("div a,16"), vec![
             EntryToken::Instruction(itk!(0, 3, "div"), 311),
-            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(15))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, Expression::Value(ExpressionValue::Integer(15)))
         ]);
         assert_eq!(tfe("div a,32"), vec![
             EntryToken::Instruction(itk!(0, 3, "div"), 311),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
-            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(7))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, Expression::Value(ExpressionValue::Integer(7)))
         ]);
         assert_eq!(tfe("div a,64"), vec![
             EntryToken::Instruction(itk!(0, 3, "div"), 311),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
-            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(3))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, Expression::Value(ExpressionValue::Integer(3)))
         ]);
         assert_eq!(tfe("div a,128"), vec![
             EntryToken::Instruction(itk!(0, 3, "div"), 311),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
             EntryToken::Instruction(itk!(0, 3, "div"), 15),
-            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(1))))
+            EntryToken::InstructionWithArg(itk!(0, 3, "div"), 230, Expression::Value(ExpressionValue::Integer(1)))
         ]);
     }
 
@@ -2652,9 +2652,9 @@ mod test {
     #[test]
     fn test_meta_instruction_incx() {
         assert_eq!(tfe("incx [$1234]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "incx"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(0x1234)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "incx"), 0xFA, Expression::Value(ExpressionValue::Integer(0x1234))),
             EntryToken::Instruction(itk!(0, 4, "incx"), 0x3C),
-            EntryToken::InstructionWithArg(itk!(0, 4, "incx"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(0x1234))))
+            EntryToken::InstructionWithArg(itk!(0, 4, "incx"), 0xEA, Expression::Value(ExpressionValue::Integer(0x1234)))
         ]);
     }
 
@@ -2669,9 +2669,9 @@ mod test {
     #[test]
     fn test_meta_instruction_decx() {
         assert_eq!(tfe("decx [$1234]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "decx"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(0x1234)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "decx"), 0xFA, Expression::Value(ExpressionValue::Integer(0x1234))),
             EntryToken::Instruction(itk!(0, 4, "decx"), 0x3D),
-            EntryToken::InstructionWithArg(itk!(0, 4, "decx"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(0x1234))))
+            EntryToken::InstructionWithArg(itk!(0, 4, "decx"), 0xEA, Expression::Value(ExpressionValue::Integer(0x1234)))
         ]);
     }
 
@@ -2686,9 +2686,9 @@ mod test {
     #[test]
     fn test_meta_instruction_vsync() {
         assert_eq!(tfe("vsync"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xF0, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0x41)))),
-            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xE6, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0b0000_0010)))),
-            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -6)))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xF0, Expression::Value(ExpressionValue::Integer(0x41))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xE6, Expression::Value(ExpressionValue::Integer(0b0000_0010))),
+            EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -6))),
         ]);
     }
 
@@ -2716,7 +2716,7 @@ mod test {
             EntryToken::Instruction(itk!(0, 4, "addw"), 0x47 + 16)
         ]);
         assert_eq!(tfe("addw hl,4"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "addw"), 0x3E, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "addw"), 0x3E, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "addw"), 0x80 + 5),
             EntryToken::Instruction(itk!(0, 4, "addw"), 0x4F + 32),
             EntryToken::Instruction(itk!(0, 4, "addw"), 0x88 + 4),
@@ -2747,29 +2747,29 @@ mod test {
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
-            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
         ]);
         assert_eq!(tfe("subw bc,a"), vec![
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 1),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 0),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 0),
-            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 0)
         ]);
         assert_eq!(tfe("subw de,a"), vec![
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 3),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 16),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 2),
-            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 16)
         ]);
         assert_eq!(tfe("subw hl,4"), vec![
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
-            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xD6, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xD6, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
-            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
         ]);
         assert_eq!(tfe("subw hl,b"), vec![
@@ -2777,7 +2777,7 @@ mod test {
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x90 + 0),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
-            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, (TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(0)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
         ]);
     }
@@ -2820,11 +2820,11 @@ mod test {
             EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
         ]);
         assert_eq!(tfe("retx 4"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "retx"), 0x3E, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "retx"), 0x3E, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
         ]);
         assert_eq!(tfe("retx [4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "retx"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "retx"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "retx"), 0xC9)
         ]);
         assert_eq!(tfe("retx [hl]"), vec![
@@ -2854,47 +2854,47 @@ mod test {
     #[test]
     fn test_meta_instruction_ldxa_memory_x() {
         assert_eq!(tfe("ldxa [4],a"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],b"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],c"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 1),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],d"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 2),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],e"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 3),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],h"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 4),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],l"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 5),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],4"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0x3E, (1, Expression::Value(ExpressionValue::Integer(4)))),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0x3E, Expression::Value(ExpressionValue::Integer(4))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],[8]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (1, Expression::Value(ExpressionValue::Integer(8)))),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(8))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],[hli]"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x2A),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa [4],[hld]"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x3A),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
     }
 
@@ -2902,69 +2902,69 @@ mod test {
     fn test_meta_instruction_ldxa_memory_double() {
         assert_eq!(tfe("ldxa [4],bc"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x79),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Binary {
                 inner: itk!(0, 4, "ldxa"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(4))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-            }))
+            })
         ]);
         assert_eq!(tfe("ldxa [4],de"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x79 + 2),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 2),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Binary {
                 inner: itk!(0, 4, "ldxa"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(4))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-            }))
+            })
         ]);
         assert_eq!(tfe("ldxa [4],hl"), vec![
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x79 + 4),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x78 + 4),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xEA, Expression::Binary {
                 inner: itk!(0, 4, "ldxa"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(4))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-            }))
+            })
         ]);
 
         assert_eq!(tfe("ldxa bc,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47 + 8),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Binary {
                 inner: itk!(0, 4, "ldxa"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(4))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-            })),
+            }),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47)
         ]);
         assert_eq!(tfe("ldxa de,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47 + 24),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Binary {
                 inner: itk!(0, 4, "ldxa"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(4))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-            })),
+            }),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47 + 16)
         ]);
         assert_eq!(tfe("ldxa hl,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47 + 40),
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (TEMPORARY_EXPRESSION_ID, Expression::Binary {
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Binary {
                 inner: itk!(0, 4, "ldxa"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(4))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-            })),
+            }),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47 + 32)
         ]);
 
@@ -2973,30 +2973,30 @@ mod test {
     #[test]
     fn test_meta_instruction_ldxa_register_x() {
         assert_eq!(tfe("ldxa a,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
         ]);
         assert_eq!(tfe("ldxa b,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x47)
         ]);
         assert_eq!(tfe("ldxa c,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x4F),
         ]);
         assert_eq!(tfe("ldxa d,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x57),
         ]);
         assert_eq!(tfe("ldxa e,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x5F),
         ]);
         assert_eq!(tfe("ldxa h,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x67),
         ]);
         assert_eq!(tfe("ldxa l,[4]"), vec![
-            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, (0, Expression::Value(ExpressionValue::Integer(4)))),
+            EntryToken::InstructionWithArg(itk!(0, 4, "ldxa"), 0xFA, Expression::Value(ExpressionValue::Integer(4))),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x6F),
         ]);
         assert_eq!(tfe("ldxa a,[hli]"), vec![
@@ -3144,11 +3144,11 @@ mod test {
         assert_eq!(lexer.tokens, vec![
             EntryToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
-                    condition: Some((0, Expression::Value(ExpressionValue::Integer(1)))),
+                    condition: Some(Expression::Value(ExpressionValue::Integer(1))),
                     body: vec![
                         EntryToken::IfStatement(itk!(10, 12, "IF"), vec![
                             IfStatementBranch {
-                                condition: Some((1, Expression::Value(ExpressionValue::Integer(0)))),
+                                condition: Some(Expression::Value(ExpressionValue::Integer(0))),
                                 body: vec![
                                     EntryToken::Instruction(itk!(20, 23, "nop"), 0)
                                 ]
@@ -3167,8 +3167,8 @@ mod test {
         assert_eq!(lexer.tokens, vec![
             EntryToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
                 binding: "x".to_string(),
-                from: (0, Expression::Value(ExpressionValue::Integer(0))),
-                to: (1, Expression::Value(ExpressionValue::Integer(10))),
+                from: Expression::Value(ExpressionValue::Integer(0)),
+                to: Expression::Value(ExpressionValue::Integer(10)),
                 body: vec![
                     EntryToken::Instruction(itk!(24, 27, "nop"), 0)
                 ]

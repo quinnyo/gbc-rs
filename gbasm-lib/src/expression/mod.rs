@@ -11,12 +11,8 @@ pub mod data;
 pub mod evaluator;
 
 
-// Constants ------------------------------------------------------------------
-pub const TEMPORARY_EXPRESSION_ID: usize = ::std::u32::MAX as usize;
-
-
 // Types ----------------------------------------------------------------------
-pub type DataExpression = (usize, Expression);
+pub type DataExpression = Expression;
 pub type OptionalDataExpression = Option<DataExpression>;
 
 

@@ -50,7 +50,7 @@ impl EvaluatorContext {
             let stack = vec![name.as_str()];
             let c = self.resolve_expression_inner(
                 &stack,
-                constant.expression.1
+                constant.expression
             )?;
 
             // Check result matches desired type
@@ -80,7 +80,7 @@ impl EvaluatorContext {
             Ok(result.clone())
 
         } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(name).cloned() {
-            let (_, value) = expression.clone();
+            let value = expression.clone();
             if constant_stack.contains(&name) {
                 Err(parent.error(
                     format!("Recursive declaration of constant \"{}\".", name)
@@ -107,7 +107,7 @@ impl EvaluatorContext {
 
     ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::new();
-        self.resolve_expression_inner(&stack, expression.1)
+        self.resolve_expression_inner(&stack, expression)
     }
 
     pub fn resolve_optional_expression(
@@ -115,7 +115,7 @@ impl EvaluatorContext {
         expression: OptionalDataExpression
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
-        if let Some((_, expr)) = expression {
+        if let Some(expr) = expression {
             let stack = Vec::new();
             Ok(Some(self.resolve_expression_inner(&stack, expr)?))
 
@@ -654,7 +654,7 @@ mod test {
 
     fn const_expression_result<S: Into<String>>(s: S) -> Result<ExpressionResult, SourceError> {
         let token = expr_lex(s).tokens.remove(0);
-        if let ExpressionToken::ConstExpression(_, _, expr) = token {
+        if let ExpressionToken::ConstExpression(_, expr) = token {
             let mut context = EvaluatorContext::new();
             let stack = Vec::new();
             context.resolve_expression_inner(&stack, expr)

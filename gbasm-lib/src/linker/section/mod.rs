@@ -697,7 +697,7 @@ mod test {
     };
     use super::EntryData;
     use crate::lexer::InnerToken;
-    use crate::expression::{Expression, ExpressionValue, TEMPORARY_EXPRESSION_ID};
+    use crate::expression::{Expression, ExpressionValue};
     use crate::expression::data::{DataAlignment, DataEndianess};
 
     macro_rules! itk {
@@ -751,19 +751,19 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, (3, Expression::Value(ExpressionValue::ConstantValue(itk!(67, 70, "int"), "int".to_string()))))]),
+                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(67, 70, "int"), "int".to_string())))]),
                     bytes: Some(vec![1]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, (5, Expression::BuiltinCall {
+                    expressions: Some(vec![(1, Expression::BuiltinCall {
                         inner: itk!(74, 79, "FLOOR"),
                         name: "FLOOR".to_string(),
                         args: vec![Expression::Value(ExpressionValue::ConstantValue(itk!(80, 85, "float"), "float".to_string()))]
 
-                    }))]),
+                    })]),
                     bytes: Some(vec![3]),
                     debug_only: false
                 }),
@@ -786,21 +786,21 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, (3, Expression::Value(ExpressionValue::ConstantValue(itk!(40, 41, "A"), "A".to_string()))))]),
+                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(40, 41, "A"), "A".to_string())))]),
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, (4, Expression::Value(ExpressionValue::ConstantValue(itk!(45, 46, "B"), "B".to_string()))))]),
+                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(45, 46, "B"), "B".to_string())))]),
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, (5, Expression::Value(ExpressionValue::ConstantValue(itk!(50, 51, "C"), "C".to_string()))))]),
+                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(50, 51, "C"), "C".to_string())))]),
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
@@ -837,8 +837,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::Integer(16)))),
-                        (1, (1, Expression::Value(ExpressionValue::Integer(32))))
+                        (1, Expression::Value(ExpressionValue::Integer(16))),
+                        (1, Expression::Value(ExpressionValue::Integer(32)))
                     ]),
                     bytes: Some(vec![16, 32]),
                     debug_only: false
@@ -851,8 +851,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::Integer(-1)))),
-                        (1, (1, Expression::Value(ExpressionValue::Integer(-128))))
+                        (1, Expression::Value(ExpressionValue::Integer(-1))),
+                        (1, Expression::Value(ExpressionValue::Integer(-128)))
                     ]),
                     bytes: Some(vec![255, 128]),
                     debug_only: false
@@ -875,8 +875,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
-                        (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
+                        (2, Expression::Value(ExpressionValue::Integer(4096))),
+                        (2, Expression::Value(ExpressionValue::Integer(8192)))
                     ]),
                     bytes: Some(vec![0, 16, 0, 32]),
                     debug_only: false
@@ -889,7 +889,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (2, (0, Expression::Value(ExpressionValue::Integer(-1))))
+                        (2, Expression::Value(ExpressionValue::Integer(-1)))
                     ]),
                     bytes: Some(vec![255, 255]),
                     debug_only: false
@@ -902,8 +902,8 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Big,
                     expressions: Some(vec![
-                        (2, (0, Expression::Value(ExpressionValue::Integer(4096)))),
-                        (2, (1, Expression::Value(ExpressionValue::Integer(8192))))
+                        (2, Expression::Value(ExpressionValue::Integer(4096))),
+                        (2, Expression::Value(ExpressionValue::Integer(8192)))
                     ]),
                     bytes: Some(vec![16, 0, 32, 0]),
                     debug_only: false
@@ -1099,7 +1099,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
+                        (2, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1)))
                     ]),
                     bytes: Some(vec![5, 0]),
                     debug_only: false
@@ -1108,7 +1108,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (2, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(39, 45, "global"), 1))))
+                        (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(39, 45, "global"), 1)))
                     ]),
                     bytes: Some(vec![5]),
                     debug_only: false
@@ -1137,7 +1137,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (2, (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1))))
+                        (2, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(29, 35, "global"), 1)))
                     ]),
                     bytes: Some(vec![5, 0]),
                     debug_only: false
@@ -1148,7 +1148,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (3, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(59, 65, "global"), 1))))
+                        (1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(59, 65, "global"), 1)))
                     ]),
                     bytes: Some(vec![5]),
                     debug_only: false
@@ -1167,7 +1167,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string()))))
+                        (1, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string())))
                     ]),
                     bytes: Some(vec![2]),
                     debug_only: false
@@ -1184,7 +1184,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (0, Expression::Value(ExpressionValue::GlobalLabelAddress(mtk!(17, 23, "global", 0), 1))))
+                        (1, Expression::Value(ExpressionValue::GlobalLabelAddress(mtk!(17, 23, "global", 0), 1)))
                     ]),
                     bytes: Some(vec![1]),
                     debug_only: false
@@ -1206,7 +1206,7 @@ mod test {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: Some(vec![
-                        (1, (1, Expression::Value(ExpressionValue::ConstantValue(itk!(56, 57, "C"), "C".to_string()))))
+                        (1, Expression::Value(ExpressionValue::ConstantValue(itk!(56, 57, "C"), "C".to_string())))
                     ]),
                     bytes: Some(vec![2]),
                     debug_only: false
@@ -1307,13 +1307,13 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 62,
-                    expression: Some((0, Expression::Value(ExpressionValue::Integer(32)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(32))),
                     bytes: vec![62, 32],
                     debug_only: false
                 }),
                 (3, EntryData::Instruction {
                     op_code: 33,
-                    expression: Some((1, Expression::Value(ExpressionValue::Integer(16384)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(16384))),
                     bytes: vec![33, 0, 64],
                     debug_only: false
                 })
@@ -1334,7 +1334,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 327,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
+                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1347,7 +1347,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 391,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
+                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1360,7 +1360,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 455,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(bit)))),
+                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1373,7 +1373,7 @@ mod test {
                 vec![
                     (1, EntryData::Instruction {
                         op_code: 199,
-                        expression: Some((0, Expression::Value(ExpressionValue::Integer(rst)))),
+                        expression: Some(Expression::Value(ExpressionValue::Integer(rst))),
                         bytes: vec![op],
                         debug_only: false
                     })
@@ -1401,19 +1401,19 @@ mod test {
                 }),
                 (2, EntryData::Instruction {
                     op_code: 40,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(26, 32, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(26, 32, "global"), 1))),
                     bytes: vec![40, 254],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((1, Expression::Value(ExpressionValue::OffsetAddress(itk!(36, 39, "+4"), 4)))),
+                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(36, 39, "+4"), 4))),
                     bytes: vec![24, 4],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((2, Expression::Value(ExpressionValue::OffsetAddress(itk!(43, 46, "-1"), -1)))),
+                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(43, 46, "-1"), -1))),
                     bytes: vec![24, 255],
                     debug_only: false
                 })
@@ -1423,19 +1423,19 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 240,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(65)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(65))),
                     bytes: vec![240, 65],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 230,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::Integer(2)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(2))),
                     bytes: vec![230, 2],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 32,
-                    expression: Some((TEMPORARY_EXPRESSION_ID, Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -6)))),
+                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -6))),
                     bytes: vec![32, 250],
                     debug_only: false
                 })
@@ -1445,7 +1445,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 248,
-                    expression: Some((0, Expression::Value(ExpressionValue::Integer(-3)))),
+                    expression: Some(Expression::Value(ExpressionValue::Integer(-3))),
                     bytes: vec![248, 253],
                     debug_only: false
                 })
@@ -1455,7 +1455,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 19, "foo"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 19, "foo"), 1))),
                     bytes: vec![24, 0],
                     debug_only: false
                 }),
@@ -1466,7 +1466,7 @@ mod test {
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(28, 31, "bar"), 2)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(28, 31, "bar"), 2))),
                     bytes: vec![24, 1],
                     debug_only: false
                 }),
@@ -1504,13 +1504,13 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(24, 27, "foo"), 2)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(24, 27, "foo"), 2))),
                     bytes: vec![195, 6, 0],
                     debug_only: false }),
 
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some((1, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(31, 37, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(31, 37, "global"), 1))),
                     bytes: vec![195, 0, 0],
                     debug_only: false
                 }),
@@ -1561,10 +1561,9 @@ mod test {
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((
-                        TEMPORARY_EXPRESSION_ID,
+                    expression: Some(
                         Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 15))
-                    )),
+                    ),
                     bytes: vec![24, 15],
                     debug_only: true
                 }),
@@ -1618,7 +1617,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some((0, Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1)))),
+                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![24, 0],
                     debug_only: false
                 }),
