@@ -973,6 +973,24 @@ mod test {
     }
 
     #[test]
+    fn test_for_statement_constant_replacement_if() {
+        let l = linker("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT IF x > 0 THEN DB x ENDIF ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (3, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
     fn test_error_for_statement_inner_constant_declaration() {
         assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1ENDFOR"), "In file \"main.gb.s\" on line 2, column 24: Constant declaration is not allowed inside of a FOR statement body.\n\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1ENDFOR\n                       ^--- Here");
     }
