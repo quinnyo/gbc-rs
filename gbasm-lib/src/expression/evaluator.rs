@@ -47,7 +47,7 @@ impl EvaluatorContext {
         });
         for name in names {
             let constant = self.raw_constants[&name].clone();
-            let stack = vec![constant.expression.0];
+            let stack = vec![name.as_str()];
             let c = self.resolve_expression_inner(
                 &stack,
                 constant.expression.1
@@ -72,7 +72,7 @@ impl EvaluatorContext {
     pub fn resolve_constant_expression(
         &mut self,
         parent: &InnerToken,
-        constant_stack: &[usize],
+        constant_stack: &[&str],
         name: &str
 
     ) -> Result<ExpressionResult, SourceError> {
@@ -80,10 +80,8 @@ impl EvaluatorContext {
             Ok(result.clone())
 
         } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(name).cloned() {
-            let (id, value) = expression.clone();
-            if constant_stack.contains(&id) {
-                // TODO switch to using the identifiers for recursion checks so we could remove the
-                // expr id
+            let (_, value) = expression.clone();
+            if constant_stack.contains(&name) {
                 Err(parent.error(
                     format!("Recursive declaration of constant \"{}\".", name)
 
@@ -91,7 +89,7 @@ impl EvaluatorContext {
 
             } else {
                 let mut child_stack = constant_stack.to_vec();
-                child_stack.push(id);
+                child_stack.push(name);
                 self.resolve_expression_inner(
                     &child_stack,
                     value
@@ -128,7 +126,7 @@ impl EvaluatorContext {
 
     fn resolve_expression_inner(
         &mut self,
-        constant_stack: &[usize],
+        constant_stack: &[&str],
         expression: Expression
 
     ) -> Result<ExpressionResult, SourceError> {
