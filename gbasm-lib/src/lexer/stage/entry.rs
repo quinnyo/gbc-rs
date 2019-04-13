@@ -17,13 +17,13 @@ use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken}
 
 
 // Entry Specific Structs -----------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IfStatementBranch {
     pub condition: OptionalDataExpression,
     pub body: Vec<EntryToken>
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ForStatement {
     pub binding: String,
     pub from: DataExpression,
@@ -33,7 +33,7 @@ pub struct ForStatement {
 
 
 // Entry Specific Tokens ------------------------------------------------------
-lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
+lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     Instruction((usize)),
     InstructionWithArg((usize, DataExpression)),
     DebugInstruction((usize)),
@@ -68,6 +68,54 @@ lexer_token!(EntryToken, (Debug, Eq, PartialEq), {
         bank_index => OptionalDataExpression
     }
 });
+
+impl EntryToken {
+    pub fn replace_constant(&mut self, constant: &str, new_value: &ExpressionValue) {
+        match self {
+            EntryToken::InstructionWithArg(_, _, expr) | EntryToken::DebugInstructionWithArg(_, _, expr) => {
+                expr.1.replace_constant(constant, new_value);
+            },
+            EntryToken::IfStatement(_, branches) => {
+                for branch in branches {
+                    if let Some(ref mut condition) = branch.condition {
+                        condition.1.replace_constant(constant, new_value);
+                    }
+                    for token in &mut branch.body {
+                        token.replace_constant(constant, new_value);
+                    }
+                }
+            },
+            EntryToken::ForStatement(_, for_statement) => {
+                for_statement.from.1.replace_constant(constant, new_value);
+                for_statement.to.1.replace_constant(constant, new_value);
+                for token in &mut for_statement.body {
+                    token.replace_constant(constant, new_value);
+                }
+            },
+            EntryToken::Constant { value, .. } => {
+                value.1.replace_constant(constant, new_value);
+            },
+            EntryToken::Data { storage, .. } => {
+                storage.replace_constant(constant, new_value);
+            },
+            EntryToken::SectionDeclaration { name, segment_offset, segment_size, bank_index, .. } => {
+                if let Some(ref mut name) = name {
+                    name.1.replace_constant(constant, new_value);
+                }
+                if let Some(ref mut segment_offset) = segment_offset {
+                    segment_offset.1.replace_constant(constant, new_value);
+                }
+                if let Some(ref mut segment_size) = segment_size {
+                    segment_size.1.replace_constant(constant, new_value);
+                }
+                if let Some(ref mut bank_index) = bank_index {
+                    bank_index.1.replace_constant(constant, new_value);
+                }
+            },
+            _ => {}
+        }
+    }
+}
 
 // Entry Level Lexer Implementation -------------------------------------------
 pub struct EntryStage;

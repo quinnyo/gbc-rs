@@ -12,7 +12,7 @@ mod util;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
-use crate::expression::ExpressionResult;
+use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
 use self::section::Section;
 
@@ -57,8 +57,6 @@ impl Linker {
     ) -> Result<Self, SourceError> {
 
         let mut context = EvaluatorContext::new();
-
-        // Extract and evaluate all constants
         let mut entry_tokens = Vec::new();
         Self::parse_entries(&mut context, tokens, &mut entry_tokens)?;
 
@@ -196,6 +194,7 @@ impl Linker {
         for token in tokens {
             // Record constants
             if let EntryToken::Constant { inner, is_string, value } = token {
+                // TODO prevent re-declaration of constants
                 context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
                     inner,
                     is_string,
@@ -215,6 +214,38 @@ impl Linker {
                     if result.is_truthy() {
                         Self::parse_entries(context, branch.body, remaining_tokens)?;
                         break;
+                    }
+                }
+
+            // Evaluate for ranges and insert the corresponding number of bodies
+            // into the output tokens
+            } else if let EntryToken::ForStatement(inner, for_statement) = token {
+
+                let binding = for_statement.binding;
+                let from = util::integer_value(&inner, context.resolve_expression(for_statement.from)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_expression(for_statement.to)?, "Invalid for range argument")?;
+
+                let iterations = to - from;
+                if iterations > 2048 {
+                    return Err(inner.error(format!(
+                        "FOR statement with {} iterations exceeds the maximum of 2048 allowed iterations.",
+                        iterations
+                    )));
+
+                } else {
+                    for i in from..to {
+                        // Replace all occurrences of the index binding with the current index value
+                        let value = ExpressionValue::Integer(i);
+                        let body_tokens: Vec<EntryToken> = for_statement.body.iter().map(|token| {
+                            let mut token = token.clone();
+                            token.replace_constant(
+                                &binding,
+                                &value
+                            );
+                            token
+
+                        }).collect();
+                        Self::parse_entries(context, body_tokens, remaining_tokens)?;
                     }
                 }
 
@@ -801,6 +832,153 @@ mod test {
                 })
             ]
         ]);
+    }
+
+    // FOR Statements ---------------------------------------------------------
+    #[test]
+    fn test_for_statement() {
+        let l = linker("SECTION ROM0\nFOR x IN 0 TO 0 REPEAT DB 1 ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker("SECTION ROM0\nFOR x IN 1 + 2 TO 0 REPEAT DB 1 ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker("SECTION ROM0\nFOR x IN 0 TO 0 + 3 REPEAT DB 1 ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_for_statement_constant_replacement() {
+        let l = linker("SECTION ROM0\nFOR x IN 0 TO 0 + 3 REPEAT DB x ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(0))))
+                    ]),
+                    bytes: Some(vec![0]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (2, Expression::Value(ExpressionValue::Integer(2))))
+                    ]),
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_for_statement_constant_replacement_nested() {
+        let l = linker("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT\n FOR y IN 0 TO 2 REPEAT\n DB x, y\n ENDFOR\n ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (4, Expression::Value(ExpressionValue::Integer(0)))),
+                        (1, (5, Expression::Value(ExpressionValue::Integer(0))))
+                    ]),
+                    bytes: Some(vec![0, 0]),
+                    debug_only: false
+                }),
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (4, Expression::Value(ExpressionValue::Integer(0)))),
+                        (1, (5, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![0, 1]),
+                    debug_only: false
+                }),
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (4, Expression::Value(ExpressionValue::Integer(1)))),
+                        (1, (5, Expression::Value(ExpressionValue::Integer(0))))
+                    ]),
+                    bytes: Some(vec![1, 0]),
+                    debug_only: false
+                }),
+                (2, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, (4, Expression::Value(ExpressionValue::Integer(1)))),
+                        (1, (5, Expression::Value(ExpressionValue::Integer(1))))
+                    ]),
+                    bytes: Some(vec![1, 1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_for_statement_inner_constant_declaration() {
+        // TODO this only uses the last value since the evaluation happens later
+        // TODO simply prevent constant declarations inside of for statements
+        let l = linker("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1\n DB foo ENDFOR");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_for_statement_max_iterations() {
+        linker("SECTION ROM0\nFOR x IN 0 TO 2048 REPEAT ENDFOR");
+        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2049 REPEAT ENDFOR"), "In file \"main.gb.s\" on line 2, column 1: FOR statement with 2049 iterations exceeds the maximum of 2048 allowed iterations.\n\nFOR x IN 0 TO 2049 REPEAT ENDFOR\n^--- Here");
     }
 
 }

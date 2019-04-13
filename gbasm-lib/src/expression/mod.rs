@@ -51,6 +51,30 @@ impl Expression {
             Expression::BuiltinCall { args, .. } => args.iter().all(|arg| arg.is_constant())
         }
     }
+
+    pub fn replace_constant(&mut self, name: &str, value: &ExpressionValue) {
+        match self {
+            Expression::Binary { left, right, .. } => {
+                left.replace_constant(name, value);
+                right.replace_constant(name, value);
+            }
+            Expression::Unary { right, .. } => {
+                right.replace_constant(name, value);
+            },
+            Expression::Value(ExpressionValue::ConstantValue(_, constant_name)) => {
+                if constant_name == name {
+                    *self = Expression::Value(value.clone());
+                }
+            },
+            Expression::BuiltinCall { args, .. } => {
+                for arg in args {
+                    arg.replace_constant(name, value);
+                }
+            },
+            _ => {}
+        }
+
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

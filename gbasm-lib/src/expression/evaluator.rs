@@ -82,6 +82,8 @@ impl EvaluatorContext {
         } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(name).cloned() {
             let (id, value) = expression.clone();
             if constant_stack.contains(&id) {
+                // TODO switch to using the identifiers for recursion checks so we could remove the
+                // expr id
                 Err(parent.error(
                     format!("Recursive declaration of constant \"{}\".", name)
 

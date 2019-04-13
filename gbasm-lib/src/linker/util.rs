@@ -14,7 +14,7 @@ lazy_static! {
 }
 
 // Linker and Section Helpers -------------------------------------------------
-pub fn constant_value(
+pub fn integer_value(
     inner: &InnerToken,
     result: ExpressionResult,
     msg: &'static str
@@ -25,7 +25,7 @@ pub fn constant_value(
             Ok(i)
         },
         _ => {
-            Err(inner.error(format!("{}, expected a interger value instead.", msg)))
+            Err(inner.error(format!("{}, expected a integer value instead.", msg)))
         }
     }
 }
