@@ -99,7 +99,7 @@ impl Compiler {
         self.log(format!("Linking completed in {}ms.", start.elapsed().as_millis()));
 
         // Report Segment Usage
-        if !self.silent && self.print_segment_map {
+        if self.print_segment_map {
             self.print_segment_usage(linker.to_usage_list());
         }
 
@@ -125,9 +125,10 @@ impl Compiler {
 
         // Validate ROM
         match generator.validate_rom() {
-            Ok(_warnings) => {
-                // TODO push warnings into output
-                // "Warning Invalid ROM size in header, size does not match CartType"
+            Ok(warnings) => {
+                for w in warnings {
+                    self.warning(w);
+                }
             },
             Err(err) => return Err((self.output.join("\n"), CompilerError::from_string(err)))
         }
@@ -136,10 +137,7 @@ impl Compiler {
         generator.finalize_rom();
         self.log(format!("ROM validated in {}ms.", start.elapsed().as_millis()));
 
-        if !self.silent && self.print_rom_info {
-            self.print_rom_info(generator.rom_info());
-        }
-
+        let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
             writer.write_binary_file(&output_file, generator.buffer).map_err(|err| {
                 (self.output.join("\n"), CompilerError::from_string(
@@ -148,17 +146,29 @@ impl Compiler {
             })?;
             self.log(format!("ROM written to \"{}\".", output_file.display()));
         }
+
+        if self.print_rom_info {
+            self.print_rom_info(info);
+        }
+
         Ok(())
     }
 
-    fn print_rom_info(&mut self, _info: ROMInfo) {
-        // println!("{:?}", info);
-        // TODO print rom info
-        // [gbasm] Title: SPRITE
-        // [gbasm] Mapper: MBC1
-        // [gbasm] ROM: 32768 bytes ( standard ROM only, 32768 bytes )
-        // [gbasm] RAM: 10240 bytes ( internal 8192 bytes, 2048 bytes in 1 bank(s) )
-        // [gbasm] BATTERY: None
+    fn print_rom_info(&mut self, info: ROMInfo) {
+        self.info(format!("ROM Title: {}", info.title));
+        self.info(format!("ROM Version: {}", info.mask_rom_version));
+        self.info(format!("ROM Checksum: ${:0>2X} / ${:0>4X}", info.checksum_header, info.checksum_rom));
+        self.info(format!("ROM Size: {} bytes", info.rom_size as u32 * 1024));
+        if info.ram_size > 0 {
+            self.info(format!("RAM Size: {} bytes", info.ram_size as u32 * 1024));
+        }
+
+        if let Some(cart_type) = info.cart_type {
+            self.info(format!("ROM Mapper: {}", cart_type.mapper));
+
+        } else {
+            self.warning("ROM Mapper: Unknown");
+        }
     }
 
     fn print_segment_usage(&mut self, segments: Vec<SegmentUsage>) {
@@ -212,6 +222,18 @@ impl Compiler {
         }
     }
 
+    fn warning<S: Into<String>>(&mut self, s: S) {
+        if !self.silent {
+            self.output.push(format!("[Warning] {}", s.into()));
+        }
+    }
+
+    fn info<S: Into<String>>(&mut self, s: S) {
+        if !self.silent {
+            self.output.push(format!("[Info] {}", s.into()));
+        }
+    }
+
     fn error(&self, stage: &str, error: SourceError) -> (String, CompilerError) {
         (self.output.join("\n"), CompilerError::new(stage, error))
     }
@@ -250,13 +272,13 @@ impl CompilerError {
 impl fmt::Display for CompilerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(source) = self.source.as_ref() {
-            write!(f, "Compilation failed during {} phase!\n\n{}", self.stage, source)
+            write!(f, "[Error] Compilation failed during {} phase!\n\n{}", self.stage, source)
 
         } else if let Some(message) = self.message.as_ref() {
-            write!(f, "Compilation failed during {} phase!\n\n{}", self.stage, message)
+            write!(f, "[Error] Compilation failed during {} phase!\n\n{}", self.stage, message)
 
         } else {
-            write!(f, "Compilation failed during {} phase!", self.stage)
+            write!(f, "[Error] Compilation failed during {} phase!", self.stage)
         }
     }
 }
@@ -406,13 +428,46 @@ ROM validated in XXms."#
         assert_eq!(file[336..340].to_vec(), vec![240, 65, 0, 0])
     }
 
+    // ROM Info ----------------------------------------------------------
+    #[test]
+    fn test_rom_info_defaults() {
+        let mut c = Compiler::new();
+        c.set_print_rom_info();
+        assert_eq!(compiler(c, ""), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM validated in XXms.\n[Info] ROM Title: \n[Info] ROM Version: 0\n[Info] ROM Checksum: $E7 / $162D\n[Info] ROM Size: 32768 bytes\n[Info] ROM Mapper: ROM");
+    }
+
+    #[test]
+    fn test_rom_info_mbc5() {
+        let header = r#"
+            SECTION 'Rom Title',ROM0[$134]
+            DS 12 'ABCDEFGHIJKL'
+
+            SECTION 'Core Rom Header',ROM0[$143]
+            DB $80                      ; $143
+            DS 2 'BD'                   ; $144 - Licensee code (not important)
+            DB 0                        ; $146 - SGB Support indicator
+            DB $19                      ; $147 - Cart type
+            DB 1                        ; $148 - ROM Size
+            DB 2                        ; $149 - RAM Size
+            DB 1                        ; $14a - Destination code
+            DB $33                      ; $14b - Old licensee code
+            DB 0                        ; $14c - Mask ROM version
+            DB 0                        ; $14d - Header checksum (important)
+            DW 0                        ; $14e - Global checksum (not important)
+        "#;
+
+        let mut c = Compiler::new();
+        c.set_print_rom_info();
+        assert_eq!(compiler(c, header), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM validated in XXms.\n[Info] ROM Title: ABCDEFGHIJK\n[Info] ROM Version: 0\n[Info] ROM Checksum: $43 / $1A2D\n[Info] ROM Size: 65536 bytes\n[Info] RAM Size: 8192 bytes\n[Info] ROM Mapper: MBC5");
+    }
+
     // Errors -----------------------------------------------------------------
     #[test]
     fn test_error_lexer() {
         let c = Compiler::new();
         assert_eq!(compiler_error(c, "@"), (
             "Compiling \"main.gb.s\"...".to_string(),
-            "Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here".to_string()
+            "[Error] Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here".to_string()
         ));
     }
 
@@ -421,7 +476,7 @@ ROM validated in XXms."#
         let c = Compiler::new();
         assert_eq!(compiler_error(c, "ld a,a"), (
             "Compiling \"main.gb.s\"...\nParsing completed in XXms.".to_string(),
-            "Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
+            "[Error] Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
         ));
     }
 

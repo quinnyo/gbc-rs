@@ -195,7 +195,6 @@ impl Linker {
         for token in tokens {
             // Record constants
             if let EntryToken::Constant { inner, is_string, value } = token {
-                // TODO prevent re-declaration of constants
                 if allow_constant_declaration {
                     context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
                         inner,

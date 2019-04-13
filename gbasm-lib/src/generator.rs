@@ -91,11 +91,11 @@ lazy_static! {
 // Structs --------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct CartType {
-    mapper: String,
-    max_rom_size: u16,
-    max_ram_size: u16,
-    max_rom_banks: u16,
-    max_ram_banks: u16,
+    pub mapper: String,
+    pub max_rom_size: u16,
+    pub max_ram_size: u16,
+    pub max_rom_banks: u16,
+    pub max_ram_banks: u16,
     has_ram: bool,
     has_battery: bool,
     has_timer: bool,
@@ -148,7 +148,7 @@ pub struct ROMInfo {
     // 0x104..=0x133
     logo: Vec<u8>,
     // 0x134..=0x13E
-    title: String,
+    pub title: String,
     // 0x13F..=0x142
     designation: [u8; 4],
     // 0x143,
@@ -158,26 +158,29 @@ pub struct ROMInfo {
     // 0x146,
     sgb_flag: u8,
     // 0x147,
-    cart_type: Option<CartType>,
+    pub cart_type: Option<CartType>,
     // 0x148,
-    cart_rom_size: u8,
+    pub rom_size: u16,
     // 0x149,
-    cart_ram_size: u8,
+    pub ram_size: u16,
     // 0x14A
     country_code: u8,
     // 0x14B
     licensee_code: u8,
     // 0x14C
-    mask_rom_version: u8,
+    pub mask_rom_version: u8,
     // 0x14D
-    checksum_header: u8,
+    pub checksum_header: u8,
     // 0x14E..=0x14F
-    checksum_rom: [u8; 2]
+    pub checksum_rom: u16,
+    pub size: usize
 }
 
 impl ROMInfo {
     fn from_buffer(buffer: &[u8]) -> Self {
         let title = buffer[0x134..=0x13E].iter().map(|c| *c).take_while(|c| *c > 0).collect();
+        let rom_size = ROM_KB_SIZES.get(&(buffer[0x148], 0)).unwrap_or(&[0, 0]);
+        let ram_size = RAM_KB_SIZES.get(&(buffer[0x149], 0)).unwrap_or(&[0, 0]);
         Self {
             logo: buffer[0x104..=0x133].to_vec(),
             title: String::from_utf8(title).unwrap_or_else(|_| "".to_string()),
@@ -186,13 +189,14 @@ impl ROMInfo {
             sgb_license_code: [buffer[0x144], buffer[0x145]],
             sgb_flag: buffer[0x146],
             cart_type: CART_TYPES.get(&buffer[0x147]).map(|s| s.clone()),
-            cart_rom_size: buffer[0x148],
-            cart_ram_size: buffer[0x149],
+            rom_size: rom_size[0],
+            ram_size: ram_size[0],
             country_code: buffer[0x14A],
             licensee_code: buffer[0x14B],
             mask_rom_version: buffer[0x14C],
             checksum_header: buffer[0x14D],
-            checksum_rom: [buffer[0x14E], buffer[0x14F]]
+            checksum_rom: (buffer[0x14E] as u16) << 8 | (buffer[0x14F] as u16),
+            size: buffer.len()
         }
     }
 }

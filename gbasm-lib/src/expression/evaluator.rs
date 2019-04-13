@@ -675,7 +675,6 @@ mod test {
     // Tests Unary Expressions ------------------------------------------------
     #[test]
     fn test_unary_integer_expressions() {
-        // TODO never parse - in include lexer and instead always apply negative unary operator?
         assert_eq!(const_expression("+1"), ExpressionResult::Integer(1));
         assert_eq!(const_expression("- 1"), ExpressionResult::Integer(-1));
         assert_eq!(const_expression("~1"), ExpressionResult::Integer(-2));
