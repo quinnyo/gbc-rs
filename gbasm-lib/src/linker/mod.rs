@@ -58,7 +58,7 @@ impl Linker {
 
         let mut context = EvaluatorContext::new();
         let mut entry_tokens = Vec::new();
-        Self::parse_entries(&mut context, tokens, &mut entry_tokens)?;
+        Self::parse_entries(&mut context, tokens, true, &mut entry_tokens)?;
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
@@ -188,6 +188,7 @@ impl Linker {
     fn parse_entries(
         context: &mut EvaluatorContext,
         tokens: Vec<EntryToken>,
+        allow_constant_declaration: bool,
         remaining_tokens: &mut Vec<EntryToken>
 
     ) -> Result<(), SourceError> {
@@ -195,11 +196,18 @@ impl Linker {
             // Record constants
             if let EntryToken::Constant { inner, is_string, value } = token {
                 // TODO prevent re-declaration of constants
-                context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
-                    inner,
-                    is_string,
-                    expression: value
-                });
+                if allow_constant_declaration {
+                    context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
+                        inner,
+                        is_string,
+                        expression: value
+                    });
+
+                } else {
+                    return Err(inner.error(
+                        "Constant declaration is not allowed inside of a FOR statement body.".to_string()
+                    ));
+                }
 
             // Evaluate if conditions and insert the corresponding branch into
             // the output tokens
@@ -212,7 +220,7 @@ impl Linker {
                         ExpressionResult::Integer(1)
                     };
                     if result.is_truthy() {
-                        Self::parse_entries(context, branch.body, remaining_tokens)?;
+                        Self::parse_entries(context, branch.body, true, remaining_tokens)?;
                         break;
                     }
                 }
@@ -245,7 +253,7 @@ impl Linker {
                             token
 
                         }).collect();
-                        Self::parse_entries(context, body_tokens, remaining_tokens)?;
+                        Self::parse_entries(context, body_tokens, false, remaining_tokens)?;
                     }
                 }
 
@@ -965,14 +973,8 @@ mod test {
     }
 
     #[test]
-    fn test_for_statement_inner_constant_declaration() {
-        // TODO this only uses the last value since the evaluation happens later
-        // TODO simply prevent constant declarations inside of for statements
-        let l = linker("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1\n DB foo ENDFOR");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-            ]
-        ]);
+    fn test_error_for_statement_inner_constant_declaration() {
+        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1ENDFOR"), "In file \"main.gb.s\" on line 2, column 24: Constant declaration is not allowed inside of a FOR statement body.\n\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1ENDFOR\n                       ^--- Here");
     }
 
     #[test]
