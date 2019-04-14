@@ -230,63 +230,45 @@ impl Section {
         match token {
             EntryToken::Instruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, None, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        expression: None,
-                        bytes: instruction::bytes(op_code),
-                        debug_only: false
-                    },
+                    bytes,
                     false
                 ))
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        // TODO pre-resolve if expr is constant
-                        expression: Some(expr),
-                        bytes: instruction::bytes(op_code),
-                        debug_only: false
-                    },
+                    bytes,
                     false
                 ))
             },
             EntryToken::DebugInstruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, None, true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        expression: None,
-                        bytes: instruction::bytes(op_code),
-                        debug_only: true
-                    },
+                    bytes,
                     false
                 ))
             },
             EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        // TODO pre-resolve if expr is constant
-                        expression: Some(expr),
-                        bytes: instruction::bytes(op_code),
-                        debug_only: true
-                    },
+                    bytes,
                     false
                 ))
             },
@@ -331,7 +313,7 @@ impl Section {
                         let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (1, e)).collect();
                         if is_constant {
                             (length, Some(
-                                Self::resolve_expressions_to_bytes(
+                                Self::resolve_expression_arguments_to_bytes(
                                     &inner,
                                     context,
                                     &endianess,
@@ -349,7 +331,7 @@ impl Section {
                         let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (2, e)).collect();
                         if is_constant {
                             (length, Some(
-                                Self::resolve_expressions_to_bytes(
+                                Self::resolve_expression_arguments_to_bytes(
                                     &inner,
                                     context,
                                     &endianess,
@@ -474,11 +456,10 @@ impl Section {
             let end_of_instruction = (entry.offset + entry.size) as i32;
             context.rom_offset = end_of_instruction;
 
+            // Resolve Data Argument Expressions
             if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
-
-                // Resolve Data Argument Expressions
                 if let Some(expressions) = expressions {
-                    *bytes = Some(Self::resolve_expressions_to_bytes(
+                    *bytes = Some(Self::resolve_expression_arguments_to_bytes(
                         &entry.inner,
                         context,
                         endianess,
@@ -487,76 +468,17 @@ impl Section {
                 }
                 debug_assert_eq!(self.is_rom, bytes.is_some());
 
+            // Resolve Instruction Argument Expressions
             } else if let EntryData::Instruction { ref op_code, ref mut bytes, ref expression, .. } = entry.data {
                 if let Some(expr) = expression {
-                    if let Some(argument) = instruction::argument(*op_code) {
+                    *bytes = Self::resolve_instruction_argument_to_bytes(
+                        &entry.inner,
+                        context,
+                        *op_code,
+                        expr,
+                        Some(end_of_instruction)
 
-                        // Handle constant/offset -> op code mapping
-                        if let Some(offsets) = instruction::offsets(*op_code) {
-                            let value = util::integer_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid constant argument")?;
-                            let mut mapped_op_code = None;
-                            for (constant_value, constant_op_code) in offsets {
-                                if value == *constant_value as i32 {
-                                    mapped_op_code = Some(*constant_op_code);
-                                    break;
-                                }
-                            }
-
-                            // Rewrite instruction to matched op code
-                            if let Some(mapped_op_code) = mapped_op_code {
-                                *bytes = instruction::bytes(mapped_op_code);
-
-                            } else {
-                                let valid_values: Vec<String> = offsets.iter().map(|(v, _)| v.to_string()).collect();
-                                return Err(entry.inner.error(
-                                    format!("Invalid constant value {}, one of the following values is required: {}", value, valid_values.join(", "))
-                                ));
-                            }
-
-                        } else {
-                            let mut instr_bytes = instruction::bytes(*op_code);
-                            let mut arg_bytes: Vec<u8> = match argument {
-                                Argument::MemoryLookupByteValue | Argument::ByteValue => {
-                                    vec![
-                                        util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte argument")?
-                                    ]
-                                },
-                                Argument::MemoryLookupWordValue | Argument::WordValue => {
-                                    let word = util::word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word argument")?;
-                                    vec![
-                                        word as u8,
-                                        (word >> 8) as u8
-                                    ]
-                                },
-                                Argument::SignedByteValue => {
-                                    // ldsp hl,X
-                                    if *op_code == 248 {
-                                        vec![
-                                            util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid signed byte argument")?
-                                        ]
-
-                                    // jr
-                                    } else {
-                                        let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
-                                        let target = address as i32 - end_of_instruction;
-                                        vec![
-                                            util::signed_byte_value(&entry.inner, target, "").map_err(|mut e| {
-                                                e.message = format!("Relative jump offset of {} is out of range{}", target, e.message);
-                                                e
-                                            })?
-                                        ]
-                                    }
-                                },
-                                _ => unreachable!("Invalid argument type for instruction with expression")
-                            };
-
-                            instr_bytes.append(&mut arg_bytes);
-                            *bytes = instr_bytes;
-                        }
-
-                    } else {
-                        unreachable!("Instruction has expression but does not expect any argument: {}", op_code);
-                    }
+                    )?.expect("Instruction Argument failed to resolve");
                 }
             }
         }
@@ -709,7 +631,7 @@ impl Section {
         }
     }
 
-    fn resolve_expressions_to_bytes(
+    fn resolve_expression_arguments_to_bytes(
         inner: &InnerToken,
         context: &mut EvaluatorContext,
         endianess: &DataEndianess,
@@ -717,14 +639,14 @@ impl Section {
 
     ) -> Result<Vec<u8>, SourceError> {
         let mut data_bytes = Vec::new();
-        for (width, expr) in expressions {
+        for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_expression(expr.clone())?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_expression(expr.clone())?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_expression(expression.clone())?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -737,6 +659,139 @@ impl Section {
 
         }
         Ok(data_bytes)
+    }
+
+    fn resolve_instruction_argument_to_bytes(
+        inner: &InnerToken,
+        context: &mut EvaluatorContext,
+        op_code: usize,
+        expression: &DataExpression,
+        end_of_instruction: Option<i32>
+
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        if let Some(argument) = instruction::argument(op_code) {
+
+            // Handle constant/offset -> op code mapping
+            if let Some(offsets) = instruction::offsets(op_code) {
+                let value = util::integer_value(inner, context.resolve_expression(expression.clone())?, "Invalid constant argument")?;
+                let mut mapped_op_code = None;
+                for (constant_value, constant_op_code) in offsets {
+                    if value == *constant_value as i32 {
+                        mapped_op_code = Some(*constant_op_code);
+                        break;
+                    }
+                }
+
+                // Rewrite instruction to matched op code
+                if let Some(mapped_op_code) = mapped_op_code {
+                    Ok(Some(instruction::bytes(mapped_op_code)))
+
+                } else {
+                    let valid_values: Vec<String> = offsets.iter().map(|(v, _)| v.to_string()).collect();
+                    Err(inner.error(
+                        format!("Invalid constant value {}, one of the following values is required: {}", value, valid_values.join(", "))
+                    ))
+                }
+
+            } else {
+                let mut instr_bytes = instruction::bytes(op_code);
+                let mut arg_bytes: Vec<u8> = match argument {
+                    Argument::MemoryLookupByteValue | Argument::ByteValue => {
+                        vec![
+                            util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid byte argument")?
+                        ]
+                    },
+                    Argument::MemoryLookupWordValue | Argument::WordValue => {
+                        let word = util::word_value(inner, context.resolve_expression(expression.clone())?, "Invalid word argument")?;
+                        vec![
+                            word as u8,
+                            (word >> 8) as u8
+                        ]
+                    },
+                    Argument::SignedByteValue => {
+                        // ldsp hl,X
+                        if op_code == 248 {
+                            vec![
+                                util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid signed byte argument")?
+                            ]
+
+                        // jr
+                        } else if let Some(end_of_instruction) = end_of_instruction {
+                            let address = util::address_word_value(inner, context.resolve_expression(expression.clone())?, "Invalid address")?;
+                            let target = address as i32 - end_of_instruction;
+                            vec![
+                                util::signed_byte_value(inner, target, "").map_err(|mut e| {
+                                    e.message = format!("Relative jump offset of {} is out of range{}", target, e.message);
+                                    e
+                                })?
+                            ]
+
+                        } else {
+                            return Ok(None);
+                        }
+                    },
+                    _ => unreachable!("Invalid argument type for instruction with expression")
+                };
+                instr_bytes.append(&mut arg_bytes);
+                Ok(Some(instr_bytes))
+            }
+
+        } else {
+            unreachable!("Instruction has expression but does not expect any argument: {}", op_code);
+        }
+    }
+
+    fn instruction_entry(
+        inner: &InnerToken,
+        context: &mut EvaluatorContext,
+        op_code: usize,
+        expression: Option<DataExpression>,
+        debug_only: bool
+
+    ) -> Result<EntryData, SourceError> {
+        if let Some(expression) = expression {
+            if expression.is_constant() {
+                if let Some(bytes) = Self::resolve_instruction_argument_to_bytes(
+                    inner,
+                    context,
+                    op_code,
+                    &expression,
+                    None
+
+                )? {
+                    Ok(EntryData::Instruction {
+                        op_code,
+                        expression: None,
+                        bytes,
+                        debug_only
+                    })
+
+                } else {
+                    Ok(EntryData::Instruction {
+                        op_code,
+                        expression: Some(expression),
+                        bytes: instruction::bytes(op_code),
+                        debug_only
+                    })
+                }
+
+            } else {
+                Ok(EntryData::Instruction {
+                    op_code,
+                    expression: Some(expression),
+                    bytes: instruction::bytes(op_code),
+                    debug_only
+                })
+            }
+
+        } else {
+            Ok(EntryData::Instruction {
+                op_code,
+                expression: None,
+                bytes: instruction::bytes(op_code),
+                debug_only
+            })
+        }
     }
 
 }
@@ -1341,13 +1396,13 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 62,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(32))),
+                    expression: None,
                     bytes: vec![62, 32],
                     debug_only: false
                 }),
                 (3, EntryData::Instruction {
                     op_code: 33,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(16384))),
+                    expression: None,
                     bytes: vec![33, 0, 64],
                     debug_only: false
                 })
@@ -1368,7 +1423,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 327,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
+                        expression: None,
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1381,7 +1436,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 391,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
+                        expression: None,
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1394,7 +1449,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 455,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
+                        expression: None,
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1407,7 +1462,7 @@ mod test {
                 vec![
                     (1, EntryData::Instruction {
                         op_code: 199,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(rst))),
+                        expression: None,
                         bytes: vec![op],
                         debug_only: false
                     })
@@ -1457,13 +1512,13 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 240,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(65))),
+                    expression: None,
                     bytes: vec![240, 65],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 230,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(2))),
+                    expression: None,
                     bytes: vec![230, 2],
                     debug_only: false
                 }),
@@ -1479,7 +1534,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 248,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(-3))),
+                    expression: None,
                     bytes: vec![248, 253],
                     debug_only: false
                 })
