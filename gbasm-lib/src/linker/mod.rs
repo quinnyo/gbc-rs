@@ -305,7 +305,6 @@ impl Linker {
         Ok(())
     }
 
-
     fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), SourceError> {
         for s in sections.iter_mut() {
             s.strip_debug();

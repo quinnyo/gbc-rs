@@ -73,6 +73,7 @@ pub enum TokenType {
     BuiltinCall,
     IfStatement,
     ForStatement,
+    CompressedBlock,
 
     // Value Tokens
     Offset,

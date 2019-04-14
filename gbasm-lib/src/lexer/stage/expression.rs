@@ -31,6 +31,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     ConstExpression((Expression)),
     IfStatement((Vec<IfStatementBranch<ExpressionToken>>)),
     ForStatement((ForStatement<ExpressionToken>)),
+    CompressedBlock((Vec<ExpressionToken>)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))
 
@@ -90,6 +91,12 @@ impl ExpressionToken {
                     to: ExpressionStage::parse_expression(for_statement.to, false)?,
                     body: ExpressionStage::parse_expression(for_statement.body, false)?
                 }))
+            },
+            ValueToken::CompressedBlock(inner, tokens) => {
+                Ok(ExpressionToken::CompressedBlock(
+                    inner,
+                    ExpressionStage::parse_expression(tokens, false)?
+                ))
             },
             token => Err(token.error(
                 format!("Unexpected \"{}\" token, expected the start of a expression instead.", token.value())
@@ -1149,6 +1156,21 @@ mod test {
                     )
                 ]
             })
+        ]);
+    }
+
+    // Compressed Blocks ------------------------------------------------------
+    #[test]
+    fn test_compressed_block_forwarding() {
+        let lexer = expr_lexer("COMPRESS DB 1 ENDCOMPRESS");
+        assert_eq!(lexer.tokens, vec![
+            ExpressionToken::CompressedBlock(itk!(0, 8, "COMPRESS"), vec![
+                ExpressionToken::Reserved(itk!(9, 11, "DB")),
+                ExpressionToken::ConstExpression(
+                    itk!(12, 13, "1"),
+                    Expression::Value(ExpressionValue::Integer(1))
+                )
+            ])
         ]);
     }
 

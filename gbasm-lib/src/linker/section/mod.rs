@@ -17,7 +17,7 @@ pub mod entry;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken};
-use crate::expression::ExpressionResult;
+use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
 use self::entry::{EntryData, SectionEntry};
@@ -239,7 +239,8 @@ impl Section {
                         expression: None,
                         bytes: instruction::bytes(op_code),
                         debug_only: false
-                    }
+                    },
+                    false
                 ))
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
@@ -253,7 +254,8 @@ impl Section {
                         expression: Some(expr),
                         bytes: instruction::bytes(op_code),
                         debug_only: false
-                    }
+                    },
+                    false
                 ))
             },
             EntryToken::DebugInstruction(inner, op_code) => {
@@ -267,7 +269,8 @@ impl Section {
                         expression: None,
                         bytes: instruction::bytes(op_code),
                         debug_only: true
-                    }
+                    },
+                    false
                 ))
             },
             EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
@@ -281,7 +284,8 @@ impl Section {
                         expression: Some(expr),
                         bytes: instruction::bytes(op_code),
                         debug_only: true
-                    }
+                    },
+                    false
                 ))
             },
             EntryToken::GlobalLabelDef(inner, id) => {
@@ -300,7 +304,7 @@ impl Section {
                     id
                 }));
             },
-            EntryToken::Data { inner, endianess, storage, alignment, debug_only } => {
+            EntryToken::Data { inner, endianess, storage, alignment, compress, debug_only } => {
 
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = match storage {
@@ -321,11 +325,11 @@ impl Section {
                     },
                     DataStorage::Bytes(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        (exprs.len(), None, Some(exprs.into_iter().map(|e| (1, e)).collect()))
+                        Self::parse_storage_bytes(1, exprs)
                     },
                     DataStorage::Words(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        (exprs.len() * 2, None, Some(exprs.into_iter().map(|e| (2, e)).collect()))
+                        Self::parse_storage_bytes(2, exprs)
                     },
                     DataStorage::Buffer(length, fill) => {
                         let length_or_string = context.resolve_expression(length)?;
@@ -367,6 +371,8 @@ impl Section {
                     }
                 };
 
+                // TODO error if compress == true and bytes.is_none() == true
+                // TODO combine and compress adjacent data blocks with compiler
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -378,6 +384,7 @@ impl Section {
                         bytes,
                         debug_only
                     },
+                    compress
                 ));
 
             },
@@ -394,31 +401,31 @@ impl Section {
 
     pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
         let mut offset = 0;
-        for e in &mut self.entries {
+        for entry in &mut self.entries {
 
             // Update offset of entry
-            e.offset = self.start_address + offset;
+            entry.offset = self.start_address + offset;
 
             // Update label addresses
-            if let EntryData::Label { ref id, ..} = e.data {
-                context.label_addresses.insert(*id, e.offset);
+            if let EntryData::Label { ref id, ..} = entry.data {
+                context.label_addresses.insert(*id, entry.offset);
 
             // Verify alignment requirements
-            } else if let EntryData::Data { ref alignment, .. } = e.data {
-                if *alignment == DataAlignment::Word && e.offset & 0xFF != 0 {
-                    return Err(e.inner.error(
+            } else if let EntryData::Data { ref alignment, .. } = entry.data {
+                if *alignment == DataAlignment::Word && entry.offset & 0xFF != 0 {
+                    return Err(entry.inner.error(
                         "Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.".to_string()
                     ));
 
-                } else if *alignment == DataAlignment::WithinWord && (e.offset & 0xFF) + e.size > 256 {
-                    return Err(e.inner.error(
+                } else if *alignment == DataAlignment::WithinWord && (entry.offset & 0xFF) + entry.size > 256 {
+                    return Err(entry.inner.error(
                         "Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.".to_string()
                     ));
                 }
             }
 
             // Advance section offset by entry size
-            offset += e.size
+            offset += entry.size
 
         }
         self.bytes_in_use = offset;
@@ -680,6 +687,12 @@ impl Section {
         } else {
             Ok(())
         }
+    }
+
+    fn parse_storage_bytes(width: usize, exprs: Vec<DataExpression>) -> (usize, Option<Vec<u8>>, Option<Vec<(usize, DataExpression)>>) {
+        // TODO check if all exprs here a constant
+        // TODO if so, early resolve the expressions to bytes
+        (exprs.len() * width, None, Some(exprs.into_iter().map(|e| (width, e)).collect()))
     }
 
 }

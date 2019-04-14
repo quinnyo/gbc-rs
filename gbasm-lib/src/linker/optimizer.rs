@@ -54,7 +54,8 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                                 expression,
                                 bytes,
                                 debug_only: false
-                            }
+                            },
+                            false
                         ))
                     }
                 }
