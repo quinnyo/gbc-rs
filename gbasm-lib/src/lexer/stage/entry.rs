@@ -57,6 +57,7 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
         alignment => DataAlignment,
         endianess => DataEndianess,
         storage => DataStorage,
+        is_constant => bool,
         compress => bool,
         debug_only => bool
     },
@@ -238,6 +239,7 @@ impl EntryStage {
                         alignment: DataAlignment::Byte,
                         endianess: DataEndianess::Little,
                         storage: DataStorage::Array(bytes),
+                        is_constant: true,
                         compress: inside_compressed,
                         debug_only: false
                     }
@@ -561,6 +563,7 @@ impl EntryStage {
                                 alignment: DataAlignment::Byte,
                                 endianess: DataEndianess::Little,
                                 storage: DataStorage::Array(bytes),
+                                is_constant: true,
                                 compress: false,
                                 debug_only: true
                             }
@@ -972,11 +975,12 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
         match Self::parse_expression_list(tokens)? {
-            Some(e) => Ok(EntryToken::Data {
+            Some((is_constant, e)) => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Bytes(e),
+                is_constant,
                 compress,
                 debug_only: false
             }),
@@ -985,6 +989,7 @@ impl EntryStage {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Byte,
+                is_constant: false,
                 compress,
                 debug_only: false
             })
@@ -998,11 +1003,12 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
         match Self::parse_expression_list(tokens)? {
-            Some(e) => Ok(EntryToken::Data {
+            Some((is_constant, e)) => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Words(e),
+                is_constant,
                 compress,
                 debug_only: false
             }),
@@ -1011,6 +1017,7 @@ impl EntryStage {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Word,
+                is_constant: false,
                 compress,
                 debug_only: false
             })
@@ -1024,11 +1031,12 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
         match Self::parse_expression_list(tokens)? {
-            Some(e) => Ok(EntryToken::Data {
+            Some((is_constant, e)) => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
                 storage: DataStorage::Words(e),
+                is_constant,
                 compress,
                 debug_only: false
             }),
@@ -1037,6 +1045,7 @@ impl EntryStage {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
                 storage: DataStorage::Word,
+                is_constant: false,
                 compress,
                 debug_only: false
             })
@@ -1060,6 +1069,7 @@ impl EntryStage {
                         alignment,
                         endianess: DataEndianess::Little,
                         storage: DataStorage::Buffer(expr, Some(data_expr)),
+                        is_constant: true,
                         compress,
                         debug_only: false
                     })
@@ -1074,6 +1084,7 @@ impl EntryStage {
                     alignment,
                     endianess: DataEndianess::Little,
                     storage: DataStorage::Buffer(expr, None),
+                    is_constant: true,
                     compress,
                     debug_only: false
                 })
@@ -1083,13 +1094,16 @@ impl EntryStage {
         }
     }
 
-    fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<Vec<DataExpression>>, SourceError> {
+    fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<(bool, Vec<DataExpression>)>, SourceError> {
         if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
             let mut expressions = Vec::new();
+            let mut is_constant = true;
             while tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
                 let expr = tokens.get("when parsing expression list")?;
                 match expr {
-                    ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) => {
+                    ExpressionToken::ConstExpression(_, expr) => expressions.push(expr),
+                    ExpressionToken::Expression(_, expr) => {
+                        is_constant = false;
                         expressions.push(expr);
                     },
                     _ => unreachable!()
@@ -1101,7 +1115,7 @@ impl EntryStage {
                     break;
                 }
             }
-            Ok(Some(expressions))
+            Ok(Some((is_constant, expressions)))
 
         } else {
             Ok(None)
@@ -1645,6 +1659,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Byte,
+            is_constant: false,
             compress: false,
             debug_only: false
         }]);
@@ -1653,6 +1668,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(2))]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1669,6 +1685,7 @@ mod test {
                 },
                 Expression::Value(ExpressionValue::Integer(1))
             ]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1682,6 +1699,19 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(4)),
                 Expression::Value(ExpressionValue::Integer(5))
             ]),
+            is_constant: true,
+            compress: false,
+            debug_only: false
+        }]);
+        assert_eq!(tfe("global:\nDB global"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 7, "global"),
+            1
+        ), EntryToken::Data {
+            inner: itk!(8, 10, "DB"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            is_constant: false,
             compress: false,
             debug_only: false
         }]);
@@ -1694,6 +1724,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Word,
+            is_constant: false,
             compress: false,
             debug_only: false
         }]);
@@ -1702,6 +1733,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1718,6 +1750,7 @@ mod test {
                 },
                 Expression::Value(ExpressionValue::Integer(1))
             ]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1731,6 +1764,19 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(4000)),
                 Expression::Value(ExpressionValue::Integer(5000))
             ]),
+            is_constant: true,
+            compress: false,
+            debug_only: false
+        }]);
+        assert_eq!(tfe("global:\nDW global"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 7, "global"),
+            1
+        ), EntryToken::Data {
+            inner: itk!(8, 10, "DW"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            is_constant: false,
             compress: false,
             debug_only: false
         }]);
@@ -1743,6 +1789,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Word,
+            is_constant: false,
             compress: false,
             debug_only: false
         }]);
@@ -1751,6 +1798,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1767,6 +1815,7 @@ mod test {
                 },
                 Expression::Value(ExpressionValue::Integer(1))
             ]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1780,6 +1829,19 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(4000)),
                 Expression::Value(ExpressionValue::Integer(5000))
             ]),
+            is_constant: true,
+            compress: false,
+            debug_only: false
+        }]);
+        assert_eq!(tfe("global:\nBW global"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 7, "global"),
+            1
+        ), EntryToken::Data {
+            inner: itk!(8, 10, "BW"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Big,
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            is_constant: false,
             compress: false,
             debug_only: false
         }]);
@@ -1798,6 +1860,7 @@ mod test {
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
             }, None),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1813,6 +1876,7 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(15)),
                 Some(Expression::Value(ExpressionValue::String("Hello World".to_string())))
             ),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1828,6 +1892,7 @@ mod test {
                 Expression::Value(ExpressionValue::String("Hello World".to_string())),
                 None
             ),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1846,6 +1911,7 @@ mod test {
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
             }, None),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1864,6 +1930,7 @@ mod test {
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
             }, None),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -1877,6 +1944,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Array(vec![1, 2, 3]),
+            is_constant: true,
             compress: false,
             debug_only: false
         }]);
@@ -2563,6 +2631,7 @@ mod test {
                 storage: DataStorage::Array(vec![
                     72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100
                 ]),
+                is_constant: true,
                 compress: false,
                 debug_only: true
             }
@@ -3230,6 +3299,7 @@ mod test {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(1))]),
+                is_constant: true,
                 compress: true,
                 debug_only: false
             },
@@ -3238,6 +3308,7 @@ mod test {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2))]),
+                is_constant: true,
                 compress: true,
                 debug_only: false
             },
@@ -3246,6 +3317,7 @@ mod test {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
                 storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2))]),
+                is_constant: true,
                 compress: true,
                 debug_only: false
             },
@@ -3254,6 +3326,7 @@ mod test {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Buffer(Expression::Value(ExpressionValue::Integer(2)), None),
+                is_constant: true,
                 compress: true,
                 debug_only: false
             }
@@ -3265,6 +3338,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Array(vec![1, 2, 3]),
+            is_constant: true,
             compress: true,
             debug_only: false
         }]);

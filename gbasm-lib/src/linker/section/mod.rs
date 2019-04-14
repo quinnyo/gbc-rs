@@ -251,6 +251,7 @@ impl Section {
                     instruction::size(op_code),
                     EntryData::Instruction {
                         op_code,
+                        // TODO pre-resolve if expr is constant
                         expression: Some(expr),
                         bytes: instruction::bytes(op_code),
                         debug_only: false
@@ -281,6 +282,7 @@ impl Section {
                     instruction::size(op_code),
                     EntryData::Instruction {
                         op_code,
+                        // TODO pre-resolve if expr is constant
                         expression: Some(expr),
                         bytes: instruction::bytes(op_code),
                         debug_only: true
@@ -304,7 +306,7 @@ impl Section {
                     id
                 }));
             },
-            EntryToken::Data { inner, endianess, storage, alignment, compress, debug_only } => {
+            EntryToken::Data { inner, endianess, storage, alignment, is_constant, compress, debug_only } => {
 
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = match storage {
@@ -325,11 +327,39 @@ impl Section {
                     },
                     DataStorage::Bytes(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        Self::parse_storage_bytes(1, exprs)
+                        let length = exprs.len();
+                        let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (1, e)).collect();
+                        if is_constant {
+                            (length, Some(
+                                Self::resolve_expressions_to_bytes(
+                                    &inner,
+                                    context,
+                                    &endianess,
+                                    &expressions
+                                )?
+                            ), None)
+
+                        } else {
+                            (length, None, Some(expressions))
+                        }
                     },
                     DataStorage::Words(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        Self::parse_storage_bytes(2, exprs)
+                        let length = exprs.len() * 2;
+                        let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (2, e)).collect();
+                        if is_constant {
+                            (length, Some(
+                                Self::resolve_expressions_to_bytes(
+                                    &inner,
+                                    context,
+                                    &endianess,
+                                    &expressions
+                                )?
+                            ), None)
+
+                        } else {
+                            (length, None, Some(expressions))
+                        }
                     },
                     DataStorage::Buffer(length, fill) => {
                         let length_or_string = context.resolve_expression(length)?;
@@ -365,13 +395,18 @@ impl Section {
                                 }
                             },
                             _ => {
-                                return Err(inner.error("invalid Data Declaration format.".to_string()))
+                                // TODO reachable?
+                                return Err(inner.error("Invalid Data Declaration format.".to_string()))
                             }
                         }
                     }
                 };
 
-                // TODO error if compress == true and bytes.is_none() == true
+                // Enforce compressed blocks to only contain constant bytes
+                if compress && bytes.is_none() {
+                    return Err(inner.error("Data Declarations inside of COMPRESS blocks may not resolve to label addresses.".to_string()))
+                }
+
                 // TODO combine and compress adjacent data blocks with compiler
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
@@ -443,27 +478,12 @@ impl Section {
 
                 // Resolve Data Argument Expressions
                 if let Some(expressions) = expressions {
-                    let mut data_bytes = Vec::new();
-                    for (width, expr) in expressions {
-                        if *width == 1 {
-                            data_bytes.push(
-                                util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte data")?
-                            );
-
-                        } else {
-                            let word = util::word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word data")?;
-                            if *endianess == DataEndianess::Little {
-                                data_bytes.push(word as u8);
-                                data_bytes.push((word >> 8) as u8);
-
-                            } else {
-                                data_bytes.push((word >> 8) as u8);
-                                data_bytes.push(word as u8);
-                            }
-                        }
-
-                    }
-                    *bytes = Some(data_bytes);
+                    *bytes = Some(Self::resolve_expressions_to_bytes(
+                        &entry.inner,
+                        context,
+                        endianess,
+                        expressions
+                    )?);
                 }
                 debug_assert_eq!(self.is_rom, bytes.is_some());
 
@@ -689,10 +709,34 @@ impl Section {
         }
     }
 
-    fn parse_storage_bytes(width: usize, exprs: Vec<DataExpression>) -> (usize, Option<Vec<u8>>, Option<Vec<(usize, DataExpression)>>) {
-        // TODO check if all exprs here a constant
-        // TODO if so, early resolve the expressions to bytes
-        (exprs.len() * width, None, Some(exprs.into_iter().map(|e| (width, e)).collect()))
+    fn resolve_expressions_to_bytes(
+        inner: &InnerToken,
+        context: &mut EvaluatorContext,
+        endianess: &DataEndianess,
+        expressions: &[(usize, DataExpression)]
+
+    ) -> Result<Vec<u8>, SourceError> {
+        let mut data_bytes = Vec::new();
+        for (width, expr) in expressions {
+            if *width == 1 {
+                data_bytes.push(
+                    util::byte_value(inner, context.resolve_expression(expr.clone())?, "Invalid byte data")?
+                );
+
+            } else {
+                let word = util::word_value(inner, context.resolve_expression(expr.clone())?, "Invalid word data")?;
+                if *endianess == DataEndianess::Little {
+                    data_bytes.push(word as u8);
+                    data_bytes.push((word >> 8) as u8);
+
+                } else {
+                    data_bytes.push((word >> 8) as u8);
+                    data_bytes.push(word as u8);
+                }
+            }
+
+        }
+        Ok(data_bytes)
     }
 
 }
@@ -764,19 +808,14 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(67, 70, "int"), "int".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![1]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::BuiltinCall {
-                        inner: itk!(74, 79, "FLOOR"),
-                        name: "FLOOR".to_string(),
-                        args: vec![Expression::Value(ExpressionValue::ConstantValue(itk!(80, 85, "float"), "float".to_string()))]
-
-                    })]),
+                    expressions: None,
                     bytes: Some(vec![3]),
                     debug_only: false
                 }),
@@ -799,21 +838,21 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(40, 41, "A"), "A".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(45, 46, "B"), "B".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(50, 51, "C"), "C".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
@@ -849,10 +888,7 @@ mod test {
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::Integer(16))),
-                        (1, Expression::Value(ExpressionValue::Integer(32)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![16, 32]),
                     debug_only: false
                 })
@@ -863,10 +899,7 @@ mod test {
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::Integer(-1))),
-                        (1, Expression::Value(ExpressionValue::Integer(-128)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![255, 128]),
                     debug_only: false
                 })
@@ -887,10 +920,7 @@ mod test {
                 (4, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, Expression::Value(ExpressionValue::Integer(4096))),
-                        (2, Expression::Value(ExpressionValue::Integer(8192)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![0, 16, 0, 32]),
                     debug_only: false
                 })
@@ -901,9 +931,7 @@ mod test {
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, Expression::Value(ExpressionValue::Integer(-1)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![255, 255]),
                     debug_only: false
                 })
@@ -914,10 +942,7 @@ mod test {
                 (4, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Big,
-                    expressions: Some(vec![
-                        (2, Expression::Value(ExpressionValue::Integer(4096))),
-                        (2, Expression::Value(ExpressionValue::Integer(8192)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![16, 0, 32, 0]),
                     debug_only: false
                 })
@@ -1179,9 +1204,7 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string())))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 })
@@ -1218,9 +1241,7 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::ConstantValue(itk!(56, 57, "C"), "C".to_string())))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 })
@@ -1674,6 +1695,36 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njr @-1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0002 is neither the start nor end of any section entry.\n\njr @-1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
+    }
+
+    // Compressed Blocks ------------------------------------------------------
+    #[test]
+    fn test_compressed_block() {
+        let l = linker("SECTION ROM0\nCOMPRESS DB 1 DB 2 ENDCOMPRESS");
+        assert_eq!(linker_section_entries(l), vec![
+            // TODO should create a DataStorage::Buffer that contains the compressed data
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_compressed_block() {
+        assert_eq!(linker_error("SECTION ROM0\nglobal:\nCOMPRESS DW global ENDCOMPRESS"), "In file \"main.gb.s\" on line 3, column 10: Data Declarations inside of COMPRESS blocks may not resolve to label addresses.\n\nCOMPRESS DW global ENDCOMPRESS\n         ^--- Here");
     }
 
 }
