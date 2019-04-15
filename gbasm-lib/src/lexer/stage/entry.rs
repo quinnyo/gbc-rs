@@ -315,10 +315,10 @@ impl EntryStage {
                         (_, "DS") => {
                             Self::parse_data_directive_ds(&mut tokens, inner, inside_compressed, DataAlignment::Byte)?
                         },
-                        (_, "DS8") => {
+                        (false, "DS8") => {
                             Self::parse_data_directive_ds(&mut tokens, inner, inside_compressed, DataAlignment::WithinWord)?
                         },
-                        (_, "DS16") => {
+                        (false, "DS16") => {
                             Self::parse_data_directive_ds(&mut tokens, inner, inside_compressed, DataAlignment::Word)?
                         },
                         (false, _) => return Err(inner.error(format!(
@@ -326,7 +326,7 @@ impl EntryStage {
                             inner.value
                         ))),
                         (true, _) => return Err(inner.error(format!(
-                            "Unexpected reserved keyword \"{}\" inside compressed block, expected either DB, BW, DS, DS8 or DS16 instead.",
+                            "Unexpected reserved keyword \"{}\" inside compressed block, expected either DB, BW or DS instead.",
                             inner.value
                         )))
                     }
@@ -3348,8 +3348,10 @@ mod test {
     #[test]
     fn test_error_compressed_block() {
         assert_eq!(entry_lexer_error("COMPRESS nop ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected Instruction, expected a data directive instead.\n\nCOMPRESS nop ENDCOMPRESS\n         ^--- Here");
-        assert_eq!(entry_lexer_error("COMPRESS SECTION ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"SECTION\" inside compressed block, expected either DB, BW, DS, DS8 or DS16 instead.\n\nCOMPRESS SECTION ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS SECTION ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"SECTION\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS SECTION ENDCOMPRESS\n         ^--- Here");
         assert_eq!(entry_lexer_error("COMPRESS foo EQU 2 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected Constant, expected a data directive instead.\n\nCOMPRESS foo EQU 2 ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS DS8 1 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"DS8\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS DS8 1 ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS DS16 1 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"DS16\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS DS16 1 ENDCOMPRESS\n         ^--- Here");
     }
 
 }

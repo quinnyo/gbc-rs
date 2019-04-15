@@ -30,6 +30,17 @@ pub enum EntryData {
     }
 }
 
+impl EntryData {
+    pub fn into_bytes(self) -> Vec<u8> {
+        match self {
+            EntryData::Marker { .. }| EntryData::Label { .. }=> Vec::new(),
+            EntryData::Data { bytes, .. } => bytes.unwrap_or_else(Vec::new),
+            EntryData::Instruction { bytes, .. } => bytes
+        }
+    }
+
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct SectionEntry {
     pub inner: InnerToken,

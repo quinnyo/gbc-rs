@@ -99,6 +99,7 @@ pub struct Section {
     name: String,
     pub segment: String,
     inner: InnerToken,
+    any_compressed: bool,
 
     pub start_address: usize,
     pub end_address: usize,
@@ -204,6 +205,7 @@ impl Section {
             name: name.clone().unwrap_or_else(|| "".to_string()),
             segment,
             inner: inner.clone(),
+            any_compressed: false,
 
             start_address,
             end_address: end_address - 1,
@@ -289,6 +291,8 @@ impl Section {
                 }));
             },
             EntryToken::Data { inner, endianess, storage, alignment, is_constant, compress, debug_only } => {
+
+                self.any_compressed |= compress;
 
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = match storage {
@@ -389,7 +393,6 @@ impl Section {
                     return Err(inner.error("Data Declarations inside of COMPRESS blocks may not resolve to label addresses.".to_string()))
                 }
 
-                // TODO combine and compress adjacent data blocks with compiler
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -414,6 +417,40 @@ impl Section {
         self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Marker {
             name
         }));
+    }
+
+    pub fn combine_blocks(&mut self) {
+        if self.any_compressed {
+            let entries: Vec<SectionEntry> = self.entries.drain(0..).collect();
+            let mut entries = entries.into_iter().peekable();
+            while let Some(entry) = entries.next() {
+                if entry.compress {
+                    // Collect continuous compressed entries
+                    let mut bytes = entry.data.into_bytes();
+                    while entries.peek().map(|e| e.compress).unwrap_or(false) {
+                        let entry = entries.next().unwrap();
+                        bytes.append(&mut entry.data.into_bytes());
+                    }
+                    // TODO compress bytes
+                    self.entries.push(SectionEntry::new_with_size(
+                        self.id,
+                        entry.inner,
+                        bytes.len(),
+                        EntryData::Data {
+                            alignment: DataAlignment::Byte,
+                            endianess: DataEndianess::Little,
+                            expressions: None,
+                            bytes: Some(bytes),
+                            debug_only: false
+                        },
+                        false
+                    ));
+
+                } else {
+                    self.entries.push(entry);
+                }
+            }
+        }
     }
 
     pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
@@ -1755,22 +1792,42 @@ mod test {
     // Compressed Blocks ------------------------------------------------------
     #[test]
     fn test_compressed_block() {
-        let l = linker("SECTION ROM0\nCOMPRESS DB 1 DB 2 ENDCOMPRESS");
+        let l = linker("SECTION ROM0\nDB 0\nCOMPRESS DB 1 DW 2000 DS 11 'Hello World' ENDCOMPRESS\nDB 4\nCOMPRESS DB 5 ENDCOMPRESS\nDB 6");
         assert_eq!(linker_section_entries(l), vec![
-            // TODO should create a DataStorage::Buffer that contains the compressed data
             vec![
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![1]),
+                    bytes: Some(vec![0]),
+                    debug_only: false
+                }),
+                (14, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1, 208, 7, 72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![2]),
+                    bytes: Some(vec![4]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![5]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![6]),
                     debug_only: false
                 })
             ]

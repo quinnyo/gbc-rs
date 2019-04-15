@@ -289,6 +289,11 @@ impl Linker {
                 section.end_address = next_start - 1;
             }
         }
+
+        for s in sections.iter_mut() {
+            s.combine_blocks();
+        }
+
     }
 
     fn resolve_sections(
