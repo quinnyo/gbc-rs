@@ -15,6 +15,7 @@ pub mod entry;
 
 
 // Internal Dependencies ------------------------------------------------------
+use crate::lz4;
 use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken};
 use crate::expression::{ExpressionResult, DataExpression};
@@ -431,7 +432,7 @@ impl Section {
                         let entry = entries.next().unwrap();
                         bytes.append(&mut entry.data.into_bytes());
                     }
-                    // TODO compress bytes
+                    let (bytes, _) = lz4::compress(&bytes, true);
                     self.entries.push(SectionEntry::new_with_size(
                         self.id,
                         entry.inner,
@@ -1792,7 +1793,7 @@ mod test {
     // Compressed Blocks ------------------------------------------------------
     #[test]
     fn test_compressed_block() {
-        let l = linker("SECTION ROM0\nDB 0\nCOMPRESS DB 1 DW 2000 DS 11 'Hello World' ENDCOMPRESS\nDB 4\nCOMPRESS DB 5 ENDCOMPRESS\nDB 6");
+        let l = linker("SECTION ROM0\nDB 0\nCOMPRESS DB 1 DW 2000 DS 11 'OOOOOOOOOO' ENDCOMPRESS\nDB 4\nCOMPRESS DB 5 ENDCOMPRESS\nDB 6");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1802,11 +1803,11 @@ mod test {
                     bytes: Some(vec![0]),
                     debug_only: false
                 }),
-                (14, EntryData::Data {
+                (9, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![1, 208, 7, 72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
+                    bytes: Some(vec![2, 1, 208, 7, 136, 79, 0, 0, 48]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
@@ -1816,11 +1817,11 @@ mod test {
                     bytes: Some(vec![4]),
                     debug_only: false
                 }),
-                (1, EntryData::Data {
+                (3, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
                     expressions: None,
-                    bytes: Some(vec![5]),
+                    bytes: Some(vec![0, 5, 48]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {

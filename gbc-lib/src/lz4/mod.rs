@@ -367,15 +367,15 @@ struct CopyState {
 
 
 // LZ4 alike dompression ------------------------------------------------------
+pub fn compress(data: &[u8], eom: bool) -> (Vec<u8>, f32) {
+    let commands = Encoder::analyze(data, eom);
+    let output = Encoder::serialize(&commands);
+    let ratio = 1.0 / data.len() as f32 * output.len() as f32;
+    (output, ratio)
+}
+
 pub struct Encoder;
 impl Encoder {
-
-    pub fn compress(data: &[u8], eom: bool) -> (Vec<u8>, f32) {
-        let commands = Encoder::analyze(data, eom);
-        let output = Encoder::serialize(&commands);
-        let ratio = 1.0 / data.len() as f32 * output.len() as f32;
-        (output, ratio)
-    }
 
     fn serialize(commands: &[Box<dyn Command>]) -> Vec<u8> {
         let mut output = Vec::new();
@@ -601,13 +601,13 @@ impl Encoder {
 #[cfg(test)]
 mod test {
 
-    use super::Encoder;
+    use super::compress;
 
     #[test]
     fn test_encode_tile_map() {
         let input = vec![255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 252, 252, 240, 240, 192, 192, 0, 0, 252, 252, 240, 240, 192, 192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let expected = vec![ 142, 255, 46, 134, 255, 7, 252, 252, 240, 240, 192, 192, 0, 0, 69, 0, 38, 48];
-        let result = Encoder::compress(&input, true);
+        let result = compress(&input, true);
         assert_eq!(result.0, expected);
     }
 
