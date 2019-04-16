@@ -2,7 +2,6 @@
 
 **gbc** is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
 
-
 ## Maingoals
 
 - No further external programs required to build a ROM
@@ -10,6 +9,28 @@
 - High test coverages
 - Quality of life improvements via syntactic sugar
 
+## Usage
+
+```
+USAGE:
+    gbc [FLAGS] [OPTIONS] <SOURCE_FILE>
+
+FLAGS:
+    -D, --debug       Enable debug instructions for BGB debugger
+    -h, --help        Prints help information
+    -i, --info        Display ROM info
+    -O, --optimize    Apply instruction optimizations
+    -S, --segments    Display segments usage
+    -s, --silent      Surpresses all output
+    -V, --version     Prints version information
+
+OPTIONS:
+    -m, --symbol-map <FILE>    Output symbol mapping for BGB debugger
+    -o, --output-rom <FILE>    ROM file to generate
+
+ARGS:
+    <SOURCE_FILE>    Sets the input source file to use
+```
 
 ## General Syntax
 
