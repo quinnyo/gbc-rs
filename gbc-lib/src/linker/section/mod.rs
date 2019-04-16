@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
-use gbasm_cpu::{self, Argument, Instruction};
+use gbc_cpu::{self, Argument, Instruction};
 
 
 // Modules --------------------------------------------------------------------
@@ -17,7 +17,7 @@ pub mod entry;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken};
-use crate::expression::ExpressionResult;
+use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
 use self::entry::{EntryData, SectionEntry};
@@ -35,7 +35,7 @@ struct SectionDefault {
 }
 
 lazy_static! {
-    static ref INSTRUCTIONS: Vec<Instruction> = gbasm_cpu::instruction_list();
+    static ref INSTRUCTIONS: Vec<Instruction> = gbc_cpu::instruction_list();
 
     static ref SECTION_DEFAULTS: HashMap<&'static str, SectionDefault> = {
         let mut map = HashMap::new();
@@ -99,6 +99,7 @@ pub struct Section {
     name: String,
     pub segment: String,
     inner: InnerToken,
+    any_compressed: bool,
 
     pub start_address: usize,
     pub end_address: usize,
@@ -204,6 +205,7 @@ impl Section {
             name: name.clone().unwrap_or_else(|| "".to_string()),
             segment,
             inner: inner.clone(),
+            any_compressed: false,
 
             start_address,
             end_address: end_address - 1,
@@ -230,58 +232,46 @@ impl Section {
         match token {
             EntryToken::Instruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, None, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        expression: None,
-                        bytes: instruction::bytes(op_code),
-                        debug_only: false
-                    }
+                    bytes,
+                    false
                 ))
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        expression: Some(expr),
-                        bytes: instruction::bytes(op_code),
-                        debug_only: false
-                    }
+                    bytes,
+                    false
                 ))
             },
             EntryToken::DebugInstruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, None, true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        expression: None,
-                        bytes: instruction::bytes(op_code),
-                        debug_only: true
-                    }
+                    bytes,
+                    false
                 ))
             },
             EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    EntryData::Instruction {
-                        op_code,
-                        expression: Some(expr),
-                        bytes: instruction::bytes(op_code),
-                        debug_only: true
-                    }
+                    bytes,
+                    false
                 ))
             },
             EntryToken::GlobalLabelDef(inner, id) => {
@@ -300,7 +290,9 @@ impl Section {
                     id
                 }));
             },
-            EntryToken::Data { inner, endianess, storage, alignment, debug_only } => {
+            EntryToken::Data { inner, endianess, storage, alignment, is_constant, compress, debug_only } => {
+
+                self.any_compressed |= compress;
 
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = match storage {
@@ -321,11 +313,39 @@ impl Section {
                     },
                     DataStorage::Bytes(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        (exprs.len(), None, Some(exprs.into_iter().map(|e| (1, e)).collect()))
+                        let length = exprs.len();
+                        let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (1, e)).collect();
+                        if is_constant {
+                            (length, Some(
+                                Self::resolve_expression_arguments_to_bytes(
+                                    &inner,
+                                    context,
+                                    &endianess,
+                                    &expressions
+                                )?
+                            ), None)
+
+                        } else {
+                            (length, None, Some(expressions))
+                        }
                     },
                     DataStorage::Words(exprs) => {
                         self.check_rom(&inner, "Data Declaration")?;
-                        (exprs.len() * 2, None, Some(exprs.into_iter().map(|e| (2, e)).collect()))
+                        let length = exprs.len() * 2;
+                        let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (2, e)).collect();
+                        if is_constant {
+                            (length, Some(
+                                Self::resolve_expression_arguments_to_bytes(
+                                    &inner,
+                                    context,
+                                    &endianess,
+                                    &expressions
+                                )?
+                            ), None)
+
+                        } else {
+                            (length, None, Some(expressions))
+                        }
                     },
                     DataStorage::Buffer(length, fill) => {
                         let length_or_string = context.resolve_expression(length)?;
@@ -361,11 +381,17 @@ impl Section {
                                 }
                             },
                             _ => {
-                                return Err(inner.error("invalid Data Declaration format.".to_string()))
+                                // TODO reachable?
+                                return Err(inner.error("Invalid Data Declaration format.".to_string()))
                             }
                         }
                     }
                 };
+
+                // Enforce compressed blocks to only contain constant bytes
+                if compress && bytes.is_none() {
+                    return Err(inner.error("Data Declarations inside of COMPRESS blocks may not resolve to label addresses.".to_string()))
+                }
 
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
@@ -378,6 +404,7 @@ impl Section {
                         bytes,
                         debug_only
                     },
+                    compress
                 ));
 
             },
@@ -392,33 +419,67 @@ impl Section {
         }));
     }
 
+    pub fn combine_blocks(&mut self) {
+        if self.any_compressed {
+            let entries: Vec<SectionEntry> = self.entries.drain(0..).collect();
+            let mut entries = entries.into_iter().peekable();
+            while let Some(entry) = entries.next() {
+                if entry.compress {
+                    // Collect continuous compressed entries
+                    let mut bytes = entry.data.into_bytes();
+                    while entries.peek().map(|e| e.compress).unwrap_or(false) {
+                        let entry = entries.next().unwrap();
+                        bytes.append(&mut entry.data.into_bytes());
+                    }
+                    // TODO compress bytes
+                    self.entries.push(SectionEntry::new_with_size(
+                        self.id,
+                        entry.inner,
+                        bytes.len(),
+                        EntryData::Data {
+                            alignment: DataAlignment::Byte,
+                            endianess: DataEndianess::Little,
+                            expressions: None,
+                            bytes: Some(bytes),
+                            debug_only: false
+                        },
+                        false
+                    ));
+
+                } else {
+                    self.entries.push(entry);
+                }
+            }
+        }
+    }
+
     pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
         let mut offset = 0;
-        for e in &mut self.entries {
+        for entry in &mut self.entries {
 
             // Update offset of entry
-            e.offset = self.start_address + offset;
+            entry.offset = self.start_address + offset;
 
             // Update label addresses
-            if let EntryData::Label { ref id, ..} = e.data {
-                context.label_addresses.insert(*id, e.offset);
+            if let EntryData::Label { ref id, ..} = entry.data {
+                context.label_addresses.insert(*id, entry.offset);
 
             // Verify alignment requirements
-            } else if let EntryData::Data { ref alignment, .. } = e.data {
-                if *alignment == DataAlignment::Word && e.offset & 0xFF != 0 {
-                    return Err(e.inner.error(
+            } else if let EntryData::Data { ref alignment, .. } = entry.data {
+                if *alignment == DataAlignment::Word && entry.offset & 0xFF != 0 {
+                    return Err(entry.inner.error(
                         "Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.".to_string()
                     ));
 
-                } else if *alignment == DataAlignment::WithinWord && (e.offset & 0xFF) + e.size > 256 {
-                    return Err(e.inner.error(
+                } else if *alignment == DataAlignment::WithinWord && (entry.offset & 0xFF) + entry.size > 256 {
+                    return Err(entry.inner.error(
                         "Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.".to_string()
                     ));
                 }
             }
 
             // Advance section offset by entry size
-            offset += e.size
+            offset += entry.size
 
         }
         self.bytes_in_use = offset;
@@ -432,104 +493,29 @@ impl Section {
             let end_of_instruction = (entry.offset + entry.size) as i32;
             context.rom_offset = end_of_instruction;
 
+            // Resolve Data Argument Expressions
             if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
-
-                // Resolve Data Argument Expressions
                 if let Some(expressions) = expressions {
-                    let mut data_bytes = Vec::new();
-                    for (width, expr) in expressions {
-                        if *width == 1 {
-                            data_bytes.push(
-                                util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte data")?
-                            );
-
-                        } else {
-                            let word = util::word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word data")?;
-                            if *endianess == DataEndianess::Little {
-                                data_bytes.push(word as u8);
-                                data_bytes.push((word >> 8) as u8);
-
-                            } else {
-                                data_bytes.push((word >> 8) as u8);
-                                data_bytes.push(word as u8);
-                            }
-                        }
-
-                    }
-                    *bytes = Some(data_bytes);
+                    *bytes = Some(Self::resolve_expression_arguments_to_bytes(
+                        &entry.inner,
+                        context,
+                        endianess,
+                        expressions
+                    )?);
                 }
                 debug_assert_eq!(self.is_rom, bytes.is_some());
 
+            // Resolve Instruction Argument Expressions
             } else if let EntryData::Instruction { ref op_code, ref mut bytes, ref expression, .. } = entry.data {
                 if let Some(expr) = expression {
-                    if let Some(argument) = instruction::argument(*op_code) {
+                    *bytes = Self::resolve_instruction_argument_to_bytes(
+                        &entry.inner,
+                        context,
+                        *op_code,
+                        expr,
+                        Some(end_of_instruction)
 
-                        // Handle constant/offset -> op code mapping
-                        if let Some(offsets) = instruction::offsets(*op_code) {
-                            let value = util::integer_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid constant argument")?;
-                            let mut mapped_op_code = None;
-                            for (constant_value, constant_op_code) in offsets {
-                                if value == *constant_value as i32 {
-                                    mapped_op_code = Some(*constant_op_code);
-                                    break;
-                                }
-                            }
-
-                            // Rewrite instruction to matched op code
-                            if let Some(mapped_op_code) = mapped_op_code {
-                                *bytes = instruction::bytes(mapped_op_code);
-
-                            } else {
-                                let valid_values: Vec<String> = offsets.iter().map(|(v, _)| v.to_string()).collect();
-                                return Err(entry.inner.error(
-                                    format!("Invalid constant value {}, one of the following values is required: {}", value, valid_values.join(", "))
-                                ));
-                            }
-
-                        } else {
-                            let mut instr_bytes = instruction::bytes(*op_code);
-                            let mut arg_bytes: Vec<u8> = match argument {
-                                Argument::MemoryLookupByteValue | Argument::ByteValue => {
-                                    vec![
-                                        util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid byte argument")?
-                                    ]
-                                },
-                                Argument::MemoryLookupWordValue | Argument::WordValue => {
-                                    let word = util::word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid word argument")?;
-                                    vec![
-                                        word as u8,
-                                        (word >> 8) as u8
-                                    ]
-                                },
-                                Argument::SignedByteValue => {
-                                    // ldsp hl,X
-                                    if *op_code == 248 {
-                                        vec![
-                                            util::byte_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid signed byte argument")?
-                                        ]
-
-                                    // jr
-                                    } else {
-                                        let address = util::address_word_value(&entry.inner, context.resolve_expression(expr.clone())?, "Invalid address")?;
-                                        let target = address as i32 - end_of_instruction;
-                                        vec![
-                                            util::signed_byte_value(&entry.inner, target, "").map_err(|mut e| {
-                                                e.message = format!("Relative jump offset of {} is out of range{}", target, e.message);
-                                                e
-                                            })?
-                                        ]
-                                    }
-                                },
-                                _ => unreachable!("Invalid argument type for instruction with expression")
-                            };
-
-                            instr_bytes.append(&mut arg_bytes);
-                            *bytes = instr_bytes;
-                        }
-
-                    } else {
-                        unreachable!("Instruction has expression but does not expect any argument: {}", op_code);
-                    }
+                    )?.expect("Instruction Argument failed to resolve");
                 }
             }
         }
@@ -682,6 +668,169 @@ impl Section {
         }
     }
 
+    fn resolve_expression_arguments_to_bytes(
+        inner: &InnerToken,
+        context: &mut EvaluatorContext,
+        endianess: &DataEndianess,
+        expressions: &[(usize, DataExpression)]
+
+    ) -> Result<Vec<u8>, SourceError> {
+        let mut data_bytes = Vec::new();
+        for (width, expression) in expressions {
+            if *width == 1 {
+                data_bytes.push(
+                    util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid byte data")?
+                );
+
+            } else {
+                let word = util::word_value(inner, context.resolve_expression(expression.clone())?, "Invalid word data")?;
+                if *endianess == DataEndianess::Little {
+                    data_bytes.push(word as u8);
+                    data_bytes.push((word >> 8) as u8);
+
+                } else {
+                    data_bytes.push((word >> 8) as u8);
+                    data_bytes.push(word as u8);
+                }
+            }
+
+        }
+        Ok(data_bytes)
+    }
+
+    fn resolve_instruction_argument_to_bytes(
+        inner: &InnerToken,
+        context: &mut EvaluatorContext,
+        op_code: usize,
+        expression: &DataExpression,
+        end_of_instruction: Option<i32>
+
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        if let Some(argument) = instruction::argument(op_code) {
+
+            // Handle constant/offset -> op code mapping
+            if let Some(offsets) = instruction::offsets(op_code) {
+                let value = util::integer_value(inner, context.resolve_expression(expression.clone())?, "Invalid constant argument")?;
+                let mut mapped_op_code = None;
+                for (constant_value, constant_op_code) in offsets {
+                    if value == *constant_value as i32 {
+                        mapped_op_code = Some(*constant_op_code);
+                        break;
+                    }
+                }
+
+                // Rewrite instruction to matched op code
+                if let Some(mapped_op_code) = mapped_op_code {
+                    Ok(Some(instruction::bytes(mapped_op_code)))
+
+                } else {
+                    let valid_values: Vec<String> = offsets.iter().map(|(v, _)| v.to_string()).collect();
+                    Err(inner.error(
+                        format!("Invalid constant value {}, one of the following values is required: {}", value, valid_values.join(", "))
+                    ))
+                }
+
+            } else {
+                let mut instr_bytes = instruction::bytes(op_code);
+                let mut arg_bytes: Vec<u8> = match argument {
+                    Argument::MemoryLookupByteValue | Argument::ByteValue => {
+                        vec![
+                            util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid byte argument")?
+                        ]
+                    },
+                    Argument::MemoryLookupWordValue | Argument::WordValue => {
+                        let word = util::word_value(inner, context.resolve_expression(expression.clone())?, "Invalid word argument")?;
+                        vec![
+                            word as u8,
+                            (word >> 8) as u8
+                        ]
+                    },
+                    Argument::SignedByteValue => {
+                        // ldsp hl,X
+                        if op_code == 248 {
+                            vec![
+                                util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid signed byte argument")?
+                            ]
+
+                        // jr
+                        } else if let Some(end_of_instruction) = end_of_instruction {
+                            let address = util::address_word_value(inner, context.resolve_expression(expression.clone())?, "Invalid address")?;
+                            let target = address as i32 - end_of_instruction;
+                            vec![
+                                util::signed_byte_value(inner, target, "").map_err(|mut e| {
+                                    e.message = format!("Relative jump offset of {} is out of range{}", target, e.message);
+                                    e
+                                })?
+                            ]
+
+                        } else {
+                            return Ok(None);
+                        }
+                    },
+                    _ => unreachable!("Invalid argument type for instruction with expression")
+                };
+                instr_bytes.append(&mut arg_bytes);
+                Ok(Some(instr_bytes))
+            }
+
+        } else {
+            unreachable!("Instruction has expression but does not expect any argument: {}", op_code);
+        }
+    }
+
+    fn instruction_entry(
+        inner: &InnerToken,
+        context: &mut EvaluatorContext,
+        op_code: usize,
+        expression: Option<DataExpression>,
+        debug_only: bool
+
+    ) -> Result<EntryData, SourceError> {
+        if let Some(expression) = expression {
+            if expression.is_constant() {
+                if let Some(bytes) = Self::resolve_instruction_argument_to_bytes(
+                    inner,
+                    context,
+                    op_code,
+                    &expression,
+                    None
+
+                )? {
+                    Ok(EntryData::Instruction {
+                        op_code,
+                        expression: None,
+                        bytes,
+                        debug_only
+                    })
+
+                } else {
+                    Ok(EntryData::Instruction {
+                        op_code,
+                        expression: Some(expression),
+                        bytes: instruction::bytes(op_code),
+                        debug_only
+                    })
+                }
+
+            } else {
+                Ok(EntryData::Instruction {
+                    op_code,
+                    expression: Some(expression),
+                    bytes: instruction::bytes(op_code),
+                    debug_only
+                })
+            }
+
+        } else {
+            Ok(EntryData::Instruction {
+                op_code,
+                expression: None,
+                bytes: instruction::bytes(op_code),
+                debug_only
+            })
+        }
+    }
+
 }
 
 // Tests ----------------------------------------------------------------------
@@ -751,19 +900,14 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(67, 70, "int"), "int".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![1]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::BuiltinCall {
-                        inner: itk!(74, 79, "FLOOR"),
-                        name: "FLOOR".to_string(),
-                        args: vec![Expression::Value(ExpressionValue::ConstantValue(itk!(80, 85, "float"), "float".to_string()))]
-
-                    })]),
+                    expressions: None,
                     bytes: Some(vec![3]),
                     debug_only: false
                 }),
@@ -786,21 +930,21 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(40, 41, "A"), "A".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(45, 46, "B"), "B".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::ConstantValue(itk!(50, 51, "C"), "C".to_string())))]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 }),
@@ -836,10 +980,7 @@ mod test {
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::Integer(16))),
-                        (1, Expression::Value(ExpressionValue::Integer(32)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![16, 32]),
                     debug_only: false
                 })
@@ -850,10 +991,7 @@ mod test {
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::Integer(-1))),
-                        (1, Expression::Value(ExpressionValue::Integer(-128)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![255, 128]),
                     debug_only: false
                 })
@@ -874,10 +1012,7 @@ mod test {
                 (4, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, Expression::Value(ExpressionValue::Integer(4096))),
-                        (2, Expression::Value(ExpressionValue::Integer(8192)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![0, 16, 0, 32]),
                     debug_only: false
                 })
@@ -888,9 +1023,7 @@ mod test {
                 (2, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (2, Expression::Value(ExpressionValue::Integer(-1)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![255, 255]),
                     debug_only: false
                 })
@@ -901,10 +1034,7 @@ mod test {
                 (4, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Big,
-                    expressions: Some(vec![
-                        (2, Expression::Value(ExpressionValue::Integer(4096))),
-                        (2, Expression::Value(ExpressionValue::Integer(8192)))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![16, 0, 32, 0]),
                     debug_only: false
                 })
@@ -1166,9 +1296,7 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::ConstantValue(mtk!(17, 18, "C", 0), "C".to_string())))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 })
@@ -1205,9 +1333,7 @@ mod test {
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
                     endianess: DataEndianess::Little,
-                    expressions: Some(vec![
-                        (1, Expression::Value(ExpressionValue::ConstantValue(itk!(56, 57, "C"), "C".to_string())))
-                    ]),
+                    expressions: None,
                     bytes: Some(vec![2]),
                     debug_only: false
                 })
@@ -1307,13 +1433,13 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 62,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(32))),
+                    expression: None,
                     bytes: vec![62, 32],
                     debug_only: false
                 }),
                 (3, EntryData::Instruction {
                     op_code: 33,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(16384))),
+                    expression: None,
                     bytes: vec![33, 0, 64],
                     debug_only: false
                 })
@@ -1334,7 +1460,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 327,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
+                        expression: None,
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1347,7 +1473,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 391,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
+                        expression: None,
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1360,7 +1486,7 @@ mod test {
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 455,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(bit))),
+                        expression: None,
                         bytes: vec![203, op],
                         debug_only: false
                     })
@@ -1373,7 +1499,7 @@ mod test {
                 vec![
                     (1, EntryData::Instruction {
                         op_code: 199,
-                        expression: Some(Expression::Value(ExpressionValue::Integer(rst))),
+                        expression: None,
                         bytes: vec![op],
                         debug_only: false
                     })
@@ -1423,13 +1549,13 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 240,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(65))),
+                    expression: None,
                     bytes: vec![240, 65],
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 230,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(2))),
+                    expression: None,
                     bytes: vec![230, 2],
                     debug_only: false
                 }),
@@ -1445,7 +1571,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 248,
-                    expression: Some(Expression::Value(ExpressionValue::Integer(-3))),
+                    expression: None,
                     bytes: vec![248, 253],
                     debug_only: false
                 })
@@ -1661,6 +1787,56 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njr @-1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0002 is neither the start nor end of any section entry.\n\njr @-1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
+    }
+
+    // Compressed Blocks ------------------------------------------------------
+    #[test]
+    fn test_compressed_block() {
+        let l = linker("SECTION ROM0\nDB 0\nCOMPRESS DB 1 DW 2000 DS 11 'Hello World' ENDCOMPRESS\nDB 4\nCOMPRESS DB 5 ENDCOMPRESS\nDB 6");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![0]),
+                    debug_only: false
+                }),
+                (14, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1, 208, 7, 72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![4]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![5]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![6]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_compressed_block() {
+        assert_eq!(linker_error("SECTION ROM0\nglobal:\nCOMPRESS DW global ENDCOMPRESS"), "In file \"main.gb.s\" on line 3, column 10: Data Declarations inside of COMPRESS blocks may not resolve to label addresses.\n\nCOMPRESS DW global ENDCOMPRESS\n         ^--- Here");
     }
 
 }

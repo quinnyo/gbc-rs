@@ -225,7 +225,8 @@ impl IncludeStage {
                         "THEN" | "ELSE" | "ENDIF" |
                         "MACRO" |
                         "ENDFOR" | "REPEAT" | "INCBIN" | "SECTION" | "INCLUDE" | "SEGMENT" |
-                        "ENDMACRO" => {
+                        "ENDMACRO" | "COMPRESS" |
+                        "ENDCOMPRESS" => {
                             Some(IncludeToken::Reserved(name))
                         },
                         // ROM Segments
@@ -637,7 +638,7 @@ mod test {
 
     #[test]
     fn test_reserved() {
-        token_types!(Reserved, "DB", "DW", "BW", "IF", "TO", "IN", "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE", "ENDIF", "MACRO", "ENDFOR", "REPEAT", "SECTION", "ENDMACRO", "SEGMENT");
+        token_types!(Reserved, "DB", "DW", "BW", "IF", "TO", "IN", "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE", "ENDIF", "MACRO", "ENDFOR", "REPEAT", "SECTION", "ENDMACRO", "SEGMENT", "COMPRESS", "ENDCOMPRESS");
     }
 
     #[test]

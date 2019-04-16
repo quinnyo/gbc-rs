@@ -1,17 +1,17 @@
-# A Gameboy Assembler 
+# A opinionated Gameboy Compiler
 
-gbasm is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
+**gbc** is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
 
-## Compatibility Notes
 
-**gbasm** is mostly compatible with [rgbds](https://github.com/bentley/rgbds) 
-but there are some deviations and additions:
+## Maingoals
 
-### General Syntax 
+- No further external programs required to build a ROM
+- Good error messages
+- High test coverages
+- Quality of life improvements via syntactic sugar
 
-- The *load accumulator and increment/decrement hl* type instructions only take `hli` and `hld` as their second operand
-- Memory operands do only support `[` and `]` in their syntax
-- All names and labels which start with an underscore are treated as being local / private to the file they were defined in
+
+## General Syntax
 
 ### User defined Macros
 
@@ -64,10 +64,11 @@ ENDFOR
 
 ### Meta Instructions
 
-**gbasm** supports additional meta instructions at the source level, 
-which are compiled down to multiple native instructions.
+Meta instructions encode multiple *native* instruction at the source level in order
+to abstract and simplfy often used code paths.
 
-These aim at increasing the readability of the source.
+These aim at increasing the readability of the source and reducing the potential
+for off-by-one errors.
 
 #### **addw**
 

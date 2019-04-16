@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
+use gbc_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -57,6 +57,8 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
         alignment => DataAlignment,
         endianess => DataEndianess,
         storage => DataStorage,
+        is_constant => bool,
+        compress => bool,
         debug_only => bool
     },
     // SECTION EXPR[String]
@@ -131,8 +133,8 @@ impl LexerStage for EntryStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let layouts = gbasm_cpu::instruction_layouts();
-        Self::parse_entry_tokens(tokens, &layouts)
+        let layouts = gbc_cpu::instruction_layouts();
+        Self::parse_entry_tokens(tokens, &layouts, false)
     }
 
 }
@@ -141,7 +143,8 @@ impl EntryStage {
 
     fn parse_entry_tokens(
         tokens: Vec<ExpressionToken>,
-        layouts: &InstructionLayouts
+        layouts: &InstructionLayouts,
+        inside_compressed: bool
 
     ) -> Result<Vec<EntryToken>, SourceError> {
 
@@ -149,14 +152,14 @@ impl EntryStage {
         let mut entry_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            let entry = match token {
+            let entry = match (inside_compressed, token) {
 
                 // Passthrough Label Defs
-                ExpressionToken::GlobalLabelDef(inner, id) => EntryToken::GlobalLabelDef(inner, id),
-                ExpressionToken::LocalLabelDef(inner, id) => EntryToken::LocalLabelDef(inner, id),
+                (false, ExpressionToken::GlobalLabelDef(inner, id)) => EntryToken::GlobalLabelDef(inner, id),
+                (false, ExpressionToken::LocalLabelDef(inner, id)) => EntryToken::LocalLabelDef(inner, id),
 
                 // If Statements
-                ExpressionToken::IfStatement(inner, branches) => {
+                (_, ExpressionToken::IfStatement(inner, branches)) => {
                     let mut entry_branches = Vec::new();
                     for branch in branches {
                         entry_branches.push(IfStatementBranch {
@@ -184,26 +187,33 @@ impl EntryStage {
                             } else {
                                 None
                             },
-                            body: Self::parse_entry_tokens(branch.body, layouts)?
+                            body: Self::parse_entry_tokens(branch.body, layouts, inside_compressed)?
                         });
                     }
                     EntryToken::IfStatement(inner, entry_branches)
                 },
 
                 // For Statements
-                ExpressionToken::ForStatement(inner, for_statement) => {
+                (_, ExpressionToken::ForStatement(inner, for_statement)) => {
                     let from = Self::parse_for_range(&inner, for_statement.from)?;
                     let to = Self::parse_for_range(&inner, for_statement.to)?;
                     EntryToken::ForStatement(inner, ForStatement {
                         binding: for_statement.binding.into_inner().value,
                         from,
                         to,
-                        body: Self::parse_entry_tokens(for_statement.body, layouts)?
+                        body: Self::parse_entry_tokens(for_statement.body, layouts, inside_compressed)?
                     })
                 },
 
+                // CompressedBlocks
+                (false, ExpressionToken::CompressedBlock(_, tokens)) => {
+                    let mut tokens = Self::parse_entry_tokens(tokens, layouts, true)?;
+                    entry_tokens.append(&mut tokens);
+                    continue;
+                },
+
                 // Constant Declarations
-                ExpressionToken::Constant(inner) => {
+                (false, ExpressionToken::Constant(inner)) => {
                     if tokens.peek_is(TokenType::Reserved, Some("EQU")) {
                         Self::parse_constant_declaration(&mut tokens, &mut constants, inner, false)?
 
@@ -216,27 +226,29 @@ impl EntryStage {
                 },
 
                 // Instructions
-                ExpressionToken::Instruction(inner) => Self::parse_instruction(&mut tokens, layouts, inner)?,
-                ExpressionToken::MetaInstruction(inner) => {
+                (false, ExpressionToken::Instruction(inner)) => Self::parse_instruction(&mut tokens, layouts, inner)?,
+                (false, ExpressionToken::MetaInstruction(inner)) => {
                     entry_tokens.append(&mut Self::parse_meta_instruction(&mut tokens, inner)?);
                     continue;
                 }
 
                 // Binary Data Declarations
-                ExpressionToken::BinaryFile(inner, bytes) => {
+                (_, ExpressionToken::BinaryFile(inner, bytes)) => {
                     EntryToken::Data {
                         inner,
                         alignment: DataAlignment::Byte,
                         endianess: DataEndianess::Little,
                         storage: DataStorage::Array(bytes),
+                        is_constant: true,
+                        compress: inside_compressed,
                         debug_only: false
                     }
                 },
 
                 // Other Directives
-                ExpressionToken::Reserved(inner) => {
-                    match inner.value.as_str() {
-                        "SECTION" => {
+                (_, ExpressionToken::Reserved(inner)) => {
+                    match (inside_compressed, inner.value.as_str()) {
+                        (false, "SECTION") => {
 
                             // Check for optional section name
                             let name = if tokens.peek_is(TokenType::ConstExpression, None) {
@@ -291,38 +303,40 @@ impl EntryStage {
                                 bank_index
                             }
                         },
-                        "DB" => {
-                            Self::parse_data_directive_db(&mut tokens, inner)?
+                        (_, "DB") => {
+                            Self::parse_data_directive_db(&mut tokens, inner, inside_compressed)?
                         },
-                        "DW" => {
-                            Self::parse_data_directive_dw(&mut tokens, inner)?
+                        (_, "DW") => {
+                            Self::parse_data_directive_dw(&mut tokens, inner, inside_compressed)?
                         },
-                        "BW" => {
-                            Self::parse_data_directive_bw(&mut tokens, inner)?
+                        (_, "BW") => {
+                            Self::parse_data_directive_bw(&mut tokens, inner, inside_compressed)?
                         },
-                        "DS" => {
-                            Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::Byte)?
+                        (_, "DS") => {
+                            Self::parse_data_directive_ds(&mut tokens, inner, inside_compressed, DataAlignment::Byte)?
                         },
-                        "DS8" => {
-                            Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::WithinWord)?
+                        (false, "DS8") => {
+                            Self::parse_data_directive_ds(&mut tokens, inner, inside_compressed, DataAlignment::WithinWord)?
                         },
-                        "DS16" => {
-                            Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::Word)?
+                        (false, "DS16") => {
+                            Self::parse_data_directive_ds(&mut tokens, inner, inside_compressed, DataAlignment::Word)?
                         },
-                        _=> {
-                            return Err(inner.error(format!(
-                                "Unexpected reserved keyword \"{}\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.",
-                                inner.value
-                            )));
-                        }
+                        (false, _) => return Err(inner.error(format!(
+                            "Unexpected reserved keyword \"{}\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.",
+                            inner.value
+                        ))),
+                        (true, _) => return Err(inner.error(format!(
+                            "Unexpected reserved keyword \"{}\" inside compressed block, expected either DB, BW or DS instead.",
+                            inner.value
+                        )))
                     }
                 },
-                token => {
-                    return Err(token.error(
-                        format!("Unexpected \"{}\", expected either a constant declaration, directive or instruction instead.", token.value())
-                    ));
-                }
-
+                (false, token) => return Err(token.error(
+                    format!("Unexpected {:?}, expected either a constant declaration, directive or instruction instead.", token.typ())
+                )),
+                (true, token) => return Err(token.error(
+                    format!("Unexpected {:?}, expected a data directive instead.", token.typ())
+                ))
             };
             entry_tokens.push(entry);
         }
@@ -384,7 +398,7 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
 
-        let max_arg_count = gbasm_cpu::instruction_max_arg_count(&inner.value);
+        let max_arg_count = gbc_cpu::instruction_max_arg_count(&inner.value);
         let mut expression: OptionalDataExpression = None;
 
         let mut layout = Vec::new();
@@ -403,7 +417,7 @@ impl EntryStage {
 
                     // Special casing for conditional instructions where "c" is the carry flag
                     // instead of a register if infront of the comma
-                    if !past_comma && gbasm_cpu::instruction_is_conditional(&inner.value) && name == Register::C{
+                    if !past_comma && gbc_cpu::instruction_is_conditional(&inner.value) && name == Register::C{
                         layout.push(LexerArgument::Flag(Flag::Carry));
 
                     } else {
@@ -549,6 +563,8 @@ impl EntryStage {
                                 alignment: DataAlignment::Byte,
                                 endianess: DataEndianess::Little,
                                 storage: DataStorage::Array(bytes),
+                                is_constant: true,
+                                compress: false,
                                 debug_only: true
                             }
                         ]
@@ -954,15 +970,18 @@ impl EntryStage {
 
     fn parse_data_directive_db(
         tokens: &mut TokenIterator<ExpressionToken>,
-        inner: InnerToken
+        inner: InnerToken,
+        compress: bool
 
     ) -> Result<EntryToken, SourceError> {
         match Self::parse_expression_list(tokens)? {
-            Some(e) => Ok(EntryToken::Data {
+            Some((is_constant, e)) => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Bytes(e),
+                is_constant,
+                compress,
                 debug_only: false
             }),
             None => Ok(EntryToken::Data {
@@ -970,6 +989,8 @@ impl EntryStage {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Byte,
+                is_constant: false,
+                compress,
                 debug_only: false
             })
         }
@@ -977,15 +998,18 @@ impl EntryStage {
 
     fn parse_data_directive_dw(
         tokens: &mut TokenIterator<ExpressionToken>,
-        inner: InnerToken
+        inner: InnerToken,
+        compress: bool
 
     ) -> Result<EntryToken, SourceError> {
         match Self::parse_expression_list(tokens)? {
-            Some(e) => Ok(EntryToken::Data {
+            Some((is_constant, e)) => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Words(e),
+                is_constant,
+                compress,
                 debug_only: false
             }),
             None => Ok(EntryToken::Data {
@@ -993,6 +1017,8 @@ impl EntryStage {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Little,
                 storage: DataStorage::Word,
+                is_constant: false,
+                compress,
                 debug_only: false
             })
         }
@@ -1000,15 +1026,18 @@ impl EntryStage {
 
     fn parse_data_directive_bw(
         tokens: &mut TokenIterator<ExpressionToken>,
-        inner: InnerToken
+        inner: InnerToken,
+        compress: bool
 
     ) -> Result<EntryToken, SourceError> {
         match Self::parse_expression_list(tokens)? {
-            Some(e) => Ok(EntryToken::Data {
+            Some((is_constant, e)) => Ok(EntryToken::Data {
                 inner,
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
                 storage: DataStorage::Words(e),
+                is_constant,
+                compress,
                 debug_only: false
             }),
             None => Ok(EntryToken::Data {
@@ -1016,6 +1045,8 @@ impl EntryStage {
                 alignment: DataAlignment::Byte,
                 endianess: DataEndianess::Big,
                 storage: DataStorage::Word,
+                is_constant: false,
+                compress,
                 debug_only: false
             })
         }
@@ -1024,6 +1055,7 @@ impl EntryStage {
     fn parse_data_directive_ds(
         tokens: &mut TokenIterator<ExpressionToken>,
         inner: InnerToken,
+        compress: bool,
         alignment: DataAlignment
 
     ) -> Result<EntryToken, SourceError> {
@@ -1037,6 +1069,8 @@ impl EntryStage {
                         alignment,
                         endianess: DataEndianess::Little,
                         storage: DataStorage::Buffer(expr, Some(data_expr)),
+                        is_constant: true,
+                        compress,
                         debug_only: false
                     })
 
@@ -1050,6 +1084,8 @@ impl EntryStage {
                     alignment,
                     endianess: DataEndianess::Little,
                     storage: DataStorage::Buffer(expr, None),
+                    is_constant: true,
+                    compress,
                     debug_only: false
                 })
             }
@@ -1058,13 +1094,16 @@ impl EntryStage {
         }
     }
 
-    fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<Vec<DataExpression>>, SourceError> {
+    fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<(bool, Vec<DataExpression>)>, SourceError> {
         if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
             let mut expressions = Vec::new();
+            let mut is_constant = true;
             while tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
                 let expr = tokens.get("when parsing expression list")?;
                 match expr {
-                    ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) => {
+                    ExpressionToken::ConstExpression(_, expr) => expressions.push(expr),
+                    ExpressionToken::Expression(_, expr) => {
+                        is_constant = false;
                         expressions.push(expr);
                     },
                     _ => unreachable!()
@@ -1076,7 +1115,7 @@ impl EntryStage {
                     break;
                 }
             }
-            Ok(Some(expressions))
+            Ok(Some((is_constant, expressions)))
 
         } else {
             Ok(None)
@@ -1548,21 +1587,21 @@ mod test {
 
     #[test]
     fn test_error_unexpected() {
-        assert_eq!(entry_lexer_error("2 + 2"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"2\", expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
+        assert_eq!(entry_lexer_error("2 + 2"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
         assert_eq!(entry_lexer_error("EQU"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"EQU\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nEQU\n^--- Here");
         assert_eq!(entry_lexer_error("EQUS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"EQUS\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nEQUS\n^--- Here");
         assert_eq!(entry_lexer_error("SEGMENT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"SEGMENT\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nSEGMENT\n^--- Here");
         assert_eq!(entry_lexer_error("BANK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"BANK\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nBANK\n^--- Here");
-        assert_eq!(entry_lexer_error(","), "In file \"main.gb.s\" on line 1, column 1: Unexpected \",\", expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
-        assert_eq!(entry_lexer_error("["), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"[\", expected either a constant declaration, directive or instruction instead.\n\n[\n^--- Here");
-        assert_eq!(entry_lexer_error("]"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"]\", expected either a constant declaration, directive or instruction instead.\n\n]\n^--- Here");
-        assert_eq!(entry_lexer_error("hl"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"hl\", expected either a constant declaration, directive or instruction instead.\n\nhl\n^--- Here");
-        assert_eq!(entry_lexer_error("nz"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"nz\", expected either a constant declaration, directive or instruction instead.\n\nnz\n^--- Here");
+        assert_eq!(entry_lexer_error(","), "In file \"main.gb.s\" on line 1, column 1: Unexpected Comma, expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
+        assert_eq!(entry_lexer_error("["), "In file \"main.gb.s\" on line 1, column 1: Unexpected OpenBracket, expected either a constant declaration, directive or instruction instead.\n\n[\n^--- Here");
+        assert_eq!(entry_lexer_error("]"), "In file \"main.gb.s\" on line 1, column 1: Unexpected CloseBracket, expected either a constant declaration, directive or instruction instead.\n\n]\n^--- Here");
+        assert_eq!(entry_lexer_error("hl"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Register, expected either a constant declaration, directive or instruction instead.\n\nhl\n^--- Here");
+        assert_eq!(entry_lexer_error("nz"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Flag, expected either a constant declaration, directive or instruction instead.\n\nnz\n^--- Here");
         assert_eq!(entry_lexer_error("DS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS\n^--- Here");
         assert_eq!(entry_lexer_error("DS8"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS8\n^--- Here");
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
-        assert_eq!(entry_lexer_error("ROMX"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ROMX\", expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
+        assert_eq!(entry_lexer_error("ROMX"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Segment, expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
     }
 
     // Constant Declarations --------------------------------------------------
@@ -1620,6 +1659,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Byte,
+            is_constant: false,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("DB 2"), vec![EntryToken::Data {
@@ -1627,6 +1668,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(2))]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("DB 2 + 3, 1"), vec![EntryToken::Data {
@@ -1642,6 +1685,8 @@ mod test {
                 },
                 Expression::Value(ExpressionValue::Integer(1))
             ]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("DB 2, 3, 4, 5"), vec![EntryToken::Data {
@@ -1654,6 +1699,20 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(4)),
                 Expression::Value(ExpressionValue::Integer(5))
             ]),
+            is_constant: true,
+            compress: false,
+            debug_only: false
+        }]);
+        assert_eq!(tfe("global:\nDB global"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 7, "global"),
+            1
+        ), EntryToken::Data {
+            inner: itk!(8, 10, "DB"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            is_constant: false,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1665,6 +1724,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Word,
+            is_constant: false,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("DW 2000"), vec![EntryToken::Data {
@@ -1672,6 +1733,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("DW 2 + 3, 1"), vec![EntryToken::Data {
@@ -1687,6 +1750,8 @@ mod test {
                 },
                 Expression::Value(ExpressionValue::Integer(1))
             ]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("DW 2000, 3000, 4000, 5000"), vec![EntryToken::Data {
@@ -1699,6 +1764,20 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(4000)),
                 Expression::Value(ExpressionValue::Integer(5000))
             ]),
+            is_constant: true,
+            compress: false,
+            debug_only: false
+        }]);
+        assert_eq!(tfe("global:\nDW global"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 7, "global"),
+            1
+        ), EntryToken::Data {
+            inner: itk!(8, 10, "DW"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            is_constant: false,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1710,6 +1789,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Word,
+            is_constant: false,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("BW 2000"), vec![EntryToken::Data {
@@ -1717,6 +1798,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
             storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("BW 2 + 3, 1"), vec![EntryToken::Data {
@@ -1732,6 +1815,8 @@ mod test {
                 },
                 Expression::Value(ExpressionValue::Integer(1))
             ]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
         assert_eq!(tfe("BW 2000, 3000, 4000, 5000"), vec![EntryToken::Data {
@@ -1744,6 +1829,20 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(4000)),
                 Expression::Value(ExpressionValue::Integer(5000))
             ]),
+            is_constant: true,
+            compress: false,
+            debug_only: false
+        }]);
+        assert_eq!(tfe("global:\nBW global"), vec![EntryToken::GlobalLabelDef(
+            itk!(0, 7, "global"),
+            1
+        ), EntryToken::Data {
+            inner: itk!(8, 10, "BW"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Big,
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            is_constant: false,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1761,6 +1860,8 @@ mod test {
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
             }, None),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1775,6 +1876,8 @@ mod test {
                 Expression::Value(ExpressionValue::Integer(15)),
                 Some(Expression::Value(ExpressionValue::String("Hello World".to_string())))
             ),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1789,6 +1892,8 @@ mod test {
                 Expression::Value(ExpressionValue::String("Hello World".to_string())),
                 None
             ),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1806,6 +1911,8 @@ mod test {
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
             }, None),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1823,6 +1930,8 @@ mod test {
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
             }, None),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -1835,6 +1944,8 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Array(vec![1, 2, 3]),
+            is_constant: true,
+            compress: false,
             debug_only: false
         }]);
     }
@@ -2499,7 +2610,7 @@ mod test {
         assert_eq!(entry_lexer_error("ld"), "In file \"main.gb.s\" on line 1, column 1: Unknown or invalid instruction \"ld\".\n\nld\n^--- Here");
         assert_eq!(entry_lexer_error("ld 4,["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction memory argument, expected a \"Expression\" token instead.\n\nld 4,[\n     ^--- Here");
         assert_eq!(entry_lexer_error("ld 4,[3"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction memory argument, expected a \"CloseBracket\" token instead.\n\nld 4,[3\n      ^--- Here");
-        assert_eq!(entry_lexer_error("stop 4"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"4\", expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
+        assert_eq!(entry_lexer_error("stop 4"), "In file \"main.gb.s\" on line 1, column 6: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
         assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma in \"ld\" instruction.\n\nld a,\n    ^--- Here");
     }
 
@@ -2520,6 +2631,8 @@ mod test {
                 storage: DataStorage::Array(vec![
                     72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100
                 ]),
+                is_constant: true,
+                compress: false,
                 debug_only: true
             }
         ]);
@@ -3174,6 +3287,71 @@ mod test {
                 ]
             })
         ]);
+    }
+
+    // Compressed Blocks ------------------------------------------------------
+    #[test]
+    fn test_compressed_block_unpacking() {
+        let lexer = entry_lexer("COMPRESS DB 1 DW 2 BW 2 DS 2 ENDCOMPRESS");
+        assert_eq!(lexer.tokens, vec![
+            EntryToken::Data {
+                inner: itk!(9, 11, "DB" ),
+                alignment: DataAlignment::Byte,
+                endianess: DataEndianess::Little,
+                storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(1))]),
+                is_constant: true,
+                compress: true,
+                debug_only: false
+            },
+            EntryToken::Data {
+                inner: itk!(14, 16, "DW"),
+                alignment: DataAlignment::Byte,
+                endianess: DataEndianess::Little,
+                storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2))]),
+                is_constant: true,
+                compress: true,
+                debug_only: false
+            },
+            EntryToken::Data {
+                inner: itk!(19, 21, "BW"),
+                alignment: DataAlignment::Byte,
+                endianess: DataEndianess::Big,
+                storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2))]),
+                is_constant: true,
+                compress: true,
+                debug_only: false
+            },
+            EntryToken::Data {
+                inner: itk!(24, 26, "DS"),
+                alignment: DataAlignment::Byte,
+                endianess: DataEndianess::Little,
+                storage: DataStorage::Buffer(Expression::Value(ExpressionValue::Integer(2)), None),
+                is_constant: true,
+                compress: true,
+                debug_only: false
+            }
+        ]);
+
+        let tokens = entry_lexer_binary("COMPRESS INCBIN 'child.bin' ENDCOMPRESS", vec![1, 2, 3]).tokens;
+        assert_eq!(tokens, vec![EntryToken::Data {
+            inner: itk!(16, 27, "child.bin"),
+            alignment: DataAlignment::Byte,
+            endianess: DataEndianess::Little,
+            storage: DataStorage::Array(vec![1, 2, 3]),
+            is_constant: true,
+            compress: true,
+            debug_only: false
+        }]);
+
+    }
+
+    #[test]
+    fn test_error_compressed_block() {
+        assert_eq!(entry_lexer_error("COMPRESS nop ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected Instruction, expected a data directive instead.\n\nCOMPRESS nop ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS SECTION ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"SECTION\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS SECTION ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS foo EQU 2 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected Constant, expected a data directive instead.\n\nCOMPRESS foo EQU 2 ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS DS8 1 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"DS8\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS DS8 1 ENDCOMPRESS\n         ^--- Here");
+        assert_eq!(entry_lexer_error("COMPRESS DS16 1 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"DS16\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS DS16 1 ENDCOMPRESS\n         ^--- Here");
     }
 
 }
