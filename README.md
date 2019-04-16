@@ -11,6 +11,11 @@
 
 ## Usage
 
+Binaries:
+
+- [Linux](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/target/x86_64-unknown-linux-musl/release/gbc?job=linux-musl)
+- [Windows](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/target/x86_64-pc-windows-gnu/release/gbc.exe?job=windows-mingw)
+
 ```
 USAGE:
     gbc [FLAGS] [OPTIONS] <SOURCE_FILE>
