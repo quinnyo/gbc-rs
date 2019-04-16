@@ -1,5 +1,6 @@
-// ST Dependencies ------------------------------------------------------------
+// STD Dependencies -----------------------------------------------------------
 use std::cmp;
+
 
 // Constants ------------------------------------------------------------------
 const MAX_LITERAL_LENGTH: u8 = 32;
@@ -602,6 +603,113 @@ impl Encoder {
 mod test {
 
     use super::compress;
+
+    fn compress_inline(input: Vec<u8>, expected: Vec<u8>) {
+        let result = compress(&input, false);
+        assert_eq!(result.0, expected);
+    }
+
+    #[test]
+    fn test_encode_literal() {
+        // Literal
+        compress_inline(vec![1], vec![
+            0, 1
+        ]);
+        compress_inline(vec![1, 1], vec![
+            1, 1, 1
+        ]);
+        compress_inline(vec![1, 2, 3, 4], vec![
+            3,
+            1, 2, 3, 4
+        ]);
+        // Max Literal
+        compress_inline(vec![
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32
+
+        ], vec![
+            31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            0, 32
+        ]);
+    }
+
+    #[test]
+    fn test_encode_repeat() {
+        // Min Repeat
+        compress_inline(vec![1, 1, 1], vec![
+            129,
+            1
+        ]);
+        compress_inline(vec![1, 1, 1, 1], vec![
+            130,
+            1
+        ]);
+
+        // Max Repeat
+        compress_inline(vec![
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+
+            1, 1
+
+        ], vec![
+            191,
+            1,
+            0,
+            1
+        ]);
+    }
+
+    #[test]
+    fn test_encode_copy() {
+        // Min Copy
+        compress_inline(vec![
+            0, 1, 2, 3, 1, 2
+        ], vec![
+            5, 0, 1, 2, 3, 1, 2
+        ]);
+        compress_inline(vec![
+            0, 1, 2, 3, 1, 2, 3
+
+        ], vec![
+            3, 0, 1, 2, 3, 64, 0
+        ]);
+
+        // TODO max copy
+
+        // TODO copy offset
+
+    }
+
+    #[test]
+    fn test_encode_reverse_copy() {
+        // Min Copy
+        compress_inline(vec![
+            0, 1, 2, 3, 2, 1
+        ], vec![
+            5, 0, 1, 2, 3, 2, 1
+        ]);
+        compress_inline(vec![
+            0, 1, 2, 3, 3, 2, 1
+
+        ], vec![
+            3, 0, 1, 2, 3, 96, 254
+        ]);
+
+        // TODO max copy
+
+        // TODO copy offset
+
+    }
 
     #[test]
     fn test_encode_tile_map() {
