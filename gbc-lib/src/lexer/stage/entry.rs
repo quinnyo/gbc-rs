@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gbasm_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
+use gbc_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -133,7 +133,7 @@ impl LexerStage for EntryStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let layouts = gbasm_cpu::instruction_layouts();
+        let layouts = gbc_cpu::instruction_layouts();
         Self::parse_entry_tokens(tokens, &layouts, false)
     }
 
@@ -398,7 +398,7 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
 
-        let max_arg_count = gbasm_cpu::instruction_max_arg_count(&inner.value);
+        let max_arg_count = gbc_cpu::instruction_max_arg_count(&inner.value);
         let mut expression: OptionalDataExpression = None;
 
         let mut layout = Vec::new();
@@ -417,7 +417,7 @@ impl EntryStage {
 
                     // Special casing for conditional instructions where "c" is the carry flag
                     // instead of a register if infront of the comma
-                    if !past_comma && gbasm_cpu::instruction_is_conditional(&inner.value) && name == Register::C{
+                    if !past_comma && gbc_cpu::instruction_is_conditional(&inner.value) && name == Register::C{
                         layout.push(LexerArgument::Flag(Flag::Carry));
 
                     } else {

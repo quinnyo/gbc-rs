@@ -10,17 +10,17 @@ use clap::{Arg, App};
 
 
 // Internal Dependencies ------------------------------------------------------
-use gbasm_lib::compiler::Compiler;
-use gbasm_lib::traits::{FileError, FileReader, FileWriter};
+use gbc_lib::compiler::Compiler;
+use gbc_lib::traits::{FileError, FileReader, FileWriter};
 
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
 
-    let matches = App::new("gbasm")
+    let matches = App::new("gbc")
         .version("0.1")
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
-        .about("GameBoy Assembler")
+        .about("GameBoy Compiler")
         .arg(Arg::with_name("SOURCE_FILE")
             .help("Sets the input source file to use")
             .required(true)

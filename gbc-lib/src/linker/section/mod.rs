@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
-use gbasm_cpu::{self, Argument, Instruction};
+use gbc_cpu::{self, Argument, Instruction};
 
 
 // Modules --------------------------------------------------------------------
@@ -35,7 +35,7 @@ struct SectionDefault {
 }
 
 lazy_static! {
-    static ref INSTRUCTIONS: Vec<Instruction> = gbasm_cpu::instruction_list();
+    static ref INSTRUCTIONS: Vec<Instruction> = gbc_cpu::instruction_list();
 
     static ref SECTION_DEFAULTS: HashMap<&'static str, SectionDefault> = {
         let mut map = HashMap::new();
