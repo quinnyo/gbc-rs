@@ -200,19 +200,19 @@ impl Compiler {
             self.output.push("".to_string());
             for (used, name, start, end) in s.ranges {
                 let display_name = if let Some(name) = name {
-                    format!(" ({})", name)
+                    format!("  ({})", name)
 
                 } else {
                     "".to_string()
                 };
                 let marker = if used {
-                    "########".to_string()
+                    "  ######".to_string()
 
                 } else {
-                    "........".bright_black().to_string()
+                    "  ......".bright_black().to_string()
                 };
                 self.output.push(format!(
-                    "             ${:0>4x}{}=${:0>4x} {} ({: >5} bytes){}",
+                    "             ${:0>4x}{}=${:0>4x} {}  {: >5} bytes{}",
                     start,
                     "..".bright_black(),
                     end - 1,
@@ -363,31 +363,31 @@ mod test {
 
         ROM0 $0000 (  369 of 16384 bytes used) ( 16015 free)
 
-             $0000..=$011f ######## (  288 bytes) (Data)
-             $0120..=$012b ######## (   12 bytes) (Data1)
-             $012c..=$016b ######## (   64 bytes) (Data2)
-             $016c..=$01ff ........ (  148 bytes)
-             $0200..=$0204 ######## (    5 bytes) (Extra)
-             $0205..=$3fff ........ (15867 bytes)
+             $0000..=$011f   ######    288 bytes  (Data)
+             $0120..=$012b   ######     12 bytes  (Data1)
+             $012c..=$016b   ######     64 bytes  (Data2)
+             $016c..=$01ff   ......    148 bytes
+             $0200..=$0204   ######      5 bytes  (Extra)
+             $0205..=$3fff   ......  15867 bytes
 
 
      ROMX[1] $4000 (  160 of 16384 bytes used) ( 16224 free)
 
-             $4000..=$407f ######## (  128 bytes)
-             $4080..=$409f ######## (   32 bytes) (X)
-             $40a0..=$7fff ........ (16224 bytes)
+             $4000..=$407f   ######    128 bytes
+             $4080..=$409f   ######     32 bytes  (X)
+             $40a0..=$7fff   ......  16224 bytes
 
 
        WRAM0 $c000 (  513 of  4096 bytes used) (  3583 free)
 
-             $c000..=$c000 ######## (    1 bytes) (Vars)
-             $c001..=$c200 ######## (  512 bytes) (Buffer)
-             $c201..=$cfff ........ ( 3583 bytes)
+             $c000..=$c000   ######      1 bytes  (Vars)
+             $c001..=$c200   ######    512 bytes  (Buffer)
+             $c201..=$cfff   ......   3583 bytes
 
 
         HRAM $ff80 (  128 of   128 bytes used) (     0 free)
 
-             $ff80..=$ffff ######## (  128 bytes) (Vars)
+             $ff80..=$ffff   ######    128 bytes  (Vars)
 
    Validated ROM in XXms."#
         );
