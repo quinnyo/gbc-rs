@@ -46,8 +46,8 @@ lazy_static! {
         MacroDefinition::builtin("STRPADL", vec![(ExpressionArgumenType::String, "text"), (ExpressionArgumenType::String, "padding"), (ExpressionArgumenType::Integer, "length")]),
 
         // Geometry
-        // MacroDefinition::builtin("SIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-        // MacroDefinition::builtin("COS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        MacroDefinition::builtin("SIN", vec![(ExpressionArgumenType::Number, "radians")]),
+        MacroDefinition::builtin("COS", vec![(ExpressionArgumenType::Number, "radians")]),
         // MacroDefinition::builtin("TAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
         // MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
         // MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),

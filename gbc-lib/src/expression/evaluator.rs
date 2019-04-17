@@ -280,6 +280,16 @@ impl EvaluatorContext {
             },
 
             // Math
+            "SIN" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).sin())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.sin())),
+                _ => unreachable!("Invalid SIN arguments")
+            },
+            "COS" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).cos())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.cos())),
+                _ => unreachable!("Invalid SIN arguments")
+            },
             "ATAN2" => match (&args[0], &args[1]) {
                 (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
                     ExpressionResult::Float(OrderedFloat((*a as f32).atan2(*b as f32)))
@@ -931,6 +941,12 @@ mod test {
         assert_eq!(const_expression("ATAN2(2, 1)"), ExpressionResult::Float(OrderedFloat(1.1071488)));
         assert_eq!(const_expression("ATAN2(2.5, 1)"), ExpressionResult::Float(OrderedFloat(1.19029)));
         assert_eq!(const_expression("ATAN2(2.5, 1.5)"), ExpressionResult::Float(OrderedFloat(1.0303768)));
+
+        assert_eq!(const_expression("SIN(1)"), ExpressionResult::Float(OrderedFloat(0.84147096)));
+        assert_eq!(const_expression("SIN(2.5)"), ExpressionResult::Float(OrderedFloat(0.5984721)));
+
+        assert_eq!(const_expression("COS(1)"), ExpressionResult::Float(OrderedFloat(0.5403023)));
+        assert_eq!(const_expression("COS(2.5)"), ExpressionResult::Float(OrderedFloat(-0.8011436)));
 
         // TODO implement and test rand macro
         // assert_eq!(const_expression("RAND(0, 10)"), ExpressionResult::Integer(3));
