@@ -189,14 +189,14 @@ impl Compiler {
         self.output.push("".to_string());
         for s in segments {
             let size = s.end_address - s.start_address;
-            self.output.push(format!(
-                "{: >12} ${:0>4x} ({: >5} of {: >5} bytes used) ({: >6} free)",
-                s.name,
-                s.start_address ,
+            let info = format!(
+                "({: >5} of {: >5} bytes used) ({: >6} free)",
                 s.bytes_in_use,
                 size,
                 size - s.bytes_in_use
-            ).bright_green().to_string());
+            );
+            let offset = format!("${:0>4x}", s.start_address);
+            self.output.push(format!("{: >12} {} {}", s.name.bright_blue(), offset.bright_yellow(), info.bright_green()));
             self.output.push("".to_string());
             for (used, name, start, end) in s.ranges {
                 let display_name = if let Some(name) = name {
