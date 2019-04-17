@@ -42,7 +42,7 @@ pub fn byte_value(
                 Ok(to_twos_byte(i))
 
             } else {
-                Err(inner.error(format!("{}, expected a byte value in the range of -128 to 255 instead.", msg)))
+                Err(inner.error(format!("{} ({}), expected a byte value in the range of -128 to 255 instead.", msg, i)))
             }
         },
         _ => {
@@ -63,7 +63,7 @@ pub fn word_value(
                 Ok(to_twos_word(i))
 
             } else {
-                Err(inner.error(format!("{}, expected a word value in the range of -32768 to 65535 instead.", msg)))
+                Err(inner.error(format!("{} ({}), expected a word value in the range of -32768 to 65535 instead.", msg, i)))
             }
         },
         _ => {
@@ -84,7 +84,7 @@ pub fn address_word_value(
                 Ok(i as i32)
 
             } else {
-                Err(inner.error(format!("{}, expected a word value in the range of -65536 to 65535 instead.", msg)))
+                Err(inner.error(format!("{} ({}), expected a word value in the range of -65536 to 65535 instead.", msg, i)))
             }
         },
         _ => {
@@ -95,12 +95,12 @@ pub fn address_word_value(
 
 pub fn signed_byte_value(
     inner: &InnerToken,
-    value: i32,
+    i: i32,
     msg: &'static str
 
 ) -> Result<u8, SourceError> {
-    if value >= -128 && value <= 127 {
-        Ok(to_twos_byte(value))
+    if i >= -128 && i <= 127 {
+        Ok(to_twos_byte(i))
 
     } else {
         Err(inner.error(format!("{}, expected a signed byte value in the range of -128 to 127 instead.", msg)))

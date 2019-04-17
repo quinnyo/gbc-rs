@@ -1002,8 +1002,8 @@ mod test {
 
     #[test]
     fn test_error_section_entry_data_rom_db() {
-        assert_eq!(linker_error("SECTION ROM0\nDB 256"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data, expected a byte value in the range of -128 to 255 instead.\n\nDB 256\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDB -129"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data, expected a byte value in the range of -128 to 255 instead.\n\nDB -129\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDB 256"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data (256), expected a byte value in the range of -128 to 255 instead.\n\nDB 256\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDB -129"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data (-129), expected a byte value in the range of -128 to 255 instead.\n\nDB -129\n^--- Here");
     }
 
     #[test]
@@ -1045,8 +1045,8 @@ mod test {
 
     #[test]
     fn test_error_section_entry_data_rom_dw_bw() {
-        assert_eq!(linker_error("SECTION ROM0\nDW 65536"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data, expected a word value in the range of -32768 to 65535 instead.\n\nDW 65536\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDW -32769"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data, expected a word value in the range of -32768 to 65535 instead.\n\nDW -32769\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDW 65536"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data (65536), expected a word value in the range of -32768 to 65535 instead.\n\nDW 65536\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDW -32769"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data (-32769), expected a word value in the range of -32768 to 65535 instead.\n\nDW -32769\n^--- Here");
     }
 
     #[test]
@@ -1450,8 +1450,8 @@ mod test {
 
     #[test]
     fn test_error_section_instructions_with_arg() {
-        assert_eq!(linker_error("SECTION ROM0\nld hl,$10000"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument, expected a word value in the range of -32768 to 65535 instead.\n\nld hl,$10000\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nld hl,-$8001"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument, expected a word value in the range of -32768 to 65535 instead.\n\nld hl,-$8001\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld hl,$10000"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument (65536), expected a word value in the range of -32768 to 65535 instead.\n\nld hl,$10000\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld hl,-$8001"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument (-32769), expected a word value in the range of -32768 to 65535 instead.\n\nld hl,-$8001\n^--- Here");
     }
 
     #[test]
