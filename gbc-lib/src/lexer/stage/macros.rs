@@ -52,7 +52,7 @@ lazy_static! {
         // MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
         // MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
         // MacroDefinition::builtin("ATAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-        // MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")], ExpressionReturnType::Float),
+        MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")])
 
         // Code
         // MacroDefinition::builtin("BYTESIZE", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),

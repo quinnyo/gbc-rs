@@ -279,6 +279,22 @@ impl EvaluatorContext {
                 _ => unreachable!("Invalid EXP arguments")
             },
 
+            // Math
+            "ATAN2" => match (&args[0], &args[1]) {
+                (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
+                    ExpressionResult::Float(OrderedFloat((*a as f32).atan2(*b as f32)))
+                },
+                (ExpressionResult::Float(a), ExpressionResult::Float(b)) => {
+                    ExpressionResult::Float(OrderedFloat(a.into_inner().atan2(b.into_inner())))
+                },
+                (ExpressionResult::Float(a), ExpressionResult::Integer(b)) => {
+                    ExpressionResult::Float(OrderedFloat(a.into_inner().atan2(*b as f32)))
+                },
+                (ExpressionResult::Integer(a), ExpressionResult::Float(b)) => {
+                    ExpressionResult::Float(OrderedFloat((*a as f32).atan2(b.into_inner())))
+                },
+                _ => unreachable!("Invalid ATAN2 arguments")
+            },
 
             // String
             "STRUPR" => match &args[0] {
@@ -910,6 +926,11 @@ mod test {
         assert_eq!(const_expression("ABS(1.5)"), ExpressionResult::Float(OrderedFloat(1.5)));
         assert_eq!(const_expression("ABS(-1)"), ExpressionResult::Integer(1));
         assert_eq!(const_expression("ABS(-1.5)"), ExpressionResult::Float(OrderedFloat(1.5)));
+
+        assert_eq!(const_expression("ATAN2(1, 2)"), ExpressionResult::Float(OrderedFloat(0.4636476)));
+        assert_eq!(const_expression("ATAN2(2, 1)"), ExpressionResult::Float(OrderedFloat(1.1071488)));
+        assert_eq!(const_expression("ATAN2(2.5, 1)"), ExpressionResult::Float(OrderedFloat(1.19029)));
+        assert_eq!(const_expression("ATAN2(2.5, 1.5)"), ExpressionResult::Float(OrderedFloat(1.0303768)));
 
         // TODO implement and test rand macro
         // assert_eq!(const_expression("RAND(0, 10)"), ExpressionResult::Integer(3));
