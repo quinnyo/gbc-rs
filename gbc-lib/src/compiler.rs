@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 
+// External Dependencies ------------------------------------------------------
+use colored::Colorize;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
@@ -15,6 +19,7 @@ use crate::traits::{FileReader, FileWriter};
 // Compiler Pipeline Implementation -------------------------------------------
 pub struct Compiler {
     silent: bool,
+    no_color: bool,
     strip_debug_code: bool,
     optimize_instructions: bool,
     print_segment_map: bool,
@@ -28,6 +33,7 @@ impl Compiler {
     pub fn new() -> Self {
         Self {
             silent: false,
+            no_color: false,
             strip_debug_code: false,
             optimize_instructions: false,
             print_segment_map: false,
@@ -40,6 +46,10 @@ impl Compiler {
 
     pub fn set_silent(&mut self) {
         self.silent = true;
+    }
+
+    pub fn set_no_color(&mut self) {
+        self.no_color = true;
     }
 
     pub fn set_print_segment_map(&mut self) {
@@ -67,7 +77,8 @@ impl Compiler {
     }
 
     pub fn compile<T: FileReader + FileWriter>(&mut self, files: &mut T, entry: PathBuf) -> Result<String, (String, CompilerError)> {
-        self.log(format!("Compiling \"{}\"...", entry.display()));
+        colored::control::set_override(!self.no_color);
+        self.log(format!("{} \"{}\" ...", "   Compiling".bright_green(), entry.display()));
         let entry_lexer = self.parse(files, entry)?;
         let linker = self.link(files, entry_lexer)?;
         self.generate(files, linker)?;
@@ -84,7 +95,7 @@ impl Compiler {
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| self.error("value construction", e))?;
         let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| self.error("expression construction", e))?;
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| self.error("entry construction", e))?;
-        self.log(format!("Parsing completed in {}ms.", start.elapsed().as_millis()));
+        self.log(format!("  {} completed in {}ms.", "   Parsing".bright_green(), start.elapsed().as_millis()));
         Ok(entry_lexer)
     }
 
@@ -96,7 +107,7 @@ impl Compiler {
             self.optimize_instructions
 
         ).map_err(|e| self.error("section linking", e))?;
-        self.log(format!("Linking completed in {}ms.", start.elapsed().as_millis()));
+        self.log(format!("  {} completed in {}ms.", "   Linking".bright_green(), start.elapsed().as_millis()));
 
         // Report Segment Usage
         if self.print_segment_map {
@@ -114,7 +125,7 @@ impl Compiler {
                     format!("Failed to write symbol map to file \"{}\"", err.path.display())
                 ))
             })?;
-            self.log(format!("Symbol map written to \"{}\".", output_file.display()));
+            self.log(format!("     {} symbol map to \"{}\".", "Written".bright_green(), output_file.display()));
         }
         Ok(linker)
     }
@@ -135,7 +146,7 @@ impl Compiler {
 
         // Apply checksum etc.
         generator.finalize_rom();
-        self.log(format!("ROM validated in {}ms.", start.elapsed().as_millis()));
+        self.log(format!("{} ROM in {}ms.", "   Validated".bright_green(), start.elapsed().as_millis()));
 
         let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
@@ -144,7 +155,7 @@ impl Compiler {
                     format!("Failed to write ROM to file \"{}\"", err.path.display())
                 ))
             })?;
-            self.log(format!("ROM written to \"{}\".", output_file.display()));
+            self.log(format!("     {} ROM to \"{}\".", "Written".bright_green(), output_file.display()));
         }
 
         if self.print_rom_info {
@@ -172,19 +183,20 @@ impl Compiler {
     }
 
     fn print_segment_usage(&mut self, segments: Vec<SegmentUsage>) {
+
         self.output.push("".to_string());
-        self.output.push("Segment Usage Report:".to_string());
+        self.info("Segment usage");
         self.output.push("".to_string());
         for s in segments {
             let size = s.end_address - s.start_address;
             self.output.push(format!(
-                "  {: <10} @ ${:0>4x} ({: >5} of {: >5} bytes used) ({: >6} free)",
+                "{: >12} ${:0>4x} ({: >5} of {: >5} bytes used) ({: >6} free)",
                 s.name,
                 s.start_address ,
                 s.bytes_in_use,
                 size,
                 size - s.bytes_in_use
-            ));
+            ).bright_green().to_string());
             self.output.push("".to_string());
             for (used, name, start, end) in s.ranges {
                 let display_name = if let Some(name) = name {
@@ -194,14 +206,15 @@ impl Compiler {
                     "".to_string()
                 };
                 let marker = if used {
-                    "########"
+                    "########".to_string()
 
                 } else {
-                    "........"
+                    "........".bright_black().to_string()
                 };
                 self.output.push(format!(
-                    "    ${:0>4x}..=${:0>4x} {} ({: >5} bytes){}",
+                    "             ${:0>4x}{}=${:0>4x} {} ({: >5} bytes){}",
                     start,
+                    "..".bright_black(),
                     end - 1,
                     marker,
                     end - start,
@@ -224,13 +237,13 @@ impl Compiler {
 
     fn warning<S: Into<String>>(&mut self, s: S) {
         if !self.silent {
-            self.output.push(format!("[Warning] {}", s.into()));
+            self.output.push(format!("     {} {}", "Warning".bright_yellow(), s.into()));
         }
     }
 
     fn info<S: Into<String>>(&mut self, s: S) {
         if !self.silent {
-            self.output.push(format!("[Info] {}", s.into()));
+            self.output.push(format!("        {} {}", "Info".bright_blue(), s.into()));
         }
     }
 
@@ -272,13 +285,13 @@ impl CompilerError {
 impl fmt::Display for CompilerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(source) = self.source.as_ref() {
-            write!(f, "[Error] Compilation failed during {} phase!\n\n{}", self.stage, source)
+            write!(f, "       {} Compilation failed during {} phase!\n\n{}", "Error".bright_red(), self.stage, source)
 
         } else if let Some(message) = self.message.as_ref() {
-            write!(f, "[Error] Compilation failed during {} phase!\n\n{}", self.stage, message)
+            write!(f, "       {} Compilation failed during {} phase!\n\n{}", "Error".bright_red(), self.stage, message)
 
         } else {
-            write!(f, "[Error] Compilation failed during {} phase!", self.stage)
+            write!(f, "       {} Compilation failed during {} phase!", "Error".bright_red(), self.stage)
         }
     }
 }
@@ -293,6 +306,7 @@ mod test {
     use super::Compiler;
 
     fn compiler<S: Into<String>>(mut compiler: Compiler, s: S) -> String {
+        compiler.set_no_color();
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
@@ -301,6 +315,7 @@ mod test {
     }
 
     fn compiler_writer<S: Into<String>>(mut compiler: Compiler, s: S) -> (String, MockFileReader) {
+        compiler.set_no_color();
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
@@ -311,6 +326,7 @@ mod test {
     }
 
     fn compiler_error<S: Into<String>>(mut compiler: Compiler, s: S) -> (String, String) {
+        compiler.set_no_color();
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
@@ -329,7 +345,7 @@ mod test {
     #[test]
     fn test_empty_input() {
         let c = Compiler::new();
-        assert_eq!(compiler(c, ""), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM validated in XXms.");
+        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.");
     }
 
     #[test]
@@ -339,41 +355,41 @@ mod test {
         let output = compiler(c, "SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'Vars',WRAM0\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128");
         assert_eq!(
             output,
-            r#"Compiling "main.gb.s"...
-Parsing completed in XXms.
-Linking completed in XXms.
+            r#"   Compiling "main.gb.s" ...
+     Parsing completed in XXms.
+     Linking completed in XXms.
 
-Segment Usage Report:
+        Info Segment usage
 
-  ROM0       @ $0000 (  369 of 16384 bytes used) ( 16015 free)
+        ROM0 $0000 (  369 of 16384 bytes used) ( 16015 free)
 
-    $0000..=$011f ######## (  288 bytes) (Data)
-    $0120..=$012b ######## (   12 bytes) (Data1)
-    $012c..=$016b ######## (   64 bytes) (Data2)
-    $016c..=$01ff ........ (  148 bytes)
-    $0200..=$0204 ######## (    5 bytes) (Extra)
-    $0205..=$3fff ........ (15867 bytes)
-
-
-  ROMX[1]    @ $4000 (  160 of 16384 bytes used) ( 16224 free)
-
-    $4000..=$407f ######## (  128 bytes)
-    $4080..=$409f ######## (   32 bytes) (X)
-    $40a0..=$7fff ........ (16224 bytes)
+             $0000..=$011f ######## (  288 bytes) (Data)
+             $0120..=$012b ######## (   12 bytes) (Data1)
+             $012c..=$016b ######## (   64 bytes) (Data2)
+             $016c..=$01ff ........ (  148 bytes)
+             $0200..=$0204 ######## (    5 bytes) (Extra)
+             $0205..=$3fff ........ (15867 bytes)
 
 
-  WRAM0      @ $c000 (  513 of  4096 bytes used) (  3583 free)
+     ROMX[1] $4000 (  160 of 16384 bytes used) ( 16224 free)
 
-    $c000..=$c000 ######## (    1 bytes) (Vars)
-    $c001..=$c200 ######## (  512 bytes) (Buffer)
-    $c201..=$cfff ........ ( 3583 bytes)
+             $4000..=$407f ######## (  128 bytes)
+             $4080..=$409f ######## (   32 bytes) (X)
+             $40a0..=$7fff ........ (16224 bytes)
 
 
-  HRAM       @ $ff80 (  128 of   128 bytes used) (     0 free)
+       WRAM0 $c000 (  513 of  4096 bytes used) (  3583 free)
 
-    $ff80..=$ffff ######## (  128 bytes) (Vars)
+             $c000..=$c000 ######## (    1 bytes) (Vars)
+             $c001..=$c200 ######## (  512 bytes) (Buffer)
+             $c201..=$cfff ........ ( 3583 bytes)
 
-ROM validated in XXms."#
+
+        HRAM $ff80 (  128 of   128 bytes used) (     0 free)
+
+             $ff80..=$ffff ######## (  128 bytes) (Vars)
+
+   Validated ROM in XXms."#
         );
     }
 
@@ -385,7 +401,7 @@ ROM validated in XXms."#
         let (output, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
         assert_eq!(file, "00:0150 global\n00:0151 global.local");
-        assert_eq!(output, "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nSymbol map written to \"rom.sym\".\nROM validated in XXms.\nROM written to \"rom.gb\".");
+        assert_eq!(output, "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
     // Debug Stripping --------------------------------------------------------
@@ -433,7 +449,7 @@ ROM validated in XXms."#
     fn test_rom_info_defaults() {
         let mut c = Compiler::new();
         c.set_print_rom_info();
-        assert_eq!(compiler(c, ""), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM validated in XXms.\n[Info] ROM Title: \n[Info] ROM Version: 0\n[Info] ROM Checksum: $E7 / $162D\n[Info] ROM Size: 32768 bytes\n[Info] ROM Mapper: ROM");
+        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
     }
 
     #[test]
@@ -456,9 +472,21 @@ ROM validated in XXms."#
             DW 0                        ; $14e - Global checksum (not important)
         "#;
 
+        let output = r#"   Compiling "main.gb.s" ...
+     Parsing completed in XXms.
+     Linking completed in XXms.
+   Validated ROM in XXms.
+        Info ROM Title: ABCDEFGHIJK
+        Info ROM Version: 0
+        Info ROM Checksum: $43 / $1A2D
+        Info ROM Size: 65536 bytes
+        Info RAM Size: 8192 bytes
+        Info ROM Mapper: MBC5"#;
+
         let mut c = Compiler::new();
         c.set_print_rom_info();
-        assert_eq!(compiler(c, header), "Compiling \"main.gb.s\"...\nParsing completed in XXms.\nLinking completed in XXms.\nROM validated in XXms.\n[Info] ROM Title: ABCDEFGHIJK\n[Info] ROM Version: 0\n[Info] ROM Checksum: $43 / $1A2D\n[Info] ROM Size: 65536 bytes\n[Info] RAM Size: 8192 bytes\n[Info] ROM Mapper: MBC5");
+        assert_eq!(compiler(c, header), output)
+
     }
 
     // Errors -----------------------------------------------------------------
@@ -466,8 +494,8 @@ ROM validated in XXms."#
     fn test_error_lexer() {
         let c = Compiler::new();
         assert_eq!(compiler_error(c, "@"), (
-            "Compiling \"main.gb.s\"...".to_string(),
-            "[Error] Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here".to_string()
+            "   Compiling \"main.gb.s\" ...".to_string(),
+            "       Error Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here".to_string()
         ));
     }
 
@@ -475,8 +503,8 @@ ROM validated in XXms."#
     fn test_error_linking() {
         let c = Compiler::new();
         assert_eq!(compiler_error(c, "ld a,a"), (
-            "Compiling \"main.gb.s\"...\nParsing completed in XXms.".to_string(),
-            "[Error] Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
+            "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.".to_string(),
+            "       Error Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
         ));
     }
 
