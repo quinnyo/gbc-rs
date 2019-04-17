@@ -159,7 +159,22 @@ impl ExpressionStage {
             // Collect all compatible tokens
             let inner = token.inner().clone();
             let mut value_tokens = vec![token];
+            let mut paren_depth = 0;
+
             while let Some(next_typ) = tokens.peek_typ() {
+
+                // Check Parenthesis Depth
+                if current_typ == TokenType::OpenParen {
+                    paren_depth += 1;
+
+                } else if current_typ == TokenType::CloseParen {
+                    paren_depth -= 1;
+                }
+
+                if paren_depth == 0 && next_typ == TokenType::CloseParen {
+                    break;
+                }
+
                 if ExpressionParser::is_follow_up_token(current_typ, next_typ) {
                     value_tokens.push(tokens.next().unwrap());
                     current_typ = next_typ;
@@ -929,6 +944,11 @@ mod test {
                 }
             )
         ]);
+    }
+
+    #[test]
+    fn test_paren_missing_open() {
+        assert_eq!(expr_lexer_error("ROUND(2))"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \")\" token, expected the start of a expression instead.\n\nROUND(2))\n        ^--- Here");
     }
 
     // Binary -----------------------------------------------------------------
