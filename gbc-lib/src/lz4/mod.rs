@@ -11,6 +11,15 @@ const MIN_COPY_LENGTH: i32 = 3;
 const MAX_COPY_OFFSET: i32 = 254;
 
 // Commands -------------------------------------------------------------------
+// 0010 RepeatZero
+// 0011 End of Stream
+// 0000 Literal
+// 0001 Unused TODO Repeat short? 0001_llll bbbb_bbbb
+// 010  Copy
+// 011  Reverse Copy
+// 001  RepeatSingle
+// 101  RepeatDual
+//
 // 0:
 //     0:
 //          1:
@@ -268,8 +277,8 @@ impl RepeatZero {
 impl Command for RepeatZero {
 
     fn serialize(&self) -> Vec<u8> {
-        // 001 U_llll
-        // repeat the zero byte 2-33 times
+        // 0010_llll
+        // repeat the zero byte 2-17 times
         vec![0x20 | (self.desc.length as u8 & 0x0F)]
     }
 
@@ -610,7 +619,7 @@ mod test {
     }
 
     #[test]
-    fn test_encode_literal() {
+    fn test_compress_literal() {
         // Literal
         compress_inline(vec![1], vec![
             0, 1
@@ -634,7 +643,14 @@ mod test {
     }
 
     #[test]
-    fn test_encode_repeat() {
+    fn test_compress_repeat_zero() {
+        compress_inline(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vec![
+            47
+        ]);
+    }
+
+    #[test]
+    fn test_compress_repeat() {
         // Min Repeat
         compress_inline(vec![1, 1, 1], vec![
             129,
@@ -670,7 +686,52 @@ mod test {
     }
 
     #[test]
-    fn test_encode_copy() {
+    fn test_compress_repeat_dual() {
+        // Min Repeat
+        compress_inline(vec![1, 2, 1, 2], vec![
+            192,
+            1,
+            2
+        ]);
+
+        // Max Repeat
+        compress_inline(vec![
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2, 1, 2, 1, 2,
+            1, 2, 1, 2, 1, 2, 1, 2,
+
+            1, 2, 1, 2
+
+        ], vec![
+            255,
+            1, 2,
+            1,
+            1, 2
+        ]);
+    }
+
+    #[test]
+    fn test_compress_copy() {
         // Min Copy
         compress_inline(vec![
             0, 1, 2, 3, 1, 2
@@ -691,7 +752,7 @@ mod test {
     }
 
     #[test]
-    fn test_encode_reverse_copy() {
+    fn test_compress_reverse_copy() {
         // Min Copy
         compress_inline(vec![
             0, 1, 2, 3, 2, 1
@@ -705,18 +766,17 @@ mod test {
             3, 0, 1, 2, 3, 96, 254
         ]);
 
+        compress_inline(vec![
+            0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2
+
+        ], vec![
+            2, 0, 1, 2, 64, 0, 67, 0, 73, 0
+        ]);
+
         // TODO max copy
 
         // TODO copy offset
 
-    }
-
-    #[test]
-    fn test_encode_tile_map() {
-        let input = vec![255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 252, 252, 240, 240, 192, 192, 0, 0, 252, 252, 240, 240, 192, 192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected = vec![ 142, 255, 46, 134, 255, 7, 252, 252, 240, 240, 192, 192, 0, 0, 69, 0, 38, 48];
-        let result = compress(&input, true);
-        assert_eq!(result.0, expected);
     }
 
 }
