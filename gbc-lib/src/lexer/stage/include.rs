@@ -6,13 +6,12 @@ use std::path::PathBuf;
 use crate::traits::FileReader;
 use crate::error::SourceError;
 use super::super::LexerStage;
-use super::super::token::{TokenGenerator, TokenChar};
+use super::super::token::{TokenGenerator, TokenIterator, TokenChar};
 use super::super::{InnerToken, LexerFile, LexerToken, TokenType};
 
 
 // Include Specific Tokens ----------------------------------------------------
 lexer_token!(IncludeToken, (Debug, Eq, PartialEq, Clone), {
-    Newline(()),
     Name(()),
     Register(()),
     Flag(()),
@@ -122,54 +121,50 @@ impl IncludeStage {
     ) -> Result<Vec<IncludeToken>, SourceError> {
 
         let mut expanded = Vec::new();
-
-        let mut tokens = tokens.into_iter();
+        let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if let IncludeToken::Reserved(ref name) = token {
-                if name.value == "INCLUDE" {
-                    match tokens.next() {
-                        Some(IncludeToken::StringLiteral(token)) => {
-                            let mut include_stack = state.files[parent_file_index].include_stack.clone();
-                            include_stack.push(token.clone());
+            if token.is(TokenType::Reserved) && token.has_value("INCLUDE") {
+                match tokens.next() {
+                    Some(IncludeToken::StringLiteral(token)) => {
+                        let mut include_stack = state.files[parent_file_index].include_stack.clone();
+                        include_stack.push(token.clone());
 
-                            let child_state = IncludeLexerState {
-                                file_reader: state.file_reader,
-                                files: state.files,
-                                parent_path: state.parent_path,
-                                child_path: &PathBuf::from(token.value.clone()),
-                            };
+                        let child_state = IncludeLexerState {
+                            file_reader: state.file_reader,
+                            files: state.files,
+                            parent_path: state.parent_path,
+                            child_path: &PathBuf::from(token.value.clone()),
+                        };
 
-                            expanded.append(&mut Self::include_directive(
-                                child_state,
-                                parent_file_index,
-                                token.start_index,
-                                include_stack
-                            )?);
-                        },
-                        Some(IncludeToken::Reserved(ref name)) if name.value == "BINARY" => {
-                            match tokens.next() {
-                                Some(IncludeToken::StringLiteral(token)) => {
-                                    let child_state = IncludeLexerState {
-                                        file_reader: state.file_reader,
-                                        files: state.files,
-                                        parent_path: state.parent_path,
-                                        child_path: &PathBuf::from(token.value.clone())
-                                    };
-                                    expanded.push(Self::incbin_directive(
-                                        child_state,
-                                        token
-                                    )?);
-                                },
-                                Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
-                                None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
-                            }
-                        },
-                        Some(other) => return Err(other.error("Expected a StringLiteral or BINARY keyword instead.".to_string())),
-                        None => return Err(token.error("Expected a StringLiteral or BINARY keyword to follow.".to_string()))
-                    }
-
-                } else {
-                    expanded.push(token);
+                        let using = Self::using_directive(&mut tokens)?;
+                        expanded.append(&mut Self::include_directive(
+                            child_state,
+                            parent_file_index,
+                            token.start_index,
+                            include_stack
+                        )?);
+                    },
+                    Some(IncludeToken::Reserved(ref name)) if name.value == "BINARY" => {
+                        match tokens.next() {
+                            Some(IncludeToken::StringLiteral(token)) => {
+                                let child_state = IncludeLexerState {
+                                    file_reader: state.file_reader,
+                                    files: state.files,
+                                    parent_path: state.parent_path,
+                                    child_path: &PathBuf::from(token.value.clone())
+                                };
+                                let using = Self::using_directive(&mut tokens)?;
+                                expanded.push(Self::incbin_directive(
+                                    child_state,
+                                    token
+                                )?);
+                            },
+                            Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
+                            None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
+                        }
+                    },
+                    Some(other) => return Err(other.error("Expected a StringLiteral or BINARY keyword instead.".to_string())),
+                    None => return Err(token.error("Expected a StringLiteral or BINARY keyword to follow.".to_string()))
                 }
 
             } else {
@@ -179,6 +174,10 @@ impl IncludeStage {
 
         Ok(expanded)
 
+    }
+
+    fn using_directive(tokens: &mut TokenIterator<IncludeToken>) -> Result<Option<String>, SourceError> {
+        Ok(None)
     }
 
     fn include_directive<T: FileReader>(
@@ -213,7 +212,7 @@ impl IncludeStage {
             let token = match iter.next() {
                 // Whitespace
                 ' ' | '\t' => continue, // Ignore whitespace,
-                '\n' | '\r' => Some(IncludeToken::Newline(iter.collect_single())),
+                '\n' | '\r' => continue, // Ignore newlines
                 // Names
                 'a'...'z' | 'A'...'Z' | '_' => {
                     let name = Self::collect_inner_name(iter, true)?;
@@ -502,9 +501,7 @@ mod test {
         let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(1, NumberLiteral, 0, 2, "42"),
-            tkf!(0, Newline, 18, 19, "\n"),
             tkf!(2, Name, 0, 3, "BAR"),
-            tkf!(0, Newline, 43, 44, "\n"),
             tkf!(3, Name, 0, 3, "ABS"),
         ]);
 
@@ -523,11 +520,8 @@ mod test {
         let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(0, NumberLiteral, 0, 1, "1"),
-            tkf!(0, Newline, 1, 2, "\n"),
             tkf!(1, NumberLiteral, 0, 1, "2"),
-            tkf!(1, Newline, 1, 2, "\n"),
             tkf!(3, NumberLiteral, 0, 1, "3"),
-            tkf!(1, Newline, 26, 27, "\n"),
             tkf!(1, NumberLiteral, 27, 28, "4"),
         ]);
 
@@ -591,7 +585,6 @@ mod test {
         let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             IncludeToken::BinaryFile(itk!(15, 25, "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
-            tkf!(0, Newline, 25, 26, "\n"),
             IncludeToken::BinaryFile(itk!(41, 53, "second.bin"), vec![42])
         ]);
 
@@ -615,13 +608,8 @@ mod test {
     }
 
     #[test]
-    fn test_newlinews() {
+    fn test_newlines() {
         assert_eq!(include_lexer("\n\r\n\n\r"), vec![
-            tk!(Newline, 0, 1, "\n"),
-            tk!(Newline, 1, 2, "\r"),
-            tk!(Newline, 2, 3, "\n"),
-            tk!(Newline, 3, 4, "\n"),
-            tk!(Newline, 4, 5, "\r"),
         ]);
     }
 
@@ -809,14 +797,11 @@ mod test {
     fn test_multiline() {
         assert_eq!(include_lexer("q\n'Text'\n4"), vec![
             tk!(Name, 0, 1, "q"),
-            tk!(Newline, 1, 2, "\n"),
             tk!(StringLiteral, 2, 8, "Text"),
-            tk!(Newline, 8, 9, "\n"),
             tk!(NumberLiteral, 9, 10, "4")
         ]);
         assert_eq!(include_lexer("; A Comment\n2"), vec![
             tk!(Comment, 0, 11, "; A Comment"),
-            tk!(Newline, 11, 12, "\n"),
             tk!(NumberLiteral, 12, 13, "2"),
         ]);
     }
@@ -829,16 +814,12 @@ mod test {
         assert_eq!(include_lexer("`q\n'Text'\n4`"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
                 tk!(Name, 1, 2, "q"),
-                tk!(Newline, 2, 3, "\n"),
                 tk!(StringLiteral, 3, 9, "Text"),
-                tk!(Newline, 9, 10, "\n"),
                 tk!(NumberLiteral, 10, 11, "4")
             ])
         ]);
         assert_eq!(include_lexer("`\n\n`"), vec![
             IncludeToken::TokenGroup(itk!(0, 1, "`"), vec![
-                tk!(Newline, 1, 2, "\n"),
-                tk!(Newline, 2, 3, "\n"),
             ])
         ]);
     }

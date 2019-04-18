@@ -241,7 +241,7 @@ impl MacroStage {
         let mut tokens_without_macro_defs = Vec::with_capacity(tokens.len());
 
         // Drop all newlines
-        let mut tokens = TokenIterator::new(tokens.into_iter().filter(|t| !t.is(TokenType::Newline)).collect());
+        let mut tokens = TokenIterator::new(tokens);
 
         // Extract Macro Definitions
         while let Some(token) = tokens.next() {
@@ -512,7 +512,7 @@ impl MacroStage {
 
                     // Recursively expand any macros calls generate by the previous user macro call
                     tokens_without_macro_calls.append(&mut Self::expand_macro_calls(
-                        expanded_macro_tokens.into_iter().filter(|t| !t.is(TokenType::Newline)).collect(),
+                        expanded_macro_tokens,
                         macro_call_id,
                         expansion_depth + 1,
                         macro_calls,
