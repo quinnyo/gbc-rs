@@ -16,7 +16,10 @@ linux-musl:
   artifacts:
     paths:
       - target/x86_64-unknown-linux-musl/release/gbc
+      - gbt/target/x86_64-unknown-linux-musl/release/gbt
   script:
+    - cargo build --release --target x86_64-unknown-linux-musl
+    - cd gbt
     - cargo build --release --target x86_64-unknown-linux-musl
 
 windows-mingw:
@@ -24,5 +27,8 @@ windows-mingw:
   artifacts:
     paths:
       - target/x86_64-pc-windows-gnu/release/gbc.exe
+      - gbt/target/x86_64-pc-windows-gnu/release/gbt.exe
   script:
+    - cargo build --release --target x86_64-pc-windows-gnu
+    - cd gbt
     - cargo build --release --target x86_64-pc-windows-gnu
