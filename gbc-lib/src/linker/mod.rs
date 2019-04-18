@@ -318,11 +318,11 @@ impl Linker {
     }
 
     fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
-        let mut optimzations_applied = false;
+        let mut optimizations_applied = false;
         for s in sections.iter_mut() {
-            optimzations_applied |= optimizer::optimize_section_entries(&mut s.entries);
+            optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries);
         }
-        optimzations_applied
+        optimizations_applied
     }
 
     fn verify_sections(sections: &[Section]) -> Result<(), SourceError> {
