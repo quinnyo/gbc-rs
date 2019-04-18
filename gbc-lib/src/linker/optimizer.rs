@@ -35,31 +35,57 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                 b,
                 c
             ) {
-                // Remove additional instruction
-                for _ in 0..remove_count {
-                    entries.remove(i + 1);
-                }
+                let difference = remove_count as isize - (new_entries.len() as isize - 1);
 
-                let old_entry = entries.remove(i);
-
-                // Insert new instructions
-                for e in new_entries.into_iter().rev() {
-                    if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
-                        entries.insert(i, SectionEntry::new_with_size(
-                            old_entry.section_id,
-                            old_entry.inner.clone(),
-                            instruction::size(op_code),
-                            EntryData::Instruction {
+                // Nothing to remove or add just replace the existing entry
+                if difference == 0 {
+                    for (index, e) in new_entries.into_iter().enumerate() {
+                        if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
+                            let entry = &mut entries[i + index];
+                            entry.size = instruction::size(op_code);
+                            entry.data = EntryData::Instruction {
                                 op_code,
                                 expression,
                                 bytes,
                                 debug_only: false
-                            },
-                            false
-                        ))
+                            };
+                            entry.compress = false;
+
+                        } else {
+                            unreachable!();
+                        }
+                    }
+
+                } else {
+                    // Remove old entries
+                    for _ in 0..remove_count {
+                        entries.remove(i + 1);
+                    }
+
+                    // Use the initial entry as the basis for the new ones
+                    let old_entry = entries.remove(i);
+
+                    // Insert new instructions
+                    for e in new_entries.into_iter().rev() {
+                        if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
+                            entries.insert(i, SectionEntry::new_with_size(
+                                old_entry.section_id,
+                                old_entry.inner.clone(),
+                                instruction::size(op_code),
+                                EntryData::Instruction {
+                                    op_code,
+                                    expression,
+                                    bytes,
+                                    debug_only: false
+                                },
+                                false
+                            ))
+
+                        } else {
+                            unreachable!();
+                        }
                     }
                 }
-
                 any_optimizations = true;
             }
         }

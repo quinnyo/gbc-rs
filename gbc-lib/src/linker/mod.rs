@@ -320,7 +320,9 @@ impl Linker {
     fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
         let mut optimizations_applied = false;
         for s in sections.iter_mut() {
-            optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries);
+            if s.is_rom {
+                optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries);
+            }
         }
         optimizations_applied
     }
