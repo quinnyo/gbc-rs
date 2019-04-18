@@ -548,7 +548,7 @@ mod test {
         reader.base = PathBuf::from("src");
         reader.add_command(
             "cmd",
-            vec!["--arg".into(), "--arg-two".into()],
+            vec!["--arg".into(), "--arg-two".into(), "src/foo.gb.s".into()],
             vec![52, 50],
             vec![53, 51]
         );
@@ -596,7 +596,7 @@ mod test {
         reader.base = PathBuf::from("src");
         reader.add_command(
             "cmd",
-            vec![],
+            vec!["src/foo.gb.s".into()],
             vec![52, 50],
             vec![255, 0]
         );
@@ -704,7 +704,7 @@ mod test {
         reader.base = PathBuf::from("src");
         reader.add_command(
             "cmd",
-            vec!["--arg".into(), "--arg-two".into()],
+            vec!["--arg".into(), "--arg-two".into(), "src/data.bin".into()],
             vec![0, 1, 2, 3, 4, 5, 6, 7],
             vec![42]
         );

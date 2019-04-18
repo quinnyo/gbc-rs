@@ -24,20 +24,21 @@ pub trait FileReader {
 
     fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError>;
 
-    fn execute_raw_command(&self, command: &str, input: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn execute_raw_command(&self, path: PathBuf, command: &str, input: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut args = command.split(' ');
         let name = args.next().expect("Failed to get command name");
         if name.is_empty() {
             Err("Missing command name".to_string())
 
         } else {
-            let args: Vec<String> = args.into_iter().map(|arg| arg.to_string()).collect();
+            let mut args: Vec<String> = args.into_iter().map(|arg| arg.to_string()).collect();
+            args.push(path.display().to_string());
             self.run_command(name.to_string(), args, input)
         }
     }
 
     fn execute_command(&self, path: PathBuf, command: &str, input: String) -> Result<String, CommandError> {
-        String::from_utf8(self.execute_raw_command(command, input.into_bytes()).map_err(|stdout| {
+        String::from_utf8(self.execute_raw_command(path.clone(), command, input.into_bytes()).map_err(|stdout| {
             CommandError {
                 path: path.clone(),
                 stdout
@@ -51,7 +52,7 @@ pub trait FileReader {
     }
 
     fn execute_binary_command(&self, path: PathBuf, command: &str, input: Vec<u8>) -> Result<Vec<u8>, CommandError> {
-        self.execute_raw_command(command, input).map_err(|stdout| {
+        self.execute_raw_command(path.clone(), command, input).map_err(|stdout| {
             CommandError {
                 path,
                 stdout

@@ -2,6 +2,7 @@
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::io::{Error as IOError, Read, Write};
 
 
@@ -159,7 +160,24 @@ impl ProjectReader {
 impl FileReader for ProjectReader {
 
     fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String> {
-        Err("Using commands is not yet fully implemented.".to_string())
+        let mut child = Command::new(name)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn().map_err(|e| {
+                format!("Failed to execute process: {}", e)
+            })?;
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin.write_all(&input).map_err(|e| {
+                format!("Failed to execute process: {}", e)
+            })?;
+        }
+
+        let output = child.wait_with_output().map_err(|e| {
+            format!("Failed to execute process: {}", e)
+        })?;
+        Ok(output.stdout)
     }
 
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {

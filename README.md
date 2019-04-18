@@ -39,6 +39,39 @@ ARGS:
 
 ## General Syntax
 
+### Includes
+
+gbc supports two types of includes:
+
+```asm
+; Source files
+INCLUDE "foo.asm"
+```
+
+```asm
+; Binary files
+INCLUDE BINARY "foo.bin"
+```
+
+Both of these support an additional `USING` directive which can be used to 
+pre-process their input before it gets parsed / included into the ROM by gbc.
+
+The called program must output the raw result only to `stdout`.
+
+```asm
+; Generate a source file on demand
+; This is equivialent to calling:
+;    mod2gb --to-asm /absolute/path/to/project/src/music.mod
+INCLUDE "src/music.mod" USING "mod2gb --to-asm"
+```
+
+```asm
+; Pre-process a tile image using another program.
+; This is equivialent to calling:
+;    image2gb --some-palette -i /absolute/path/to/project/src/tiles.png
+INCLUDE BINARY "src/tiles.png" USING "image2gb --some-palette -i"
+```
+
 ### User defined Macros
 
 User Macros work by generating and substituting tokens.
