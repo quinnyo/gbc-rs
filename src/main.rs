@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::env;
+use std::process;
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -107,6 +108,7 @@ fn main() {
             Err((output, err)) => {
                 println!("{}", output);
                 eprintln!("{}", err);
+                process::exit(1)
             }
         }
 
@@ -164,6 +166,7 @@ impl FileReader for ProjectReader {
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn().map_err(|e| {
                 format!("Failed to execute process: {}", e)
             })?;
@@ -177,7 +180,14 @@ impl FileReader for ProjectReader {
         let output = child.wait_with_output().map_err(|e| {
             format!("Failed to execute process: {}", e)
         })?;
-        Ok(output.stdout)
+
+        if output.status.success() {
+            Ok(output.stdout)
+
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+
     }
 
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {
