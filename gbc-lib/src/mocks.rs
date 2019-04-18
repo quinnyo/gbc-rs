@@ -11,7 +11,8 @@ use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage,
 pub struct MockFileReader {
     pub base: PathBuf,
     files: HashMap<PathBuf, String>,
-    binary_files: HashMap<PathBuf, Vec<u8>>
+    binary_files: HashMap<PathBuf, Vec<u8>>,
+    commands: HashMap<(String, Vec<String>), (Vec<u8>, Vec<u8>)>
 }
 
 impl MockFileReader {
@@ -30,9 +31,26 @@ impl MockFileReader {
     pub fn get_binary_file<S: Into<String>>(&mut self, path: S) -> Option<Vec<u8>> {
         self.binary_files.remove(&PathBuf::from(path.into()))
     }
+
+    pub fn add_command<S: Into<String>>(&mut self, name: S, args: Vec<String>, input: Vec<u8>, output: Vec<u8>) {
+        self.commands.insert((name.into(), args), (input, output));
+    }
+
 }
 
 impl FileReader for MockFileReader {
+
+    fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String> {
+        let (expected, output) = self.commands.get(&(name.clone(), args)).map(|b| b.clone()).ok_or_else(|| {
+            format!("{}: mock command not found", name)
+        })?;
+        if input != expected {
+            Err(format!("Mock command input does not match expected values: {:?} vs {:?}", input, expected))
+
+        } else {
+            Ok(output)
+        }
+    }
 
     fn read_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, String), FileError> {
         let path = Self::resolve_path(&self.base, parent_path, child_path);

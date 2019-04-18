@@ -1,5 +1,4 @@
 // STD Dependencies -----------------------------------------------------------
-use std::fmt;
 use std::path::PathBuf;
 use std::io::Error as IOError;
 
@@ -11,17 +10,54 @@ pub struct FileError {
     pub path: PathBuf
 }
 
-impl fmt::Display for FileError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "FileError: {}", self.path.display())
-    }
+#[derive(Debug)]
+pub struct CommandError {
+    pub path: PathBuf,
+    pub stdout: String
 }
 
 pub trait FileReader {
 
+    fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String>;
+
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError>;
 
     fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError>;
+
+    fn execute_raw_command(&self, command: &str, input: Vec<u8>) -> Result<Vec<u8>, String> {
+        let mut args = command.split(' ');
+        let name = args.next().expect("Failed to get command name");
+        if name.is_empty() {
+            Err("Missing command name".to_string())
+
+        } else {
+            let args: Vec<String> = args.into_iter().map(|arg| arg.to_string()).collect();
+            self.run_command(name.to_string(), args, input)
+        }
+    }
+
+    fn execute_command(&self, path: PathBuf, command: &str, input: String) -> Result<String, CommandError> {
+        String::from_utf8(self.execute_raw_command(command, input.into_bytes()).map_err(|stdout| {
+            CommandError {
+                path: path.clone(),
+                stdout
+            }
+        })?).map_err(|e| {
+            CommandError {
+                path,
+                stdout: format!("Command did not return a valid string: {}", e.to_string())
+            }
+        })
+    }
+
+    fn execute_binary_command(&self, path: PathBuf, command: &str, input: Vec<u8>) -> Result<Vec<u8>, CommandError> {
+        self.execute_raw_command(command, input).map_err(|stdout| {
+            CommandError {
+                path,
+                stdout
+            }
+        })
+    }
 
     fn resolve_path(base: &PathBuf, parent: Option<&PathBuf>, child: &PathBuf) -> PathBuf {
         let mut full_path = base.clone();

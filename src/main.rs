@@ -157,6 +157,11 @@ impl ProjectReader {
 }
 
 impl FileReader for ProjectReader {
+
+    fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String> {
+        Err("Using commands is not yet fully implemented.".to_string())
+    }
+
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {
         let path = Self::resolve_path(&self.base, parent, child);
         self.read_file_inner(&path).map_err(|io| {
