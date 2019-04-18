@@ -146,26 +146,26 @@ impl IncludeStage {
                                 include_stack
                             )?);
                         },
-                        Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
-                        None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
-                    }
-
-                } else if name.value == "INCBIN" {
-                    match tokens.next() {
-                        Some(IncludeToken::StringLiteral(token)) => {
-                            let child_state = IncludeLexerState {
-                                file_reader: state.file_reader,
-                                files: state.files,
-                                parent_path: state.parent_path,
-                                child_path: &PathBuf::from(token.value.clone())
-                            };
-                            expanded.push(Self::incbin_directive(
-                                child_state,
-                                token
-                            )?);
+                        Some(IncludeToken::Reserved(ref name)) if name.value == "BINARY" => {
+                            match tokens.next() {
+                                Some(IncludeToken::StringLiteral(token)) => {
+                                    let child_state = IncludeLexerState {
+                                        file_reader: state.file_reader,
+                                        files: state.files,
+                                        parent_path: state.parent_path,
+                                        child_path: &PathBuf::from(token.value.clone())
+                                    };
+                                    expanded.push(Self::incbin_directive(
+                                        child_state,
+                                        token
+                                    )?);
+                                },
+                                Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
+                                None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
+                            }
                         },
-                        Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
-                        None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
+                        Some(other) => return Err(other.error("Expected a StringLiteral or BINARY keyword instead.".to_string())),
+                        None => return Err(token.error("Expected a StringLiteral or BINARY keyword to follow.".to_string()))
                     }
 
                 } else {
@@ -224,7 +224,7 @@ impl IncludeStage {
                         "DS16" | "EQUS" | "BANK" |
                         "THEN" | "ELSE" | "ENDIF" |
                         "MACRO" |
-                        "ENDFOR" | "REPEAT" | "INCBIN" | "SECTION" | "INCLUDE" | "SEGMENT" |
+                        "ENDFOR" | "REPEAT" | "BINARY" | "SECTION" | "INCLUDE" | "SEGMENT" |
                         "ENDMACRO" | "COMPRESS" |
                         "ENDCOMPRESS" => {
                             Some(IncludeToken::Reserved(name))
@@ -575,8 +575,8 @@ mod test {
 
     #[test]
     fn test_resolve_include_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE 4"), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral instead.\n\nINCLUDE 4\n        ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE\n^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 4"), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE 4\n        ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral or BINARY keyword to follow.\n\nINCLUDE\n^--- Here");
     }
 
     #[test]
@@ -584,15 +584,15 @@ mod test {
 
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCBIN 'data.bin'\nINCBIN 'second.bin'");
+        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin'\nINCLUDE BINARY 'second.bin'");
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
         reader.add_binary_file("src/second.bin", vec![42]);
 
         let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
-            IncludeToken::BinaryFile(itk!(7, 17, "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
-            tkf!(0, Newline, 17, 18, "\n"),
-            IncludeToken::BinaryFile(itk!(25, 37, "second.bin"), vec![42])
+            IncludeToken::BinaryFile(itk!(15, 25, "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
+            tkf!(0, Newline, 25, 26, "\n"),
+            IncludeToken::BinaryFile(itk!(41, 53, "second.bin"), vec![42])
         ]);
 
     }
@@ -602,16 +602,16 @@ mod test {
 
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCBIN 'data.bin'");
+        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin'");
         let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 1, column 8: File \"src/data.bin\" not found\n\nINCBIN \'data.bin\'\n       ^--- Here");
+        assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 1, column 16: File \"src/data.bin\" not found\n\nINCLUDE BINARY \'data.bin\'\n               ^--- Here");
 
     }
 
     #[test]
     fn test_resolve_incbin_incomplete() {
-        assert_eq!(include_lexer_error("INCBIN 4"), "In file \"main.gb.s\" on line 1, column 8: Expected a StringLiteral instead.\n\nINCBIN 4\n       ^--- Here");
-        assert_eq!(include_lexer_error("INCBIN"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCBIN\n^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 4"), "In file \"main.gb.s\" on line 1, column 16: Expected a StringLiteral instead.\n\nINCLUDE BINARY 4\n               ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE BINARY\n^--- Here");
     }
 
     #[test]

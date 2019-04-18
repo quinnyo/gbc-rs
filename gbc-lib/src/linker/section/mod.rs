@@ -1051,7 +1051,7 @@ mod test {
 
     #[test]
     fn test_section_entry_data_rom_incbin() {
-        let linker = linker_binary("SECTION ROM0\nINCBIN 'child.bin'", vec![1, 2, 3, 4]);
+        let linker = linker_binary("SECTION ROM0\nINCLUDE BINARY 'child.bin'", vec![1, 2, 3, 4]);
         assert_eq!(linker_section_entries(linker), vec![
             vec![
                 (4, EntryData::Data {

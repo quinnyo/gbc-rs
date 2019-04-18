@@ -1938,9 +1938,9 @@ mod test {
 
     #[test]
     fn test_data_incbin() {
-        let tokens = entry_lexer_binary("INCBIN 'child.bin'", vec![1, 2, 3]).tokens;
+        let tokens = entry_lexer_binary("INCLUDE BINARY 'child.bin'", vec![1, 2, 3]).tokens;
         assert_eq!(tokens, vec![EntryToken::Data {
-            inner: itk!(7, 18, "child.bin"),
+            inner: itk!(15, 26, "child.bin"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Array(vec![1, 2, 3]),
@@ -3332,9 +3332,9 @@ mod test {
             }
         ]);
 
-        let tokens = entry_lexer_binary("COMPRESS INCBIN 'child.bin' ENDCOMPRESS", vec![1, 2, 3]).tokens;
+        let tokens = entry_lexer_binary("COMPRESS INCLUDE BINARY 'child.bin' ENDCOMPRESS", vec![1, 2, 3]).tokens;
         assert_eq!(tokens, vec![EntryToken::Data {
-            inner: itk!(16, 27, "child.bin"),
+            inner: itk!(24, 35, "child.bin"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Array(vec![1, 2, 3]),
