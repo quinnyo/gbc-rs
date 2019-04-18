@@ -57,7 +57,7 @@ impl Linker {
     ) -> Result<Self, SourceError> {
 
         let mut context = EvaluatorContext::new();
-        let mut entry_tokens = Vec::new();
+        let mut entry_tokens = Vec::with_capacity(tokens.len());
         Self::parse_entries(&mut context, tokens, true, &mut entry_tokens)?;
 
         // Make sure that all constants are always evaluated even when they're not used by any

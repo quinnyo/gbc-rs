@@ -77,7 +77,7 @@ impl LexerStage for ValueStage {
 
     ) -> Result<Vec<Self::Output>, SourceError> {
         let mut global_labels: HashMap<(String, Option<usize>), (InnerToken, usize)> = HashMap::new();
-        let mut global_labels_names: Vec<String> = Vec::new();
+        let mut global_labels_names: Vec<String> = Vec::with_capacity(64);
         let mut unique_label_id = 0;
         Self::convert_local_labels_refs(Self::parse_tokens(
             &mut global_labels,
@@ -122,7 +122,7 @@ impl ValueStage {
 
                 // Convert Statements
                 MacroToken::IfStatement(inner, branches) => {
-                    let mut value_branches = Vec::new();
+                    let mut value_branches = Vec::with_capacity(branches.len());
                     for branch in branches {
                         value_branches.push(branch.into_other(|tokens| {
                             Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, tokens)
@@ -472,7 +472,7 @@ impl ValueStage {
     fn convert_local_labels_refs(mut tokens: Vec<ValueToken>) -> Result<Vec<ValueToken>, SourceError> {
 
         let mut global_label_map = HashMap::new();
-        let mut local_label_refs = Vec::new();
+        let mut local_label_refs = Vec::with_capacity(64);
         let mut error = Self::inner_assign_and_verify_local_label_refs(
             &mut tokens,
             &mut global_label_map,

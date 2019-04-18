@@ -66,7 +66,7 @@ impl ExpressionToken {
                 typ
             }),
             ValueToken::IfStatement(inner, branches) => {
-                let mut expr_branches = Vec::new();
+                let mut expr_branches = Vec::with_capacity(branches.len());
                 for branch in branches {
                     expr_branches.push(branch.into_other(|tokens| {
                         ExpressionStage::parse_expression(tokens, false)

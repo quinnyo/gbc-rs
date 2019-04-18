@@ -188,7 +188,7 @@ impl MacroDefinition {
                 (typ, InnerToken::new(0, 0, 0, name.into()))
 
             }).collect(),
-            body: Vec::new(),
+            body: Vec::with_capacity(64),
             builtin: true
         }
     }
@@ -237,7 +237,7 @@ impl MacroStage {
 
     ) -> Result<(Vec<MacroDefinition>, Vec<MacroToken>), SourceError> {
 
-        let mut user_macro_defs = Vec::new();
+        let mut user_macro_defs = Vec::with_capacity(16);
         let mut tokens_without_macro_defs = Vec::with_capacity(tokens.len());
 
         // Drop all newlines

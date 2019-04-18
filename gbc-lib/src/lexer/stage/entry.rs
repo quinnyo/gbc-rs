@@ -160,7 +160,7 @@ impl EntryStage {
 
                 // If Statements
                 (_, ExpressionToken::IfStatement(inner, branches)) => {
-                    let mut entry_branches = Vec::new();
+                    let mut entry_branches = Vec::with_capacity(branches.len());
                     for branch in branches {
                         entry_branches.push(IfStatementBranch {
                             condition: if let Some(mut tokens) = branch.condition {
@@ -401,7 +401,7 @@ impl EntryStage {
         let max_arg_count = gbc_cpu::instruction_max_arg_count(&inner.value);
         let mut expression: OptionalDataExpression = None;
 
-        let mut layout = Vec::new();
+        let mut layout = Vec::with_capacity(8);
         let mut arg_count = 0;
         let mut past_comma = false;
         let mut trailing_comma = None;
@@ -713,7 +713,7 @@ impl EntryStage {
         tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
 
         let (high, low) = double.to_pair();
-        let mut instructions = Vec::new();
+        let mut instructions = Vec::with_capacity(8);
 
         // addw hl|de|bc,a|b|c|d|e|h|l|$ff
         if addw {
@@ -870,7 +870,7 @@ impl EntryStage {
 
                 // Other registers
                 } else {
-                    let mut instructions = Vec::new();
+                    let mut instructions = Vec::with_capacity(shifts);
                     for _ in 0..shifts {
                         instructions.push(EntryToken::Instruction(inner.clone(), shift_op));
                     }
@@ -1096,7 +1096,7 @@ impl EntryStage {
 
     fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<(bool, Vec<DataExpression>)>, SourceError> {
         if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
-            let mut expressions = Vec::new();
+            let mut expressions = Vec::with_capacity(8);
             let mut is_constant = true;
             while tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
                 let expr = tokens.get("when parsing expression list")?;

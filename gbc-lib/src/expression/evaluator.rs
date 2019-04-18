@@ -106,7 +106,7 @@ impl EvaluatorContext {
         expression: DataExpression
 
     ) -> Result<ExpressionResult, SourceError> {
-        let stack = Vec::new();
+        let stack = Vec::with_capacity(8);
         self.resolve_expression_inner(&stack, expression)
     }
 
@@ -116,7 +116,7 @@ impl EvaluatorContext {
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            let stack = Vec::new();
+            let stack = Vec::with_capacity(8);
             Ok(Some(self.resolve_expression_inner(&stack, expr)?))
 
         } else {
@@ -175,7 +175,7 @@ impl EvaluatorContext {
                 }
             },
             Expression::BuiltinCall { inner, name, args } => {
-                let mut arguments = Vec::new();
+                let mut arguments = Vec::with_capacity(args.len());
                 for arg in args {
                     arguments.push(self.resolve_expression_inner(
                         constant_stack,

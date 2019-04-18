@@ -120,7 +120,7 @@ impl IncludeStage {
 
     ) -> Result<Vec<IncludeToken>, SourceError> {
 
-        let mut expanded = Vec::new();
+        let mut expanded = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
             if token.is(TokenType::Reserved) && token.has_value("INCLUDE") {
