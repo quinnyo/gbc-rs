@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 
 // External Dependencies ------------------------------------------------------
+use colored::Colorize;
 use clap::{Arg, App, SubCommand};
 
 
@@ -13,6 +14,10 @@ mod tiles;
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
+
+    // TODO animated gif conversion
+    // TODO MMP file conversion
+    // TODO lz4 compression
 
     let matches = App::new("gbt")
         .version("0.1")
@@ -63,7 +68,7 @@ fn main() {
             matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
 
         ) {
-            eprintln!("Error: {}", err);
+            eprintln!("       {} {}", "Error".bright_red(), err);
             process::exit(1)
         }
     }
