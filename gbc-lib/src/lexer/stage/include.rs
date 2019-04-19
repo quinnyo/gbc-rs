@@ -2,6 +2,10 @@
 use std::path::PathBuf;
 
 
+// External Dependencies ------------------------------------------------------
+use colored::Colorize;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
 use crate::error::SourceError;
@@ -101,7 +105,7 @@ impl IncludeStage {
                 SourceError::new(
                     file_index,
                     index,
-                    format!("Failed to execute command \"{}\" on included file \"{}\":\n\n{}", using, err.path.display(), err.stdout)
+                    format!("Failed to execute command \"{}\" on included file \"{}\":\n\n{}\n{}{}", using, err.path.display(), "---".red(), err.stdout, "---".red())
                 )
             })?;
         }
@@ -228,7 +232,7 @@ impl IncludeStage {
                 SourceError::new(
                     token.file_index,
                     token.start_index,
-                    format!("Failed to execute command \"{}\" on included file \"{}\":\n\n{}", using, err.path.display(), err.stdout)
+                    format!("Failed to execute command \"{}\" on included file \"{}\":\n\n{}\n{}{}", using, err.path.display(), "---".red(), err.stdout, "---".red())
                 )
             })?;
         }
@@ -550,7 +554,8 @@ mod test {
             "cmd",
             vec!["--arg".into(), "--arg-two".into(), "src/foo.gb.s".into()],
             vec![52, 50],
-            vec![53, 51]
+            vec![53, 51],
+            None
         );
         reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING 'cmd --arg --arg-two'");
         reader.add_file("src/foo.gb.s", "42");
@@ -571,7 +576,7 @@ mod test {
         reader.add_file("src/foo.gb.s", "42");
 
         let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gb.s\":\n\ncmd: mock command not found\n\nINCLUDE \'foo.gb.s\' USING \'cmd\'\n        ^--- Here");
+        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gb.s\":\n\n---\ncmd: mock command not found---\n\nINCLUDE \'foo.gb.s\' USING \'cmd\'\n        ^--- Here");
 
     }
 
@@ -585,7 +590,7 @@ mod test {
         reader.add_file("src/foo.gb.s", "42");
 
         let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"\" on included file \"src/foo.gb.s\":\n\nMissing command name\n\nINCLUDE \'foo.gb.s\' USING \'\'\n        ^--- Here");
+        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"\" on included file \"src/foo.gb.s\":\n\n---\nMissing command name---\n\nINCLUDE \'foo.gb.s\' USING \'\'\n        ^--- Here");
 
     }
 
@@ -598,13 +603,34 @@ mod test {
             "cmd",
             vec!["src/foo.gb.s".into()],
             vec![52, 50],
-            vec![255, 0]
+            vec![255, 0],
+            None
         );
         reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING 'cmd'");
         reader.add_file("src/foo.gb.s", "42");
 
         let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gb.s\":\n\nCommand did not return a valid string: invalid utf-8 sequence of 1 bytes from index 0\n\nINCLUDE \'foo.gb.s\' USING \'cmd\'\n        ^--- Here");
+        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gb.s\":\n\n---\nCommand did not return a valid string: invalid utf-8 sequence of 1 bytes from index 0---\n\nINCLUDE \'foo.gb.s\' USING \'cmd\'\n        ^--- Here");
+
+    }
+
+    #[test]
+    fn test_error_resolve_include_using_stderr() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_command(
+            "cmd",
+            vec!["src/foo.gb.s".into()],
+            vec![52, 50],
+            vec![],
+            Some("Mock failure".to_string())
+        );
+        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING 'cmd'");
+        reader.add_binary_file("src/data.bin", vec![]);
+
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
+        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 16: Failed to execute command \"cmd\" on included file \"src/data.bin\":\n\n---\ncmd: mock command not found---\n\nINCLUDE BINARY \'data.bin\' USING \'cmd\'\n               ^--- Here");
 
     }
 
@@ -706,7 +732,8 @@ mod test {
             "cmd",
             vec!["--arg".into(), "--arg-two".into(), "src/data.bin".into()],
             vec![0, 1, 2, 3, 4, 5, 6, 7],
-            vec![42]
+            vec![42],
+            None
         );
         reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING 'cmd --arg --arg-two'\n");
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);

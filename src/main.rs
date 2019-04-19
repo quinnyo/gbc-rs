@@ -24,7 +24,7 @@ fn main() {
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
         .about("GameBoy Compiler")
         .arg(Arg::with_name("SOURCE_FILE")
-            .help("Sets the input source file to use")
+            .help("Input source file")
             .required(true)
             .index(1)
         )

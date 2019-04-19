@@ -2,6 +2,10 @@
 use std::fmt;
 
 
+// External Dependencies ------------------------------------------------------
+use colored::Colorize;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::lexer::{LexerFile, InnerToken};
 use crate::lexer::stage::macros::MacroCall;
@@ -113,7 +117,7 @@ impl SourceError {
             message: format!(
                 "{}{}{}{}",
                 location,
-                stack,
+                stack.bright_yellow(),
                 reference,
                 macro_call,
             ),
@@ -128,25 +132,35 @@ impl SourceError {
         let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
         let col_pointer = str::repeat(" ", col);
         if prefix_message {
-            format!(
-                "{} in file \"{}\" on line {}, column {}:\n\n{}\n{}^--- Here",
+            let location = format!(
+                "{} in file \"{}\" on line {}, column {}:",
                 message,
                 file.path.display(),
                 line + 1,
                 col + 1,
+            );
+            format!(
+                "{}\n\n{}\n{}{}",
+                location.bright_red(),
                 line_source,
-                col_pointer
+                col_pointer,
+                "^--- Here".bright_red()
             )
 
         } else {
-            format!(
-                "In file \"{}\" on line {}, column {}: {}\n\n{}\n{}^--- Here",
+            let location = format!(
+                "In file \"{}\" on line {}, column {}:",
                 file.path.display(),
                 line + 1,
                 col + 1,
+            );
+            format!(
+                "{} {}\n\n{}\n{}{}",
+                location.bright_red(),
                 message,
                 line_source,
-                col_pointer
+                col_pointer,
+                "^--- Here".bright_red()
             )
         }
     }
@@ -158,6 +172,4 @@ impl fmt::Display for SourceError {
         write!(f, "{}", self.message)
     }
 }
-
-//impl Error for SourceError {}
 

@@ -12,7 +12,7 @@ pub struct MockFileReader {
     pub base: PathBuf,
     files: HashMap<PathBuf, String>,
     binary_files: HashMap<PathBuf, Vec<u8>>,
-    commands: HashMap<(String, Vec<String>), (Vec<u8>, Vec<u8>)>
+    commands: HashMap<(String, Vec<String>), (Vec<u8>, Vec<u8>, Option<String>)>
 }
 
 impl MockFileReader {
@@ -32,8 +32,15 @@ impl MockFileReader {
         self.binary_files.remove(&PathBuf::from(path.into()))
     }
 
-    pub fn add_command<S: Into<String>>(&mut self, name: S, args: Vec<String>, input: Vec<u8>, output: Vec<u8>) {
-        self.commands.insert((name.into(), args), (input, output));
+    pub fn add_command<S: Into<String>>(
+        &mut self,
+        name: S,
+        args: Vec<String>,
+        input: Vec<u8>,
+        output: Vec<u8>,
+        stderr: Option<String>
+    ) {
+        self.commands.insert((name.into(), args), (input, output, stderr));
     }
 
 }
@@ -41,10 +48,13 @@ impl MockFileReader {
 impl FileReader for MockFileReader {
 
     fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String> {
-        let (expected, output) = self.commands.get(&(name.clone(), args)).map(|b| b.clone()).ok_or_else(|| {
+        let (expected, output, stderr) = self.commands.get(&(name.clone(), args)).map(|b| b.clone()).ok_or_else(|| {
             format!("{}: mock command not found", name)
         })?;
-        if input != expected {
+        if let Some(stderr) = stderr {
+            Err(stderr)
+
+        } else if input != expected {
             Err(format!("Mock command input does not match expected values: {:?} vs {:?}", input, expected))
 
         } else {
