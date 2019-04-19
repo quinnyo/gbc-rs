@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::mem;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::expression::{OptionalDataExpression, Expression, ExpressionValue};
 use super::section::entry::{EntryData, SectionEntry};
@@ -23,6 +27,8 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
 
     let mut i = 0;
     let mut any_optimizations = false;
+    let mut optimized_entries: Vec<SectionEntry> = Vec::with_capacity(entries.len());
+
     while i < entries.len() {
         if let Some((op_code, offset, expression, bytes)) = get_instruction(&entries, i) {
             let b = get_instruction(&entries, i + 1);
@@ -35,63 +41,51 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                 b,
                 c
             ) {
-                let difference = remove_count as isize - (new_entries.len() as isize - 1);
+                // Use the initial entry as the basis for the new ones
+                let base_entry = entries[i].clone();
 
-                // Nothing to remove or add just replace the existing entry
-                if difference == 0 {
-                    for (index, e) in new_entries.into_iter().enumerate() {
-                        if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
-                            let entry = &mut entries[i + index];
-                            entry.size = instruction::size(op_code);
-                            entry.data = EntryData::Instruction {
+                // Insert new instructions
+                for e in new_entries {
+                    if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
+                        optimized_entries.push(SectionEntry::new_with_size(
+                            base_entry.section_id,
+                            base_entry.inner.clone(),
+                            instruction::size(op_code),
+                            EntryData::Instruction {
                                 op_code,
                                 expression,
                                 bytes,
                                 debug_only: false
-                            };
-                            entry.compress = false;
+                            },
+                            false
+                        ))
 
-                        } else {
-                            unreachable!();
-                        }
-                    }
-
-                } else {
-                    // Remove old entries
-                    for _ in 0..remove_count {
-                        entries.remove(i + 1);
-                    }
-
-                    // Use the initial entry as the basis for the new ones
-                    let old_entry = entries.remove(i);
-
-                    // Insert new instructions
-                    for e in new_entries.into_iter().rev() {
-                        if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
-                            entries.insert(i, SectionEntry::new_with_size(
-                                old_entry.section_id,
-                                old_entry.inner.clone(),
-                                instruction::size(op_code),
-                                EntryData::Instruction {
-                                    op_code,
-                                    expression,
-                                    bytes,
-                                    debug_only: false
-                                },
-                                false
-                            ))
-
-                        } else {
-                            unreachable!();
-                        }
+                    } else {
+                        unreachable!();
                     }
                 }
+
+                i += remove_count;
                 any_optimizations = true;
+
+            } else {
+                optimized_entries.push(entries[i].clone());
             }
+
+        } else {
+            optimized_entries.push(entries[i].clone());
         }
         i += 1;
     }
-    any_optimizations
+
+    if any_optimizations {
+        mem::replace(entries, optimized_entries);
+        true
+
+    } else {
+        false
+    }
+
 }
 
 fn optimize_instructions(

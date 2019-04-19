@@ -5,7 +5,7 @@ use crate::expression::data::{DataAlignment, DataEndianess};
 
 
 // Types ----------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum EntryData {
     Marker {
         name: String
@@ -41,7 +41,7 @@ impl EntryData {
 
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SectionEntry {
     pub inner: InnerToken,
     pub section_id: usize,
