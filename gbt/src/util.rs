@@ -1,7 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fs::File;
 use std::path::PathBuf;
-use std::io::{stdout, BufReader, Error as IOError, ErrorKind, Write};
+use std::io::{stdout, BufReader, Error as IOError, ErrorKind, Read, Write};
 
 
 // External Dependencies ------------------------------------------------------
@@ -119,6 +119,26 @@ pub fn output_binary(output_file: Option<PathBuf>, bytes: Vec<u8>) -> Result<(),
 
     } else {
         stdout().write_all(&bytes).map_err(|_| {
+            "Failed to write GameBoy data to stdout".to_string()
+        })
+    }
+}
+
+pub fn load_text(path: &PathBuf) -> Result<String, IOError> {
+    let mut file = File::open(path)?;
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+pub fn output_text(output_file: Option<PathBuf>, text: String) -> Result<(), String> {
+    if let Some(outfile) = output_file {
+        save_binary(&outfile, text.into_bytes()).map_err(|e| {
+            format!("Failed to save GameBoy data: {}", e)
+        })
+
+    } else {
+        stdout().write_all(&text.into_bytes()).map_err(|_| {
             "Failed to write GameBoy data to stdout".to_string()
         })
     }

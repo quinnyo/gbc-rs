@@ -9,4 +9,6 @@ gbc-lib = { version = "0.1.0", path = "../gbc-lib"  }
 clap = "2.33.0"
 image = "0.21"
 colored = "1.7"
-
+base64 = "0.10.0"
+serde-xml-rs = "0.3.0"
+serde = { version = "1.0.0", features=["derive"] }

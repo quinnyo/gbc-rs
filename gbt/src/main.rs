@@ -10,6 +10,8 @@ use clap::{Arg, App, SubCommand};
 
 // Internal Dependencies ------------------------------------------------------
 mod animation;
+mod lmms;
+mod mmp;
 mod tiles;
 mod util;
 
@@ -86,6 +88,23 @@ fn main() {
                 .help("palette used for mapping colors to GameBoy palette indicies")
             )
         )
+        .subcommand(SubCommand::with_name("mmp")
+            .about("converts LMMS projects into a custom GameBoy music format")
+            .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
+            .version("0.1")
+            .arg(Arg::with_name("MMP_FILE")
+                .help("Input lmms project file")
+                .required(true)
+                .multiple(true)
+                .index(1)
+            )
+            .arg(Arg::with_name("OUTPUT_FILE")
+                .long("out-file")
+                .short("o")
+                .takes_value(true)
+                .help("GameBoy music data to generate")
+            )
+        )
         .get_matches();
 
     if let Some(matches) = matches.subcommand_matches("tiles") {
@@ -104,6 +123,16 @@ fn main() {
         if let Err(err) = animation::convert(
             PathBuf::from(matches.value_of("IMAGE_FILE").unwrap()),
             matches.values_of("COLOR_PALETTE").unwrap().collect(),
+            matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
+
+        ) {
+            eprintln!("       {} {}", "Error".bright_red(), err);
+            process::exit(1)
+        }
+
+    } else if let Some(matches) = matches.subcommand_matches("mmp") {
+        if let Err(err) = mmp::convert(
+            matches.values_of("MMP_FILE").unwrap().into_iter().map(PathBuf::from).collect(),
             matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
 
         ) {
