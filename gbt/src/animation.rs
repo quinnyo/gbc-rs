@@ -15,7 +15,7 @@ use super::util;
 #[derive(Debug)]
 struct AnimationFrame {
     tiles: Vec<[u8; 16]>,
-    delay: u8
+    delay: u16
 }
 
 
@@ -47,7 +47,7 @@ pub fn convert(
             tiles: util::indicies_to_tiles(util::image_to_indicies(frame, &color_palette).map_err(|e| {
                 format!("Frame #{}: {}", index, e)
             })?),
-            delay: delay as u8
+            delay: delay / 10
         });
     }
 
@@ -80,7 +80,7 @@ pub fn convert(
 
         let (mut frame_data, _) = compress(&frame_updates, true);
         animation_data.push(frame_update_count);
-        animation_data.push(frame.delay / 2);
+        animation_data.push((frame.delay / 2) as u8);
         animation_data.append(&mut frame_data);
         previous_frame = frame;
     }
