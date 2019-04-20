@@ -35,7 +35,18 @@ pub struct Head {
 #[derive(Deserialize, Debug)]
 pub struct Song {
     #[serde(rename="trackcontainer")]
-    pub track_container: TrackContainer
+    pub track_container: TrackContainer,
+    pub timeline: Timeline
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Timeline {
+    #[serde(rename="lpstate", deserialize_with="deserialize_number_as_bool")]
+    pub is_looping: bool,
+    #[serde(rename="lp0pos")]
+    pub loop_start: usize,
+    #[serde(rename="lp1pos")]
+    pub loop_end: usize
 }
 
 #[derive(Deserialize, Debug)]
@@ -70,7 +81,7 @@ pub struct InstrumentTrack {
     #[serde(rename="pitchrange")]
     pub pitch_range: i32,
     #[serde(rename="basenote")]
-    pub base_note: u32,
+    pub base_note: usize,
     #[serde(rename="usemasterpitch", deserialize_with="deserialize_number_as_bool")]
     pub use_master_pitch: bool,
     pub instrument: Instrument
@@ -84,55 +95,47 @@ pub struct Instrument {
 
 #[derive(Deserialize, Debug)]
 pub struct Papu {
-    so1vol: u8,
-    so2vol: u8,
+    pub so1vol: u8,
+    pub so2vol: u8,
     #[serde(rename="Bass")]
-    bass: u32,
+    pub bass: u32,
     #[serde(rename="Treble")]
-    treble: i32,
+    pub treble: i32,
 
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch1so1: bool,
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch1so2: bool,
-    ch1vol: u8,
-    ch1ssl: u8,
-    ch1wpd: u8,
-    ch1vsd: u8,
-    srs: u8,
-    sd: u8,
-    st: u8,
+    pub ch1so1: u8,
+    pub ch1so2: u8,
+    pub ch1vol: u8,
+    pub ch1ssl: u8,
+    pub ch1wpd: u8,
+    pub ch1vsd: u8,
+    pub srs: u8,
+    pub sd: u8,
+    pub st: u8,
 
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch2so1: bool,
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch2so2: bool,
-    ch2vol: u8,
-    ch2ssl: u8,
-    ch2wpd: u8,
-    ch2vsd: u8,
+    pub ch2so1: u8,
+    pub ch2so2: u8,
+    pub ch2vol: u8,
+    pub ch2ssl: u8,
+    pub ch2wpd: u8,
+    pub ch2vsd: u8,
 
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch3so1: bool,
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch3so2: bool,
-    ch3vol: u8,
-    srw: u8,
+    pub ch3so1: u8,
+    pub ch3so2: u8,
+    pub ch3vol: u8,
+    pub srw: u8,
 
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch4so1: bool,
-    #[serde(deserialize_with="deserialize_number_as_bool")]
-    ch4so2: bool,
-    ch4vol: u8,
-    ch4ssl: u8,
-    ch4vsd: u8,
+    pub ch4so1: u8,
+    pub ch4so2: u8,
+    pub ch4vol: u8,
+    pub ch4ssl: u8,
+    pub ch4vsd: u8,
     #[serde(rename="sampleShape", deserialize_with="deserialize_sample_shape")]
-    samples: Vec<u8>
-    // <papu sampleShape="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="/>
+    pub samples: Vec<u8>
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Pattern {
+    pub pos: usize,
     #[serde(rename="note")]
     pub notes: Vec<Note>
 }
@@ -142,9 +145,9 @@ pub struct Note {
     #[serde(rename="vol")]
     pub volume: f32,
     pub pan: f32,
-    pub key: u32,
-    pub pos: u32,
-    pub len: u32,
+    pub key: usize,
+    pub pos: usize,
+    pub len: usize,
 }
 
 
@@ -162,7 +165,6 @@ fn deserialize_number_as_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
     }
     deserializer.deserialize_i32(BoolVisitor)
 }
-
 
 fn deserialize_sample_shape<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error> where D: de::Deserializer<'de> {
     struct SampleShapeVisitor;
@@ -190,5 +192,4 @@ fn deserialize_sample_shape<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error
     }
     deserializer.deserialize_seq(SampleShapeVisitor)
 }
-
 

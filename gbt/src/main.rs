@@ -10,7 +10,6 @@ use clap::{Arg, App, SubCommand};
 
 // Internal Dependencies ------------------------------------------------------
 mod animation;
-mod lmms;
 mod mmp;
 mod tiles;
 mod util;
