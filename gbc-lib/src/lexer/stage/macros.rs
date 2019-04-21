@@ -127,7 +127,6 @@ lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     ForStatement((ForStatement<MacroToken>)),
     BlockStatement((BlockStatement<MacroToken>)),
-    CompressedBlock((Vec<MacroToken>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -398,30 +397,6 @@ impl MacroStage {
                     to,
                     body,
                 }));
-
-            // Parse COMPRESS Blocks
-            } else if token.is(TokenType::Reserved) && token.has_value("ENDCOMPRESS") {
-                return Err(token.error(format!("Unexpected \"{}\" token outside of COMPRESS block.", token.value())));
-
-            } else if token.is(TokenType::Reserved) && token.has_value("COMPRESS") {
-                let inner = token.into_inner();
-
-                // Collect Body Tokens
-                let mut body_tokens = Vec::new();
-                while !tokens.peek_is(TokenType::Reserved, Some("ENDCOMPRESS")) {
-                    let token = tokens.get("Unexpected end of input while parsing COMPRESS block body.")?;
-                    if token.is(TokenType::Reserved) && token.has_value("COMPRESS") {
-                        return Err(token.error("Invalid nested COMPRESS block.".to_string()));
-
-                    } else {
-                        body_tokens.push(token);
-                    }
-                }
-                tokens.expect(TokenType::Reserved, Some("ENDCOMPRESS"), "when parsing macro definition")?;
-                tokens_with_statements.push(MacroToken::CompressedBlock(
-                    inner,
-                    Self::parse_statements(body_tokens)?
-                ));
 
             // Parse BLOCKS
             } else if token.is(TokenType::Reserved) && token.has_value("ENDBLOCK") {
@@ -1649,25 +1624,6 @@ mod test {
         assert_eq!(macro_lexer_error("TO"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"TO\" token outside of FOR statement.\n\nTO\n^--- Here");
         assert_eq!(macro_lexer_error("REPEAT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"REPEAT\" token outside of FOR statement.\n\nREPEAT\n^--- Here");
         assert_eq!(macro_lexer_error("ENDFOR"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDFOR\" token outside of FOR statement.\n\nENDFOR\n^--- Here");
-    }
-
-    // Compressed Blocks ------------------------------------------------------
-    #[test]
-    fn test_compressed_block() {
-        let lexer = macro_lexer("COMPRESS DB 1 ENDCOMPRESS");
-        assert_eq!(lexer.tokens, vec![
-            MacroToken::CompressedBlock(itk!(0, 8, "COMPRESS"), vec![
-                MacroToken::Reserved(itk!(9, 11, "DB")),
-                MacroToken::NumberLiteral(itk!(12, 13, "1"))
-            ])
-        ]);
-    }
-
-    #[test]
-    fn test_error_compressed_block() {
-        assert_eq!(macro_lexer_error("COMPRESS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing COMPRESS block body.\n\nCOMPRESS\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDCOMPRESS\" token outside of COMPRESS block.\n\nENDCOMPRESS\n^--- Here");
-        assert_eq!(macro_lexer_error("COMPRESS COMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Invalid nested COMPRESS block.\n\nCOMPRESS COMPRESS\n         ^--- Here");
     }
 
     // Blocks -----------------------------------------------------------------

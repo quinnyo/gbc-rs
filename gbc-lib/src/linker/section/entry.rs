@@ -34,18 +34,6 @@ pub enum EntryData {
     }
 }
 
-impl EntryData {
-    pub fn into_bytes(self) -> Vec<u8> {
-        match self {
-            EntryData::Marker { .. }| EntryData::Label { .. } => Vec::new(),
-            EntryData::Data { bytes, .. } => bytes.unwrap_or_else(Vec::new),
-            EntryData::Instruction { bytes, .. } => bytes,
-            EntryData::Block { .. } => Vec::new()
-        }
-    }
-
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SectionEntry {
     pub inner: InnerToken,
@@ -53,7 +41,6 @@ pub struct SectionEntry {
     pub offset: usize,
     pub size: usize,
     pub data: EntryData,
-    pub compress: bool
 }
 
 impl SectionEntry {
@@ -64,19 +51,17 @@ impl SectionEntry {
             section_id,
             offset: 0,
             size: 0,
-            data,
-            compress: false
+            data
         }
     }
 
-    pub fn new_with_size(section_id: usize, inner: InnerToken, size: usize, data: EntryData, compress: bool) -> Self {
+    pub fn new_with_size(section_id: usize, inner: InnerToken, size: usize, data: EntryData) -> Self {
         SectionEntry {
             inner,
             section_id,
             offset: 0,
             size,
-            data,
-            compress
+            data
         }
     }
 

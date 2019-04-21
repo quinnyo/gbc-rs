@@ -32,7 +32,6 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch<ValueToken>>)),
     ForStatement((ForStatement<ValueToken>)),
     BlockStatement((BlockStatement<ValueToken>)),
-    CompressedBlock((Vec<ValueToken>)),
     GlobalLabelDef((usize)),
     GlobalLabelRef((usize)),
     LocalLabelDef((usize)),
@@ -144,12 +143,6 @@ impl ValueStage {
                     ValueToken::BlockStatement(inner, match block {
                         BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?)
                     })
-                },
-                MacroToken::CompressedBlock(inner, tokens) => {
-                    ValueToken::CompressedBlock(
-                        inner,
-                        Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, tokens)?
-                    )
                 },
 
                 // Registers
@@ -1283,21 +1276,6 @@ mod test {
                 }],
                 body: vec![ValueToken::Name(itk!(24, 27, "bar"))]
             })
-        ]);
-    }
-
-    // Compressed Blocks ------------------------------------------------------
-    #[test]
-    fn test_compressed_block_forwarding() {
-        let lexer = value_lexer("COMPRESS DB 1 ENDCOMPRESS");
-        assert_eq!(lexer.tokens, vec![
-            ValueToken::CompressedBlock(itk!(0, 8, "COMPRESS"), vec![
-                ValueToken::Reserved(itk!(9, 11, "DB")),
-                ValueToken::Integer {
-                    inner: itk!(12, 13, "1"),
-                    value: 1
-                }
-            ])
         ]);
     }
 

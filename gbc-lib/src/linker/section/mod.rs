@@ -15,7 +15,6 @@ pub mod entry;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lz4;
 use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken};
 use crate::expression::{ExpressionResult, DataExpression};
@@ -101,7 +100,6 @@ pub struct Section {
     name: String,
     pub segment: String,
     inner: InnerToken,
-    any_compressed: bool,
 
     pub start_address: usize,
     pub end_address: usize,
@@ -207,7 +205,6 @@ impl Section {
             name: name.clone().unwrap_or_else(|| "".to_string()),
             segment,
             inner: inner.clone(),
-            any_compressed: false,
 
             start_address,
             end_address: end_address - 1,
@@ -239,8 +236,7 @@ impl Section {
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    bytes,
-                    false
+                    bytes
                 ))
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
@@ -250,8 +246,7 @@ impl Section {
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    bytes,
-                    false
+                    bytes
                 ))
             },
             EntryToken::DebugInstruction(inner, op_code) => {
@@ -261,8 +256,7 @@ impl Section {
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    bytes,
-                    false
+                    bytes
                 ))
             },
             EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
@@ -272,8 +266,7 @@ impl Section {
                     self.id,
                     inner,
                     instruction::size(op_code),
-                    bytes,
-                    false
+                    bytes
                 ))
             },
             EntryToken::GlobalLabelDef(inner, id) => {
@@ -292,9 +285,7 @@ impl Section {
                     id
                 }));
             },
-            EntryToken::Data { inner, endianess, storage, alignment, is_constant, compress, debug_only } => {
-
-                self.any_compressed |= compress;
+            EntryToken::Data { inner, endianess, storage, alignment, is_constant, debug_only } => {
 
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = self.evaluate_data_storage(
@@ -304,11 +295,6 @@ impl Section {
                     storage,
                     is_constant
                 )?;
-
-                // Enforce compressed blocks to only contain constant bytes
-                if compress && bytes.is_none() {
-                    return Err(inner.error("Data Declarations inside of COMPRESS blocks may not resolve to label addresses.".to_string()))
-                }
 
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
@@ -320,8 +306,7 @@ impl Section {
                         expressions,
                         bytes,
                         debug_only
-                    },
-                    compress
+                    }
                 ));
 
             },
@@ -357,8 +342,7 @@ impl Section {
                     EntryData::Block {
                         command,
                         bytes
-                    },
-                    false
+                    }
                 ));
             },
             _ => unreachable!()
@@ -377,37 +361,6 @@ impl Section {
         file_reader: &R
 
     ) -> Result<(), SourceError> {
-        if self.any_compressed {
-            let entries: Vec<SectionEntry> = self.entries.drain(0..).collect();
-            let mut entries = entries.into_iter().peekable();
-            while let Some(entry) = entries.next() {
-                if entry.compress {
-                    // Collect continuous compressed entries
-                    let mut bytes = entry.data.into_bytes();
-                    while entries.peek().map(|e| e.compress).unwrap_or(false) {
-                        let entry = entries.next().unwrap();
-                        bytes.append(&mut entry.data.into_bytes());
-                    }
-                    let (bytes, _) = lz4::compress(&bytes, true);
-                    self.entries.push(SectionEntry::new_with_size(
-                        self.id,
-                        entry.inner,
-                        bytes.len(),
-                        EntryData::Data {
-                            alignment: DataAlignment::Byte,
-                            endianess: DataEndianess::Little,
-                            expressions: None,
-                            bytes: Some(bytes),
-                            debug_only: false
-                        },
-                        false
-                    ));
-
-                } else {
-                    self.entries.push(entry);
-                }
-            }
-        }
 
         // Process using blocks with their specified commands
         for entry in &mut self.entries {
@@ -1876,56 +1829,6 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njr @-1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0002 is neither the start nor end of any section entry.\n\njr @-1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
-    }
-
-    // Compressed Blocks ------------------------------------------------------
-    #[test]
-    fn test_compressed_block() {
-        let l = linker("SECTION ROM0\nDB 0\nCOMPRESS DB 1 DW 2000 DS 11 'OOOOOOOOOO' ENDCOMPRESS\nDB 4\nCOMPRESS DB 5 ENDCOMPRESS\nDB 6");
-        assert_eq!(linker_section_entries(l), vec![
-            vec![
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![0]),
-                    debug_only: false
-                }),
-                (9, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![2, 1, 208, 7, 136, 79, 0, 0, 48]),
-                    debug_only: false
-                }),
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![4]),
-                    debug_only: false
-                }),
-                (3, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![0, 5, 48]),
-                    debug_only: false
-                }),
-                (1, EntryData::Data {
-                    alignment: DataAlignment::Byte,
-                    endianess: DataEndianess::Little,
-                    expressions: None,
-                    bytes: Some(vec![6]),
-                    debug_only: false
-                })
-            ]
-        ]);
-    }
-
-    #[test]
-    fn test_error_compressed_block() {
-        assert_eq!(linker_error("SECTION ROM0\nglobal:\nCOMPRESS DW global ENDCOMPRESS"), "In file \"main.gb.s\" on line 3, column 10: Data Declarations inside of COMPRESS blocks may not resolve to label addresses.\n\nCOMPRESS DW global ENDCOMPRESS\n         ^--- Here");
     }
 
     // Using Blocks -----------------------------------------------------------
