@@ -161,7 +161,7 @@ impl ProjectReader {
 
 impl FileReader for ProjectReader {
 
-    fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String> {
         let mut child = Command::new(name)
             .args(args)
             .stdin(Stdio::piped())
@@ -172,13 +172,13 @@ impl FileReader for ProjectReader {
             })?;
 
         if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(&input).map_err(|e| {
-                format!("Failed to execute process: {}", e)
-            })?;
+            // We ignore any potential error here in case the child
+            // is not waiting for STDIN
+            stdin.write_all(input).ok();
         }
 
         let output = child.wait_with_output().map_err(|e| {
-            format!("Failed to execute process: {}", e)
+            format!("Failed to execute process (STDOUT): {}", e)
         })?;
 
         if output.status.success() {

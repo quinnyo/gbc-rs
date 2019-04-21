@@ -47,14 +47,14 @@ impl MockFileReader {
 
 impl FileReader for MockFileReader {
 
-    fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String> {
         let (expected, output, stderr) = self.commands.get(&(name.clone(), args)).map(|b| b.clone()).ok_or_else(|| {
             format!("{}: mock command not found", name)
         })?;
         if let Some(stderr) = stderr {
             Err(stderr)
 
-        } else if input != expected {
+        } else if input != &expected[..] {
             Err(format!("Mock command input does not match expected values: {:?} vs {:?}", input, expected))
 
         } else {

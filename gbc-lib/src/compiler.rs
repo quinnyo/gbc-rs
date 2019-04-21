@@ -88,9 +88,9 @@ impl Compiler {
 
 impl Compiler {
 
-    fn parse<T: FileReader>(&mut self, reader: &T, entry: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilerError)> {
+    fn parse<T: FileReader>(&mut self, io: &T, entry: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilerError)> {
         let start = Instant::now();
-        let include_lexer = Lexer::<IncludeStage>::from_file(reader, &entry).map_err(|e| self.error("file inclusion", e))?;
+        let include_lexer = Lexer::<IncludeStage>::from_file(io, &entry).map_err(|e| self.error("file inclusion", e))?;
         let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| self.error("macro expansion", e))?;
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| self.error("value construction", e))?;
         let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| self.error("expression construction", e))?;
@@ -99,9 +99,10 @@ impl Compiler {
         Ok(entry_lexer)
     }
 
-    fn link<T: FileWriter>(&mut self, writer: &mut T, entry_lexer: Lexer<EntryStage>) -> Result<Linker, (String, CompilerError)> {
+    fn link<T: FileReader + FileWriter>(&mut self, io: &mut T, entry_lexer: Lexer<EntryStage>) -> Result<Linker, (String, CompilerError)> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
+            io,
             entry_lexer,
             self.strip_debug_code,
             self.optimize_instructions
@@ -120,7 +121,7 @@ impl Compiler {
                 format!("{:0>2}:{:0>4x} {}", bank, address, name)
 
             }).collect::<Vec<String>>().join("\n");
-            writer.write_file(&output_file, symbols).map_err(|err| {
+            io.write_file(&output_file, symbols).map_err(|err| {
                 (self.output.join("\n"), CompilerError::from_string(
                     format!("Failed to write symbol map to file \"{}\"", err.path.display())
                 ))
@@ -130,7 +131,7 @@ impl Compiler {
         Ok(linker)
     }
 
-    fn generate<T: FileWriter>(&mut self, writer: &mut T, linker: Linker) -> Result<(), (String, CompilerError)> {
+    fn generate<T: FileWriter>(&mut self, io: &mut T, linker: Linker) -> Result<(), (String, CompilerError)> {
         let start = Instant::now();
         let mut generator = Generator::from_linker(linker);
 
@@ -150,7 +151,7 @@ impl Compiler {
 
         let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
-            writer.write_binary_file(&output_file, generator.buffer).map_err(|err| {
+            io.write_binary_file(&output_file, generator.buffer).map_err(|err| {
                 (self.output.join("\n"), CompilerError::from_string(
                     format!("Failed to write ROM to file \"{}\"", err.path.display())
                 ))

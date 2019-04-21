@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use std::io::Error as IOError;
 
 
+// External Dependencies ------------------------------------------------------
+use colored::Colorize;
+
+
 // Generic Traits -------------------------------------------------------------
 #[derive(Debug)]
 pub struct FileError {
@@ -12,19 +16,43 @@ pub struct FileError {
 
 #[derive(Debug)]
 pub struct CommandError {
-    pub path: PathBuf,
+    pub command: String,
+    pub path: Option<PathBuf>,
     pub stdout: String
+}
+
+impl CommandError {
+    pub fn to_string(&self) -> String {
+        if let Some(path) = self.path.as_ref() {
+            format!(
+                "Failed to execute command \"{}\" on included file \"{}\":\n\n{}\n{}{}",
+                self.command,
+                path.display(),
+                "---".red(),
+                self.stdout,
+                "---".red()
+            )
+        } else {
+            format!(
+                "Failed to execute command \"{}\":\n\n{}\n{}{}",
+                self.command,
+                "---".red(),
+                self.stdout,
+                "---".red()
+            )
+        }
+    }
 }
 
 pub trait FileReader {
 
-    fn run_command(&self, name: String, args: Vec<String>, input: Vec<u8>) -> Result<Vec<u8>, String>;
+    fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String>;
 
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError>;
 
     fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError>;
 
-    fn execute_raw_command(&self, path: PathBuf, command: &str, input: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn execute_raw_command(&self, path: Option<PathBuf>, command: &str, input: &[u8]) -> Result<Vec<u8>, String> {
         let mut args = command.split(' ');
         let name = args.next().expect("Failed to get command name");
         if name.is_empty() {
@@ -32,28 +60,33 @@ pub trait FileReader {
 
         } else {
             let mut args: Vec<String> = args.into_iter().map(|arg| arg.to_string()).collect();
-            args.push(path.display().to_string());
+            if let Some(path) = path {
+                args.push(path.display().to_string());
+            }
             self.run_command(name.to_string(), args, input)
         }
     }
 
-    fn execute_command(&self, path: PathBuf, command: &str, input: String) -> Result<String, CommandError> {
-        String::from_utf8(self.execute_raw_command(path.clone(), command, input.into_bytes()).map_err(|stdout| {
+    fn execute_command(&self, path: Option<PathBuf>, command: &str, input: String) -> Result<String, CommandError> {
+        String::from_utf8(self.execute_raw_command(path.clone(), command, &input.into_bytes()).map_err(|stdout| {
             CommandError {
+                command: command.to_string(),
                 path: path.clone(),
                 stdout
             }
         })?).map_err(|e| {
             CommandError {
+                command: command.to_string(),
                 path,
                 stdout: format!("Command did not return a valid string: {}", e.to_string())
             }
         })
     }
 
-    fn execute_binary_command(&self, path: PathBuf, command: &str, input: Vec<u8>) -> Result<Vec<u8>, CommandError> {
+    fn execute_binary_command(&self, path: Option<PathBuf>, command: &str, input: &[u8]) -> Result<Vec<u8>, CommandError> {
         self.execute_raw_command(path.clone(), command, input).map_err(|stdout| {
             CommandError {
+                command: command.to_string(),
                 path,
                 stdout
             }

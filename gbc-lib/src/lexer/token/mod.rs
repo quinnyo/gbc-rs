@@ -73,6 +73,7 @@ pub enum TokenType {
     BuiltinCall,
     IfStatement,
     ForStatement,
+    BlockStatement,
     CompressedBlock,
 
     // Value Tokens
@@ -97,7 +98,8 @@ pub enum TokenType {
     InstructionWithArg,
     DebugInstruction,
     DebugInstructionWithArg,
-    SectionDeclaration
+    SectionDeclaration,
+    UsingStatement
 
 }
 

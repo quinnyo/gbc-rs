@@ -27,15 +27,20 @@ pub enum EntryData {
         expression: OptionalDataExpression,
         bytes: Vec<u8>,
         debug_only: bool
+    },
+    Block {
+        command: String,
+        bytes: Vec<u8>
     }
 }
 
 impl EntryData {
     pub fn into_bytes(self) -> Vec<u8> {
         match self {
-            EntryData::Marker { .. }| EntryData::Label { .. }=> Vec::new(),
+            EntryData::Marker { .. }| EntryData::Label { .. } => Vec::new(),
             EntryData::Data { bytes, .. } => bytes.unwrap_or_else(Vec::new),
-            EntryData::Instruction { bytes, .. } => bytes
+            EntryData::Instruction { bytes, .. } => bytes,
+            EntryData::Block { .. } => Vec::new()
         }
     }
 

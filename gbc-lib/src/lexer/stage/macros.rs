@@ -104,6 +104,11 @@ pub struct ForStatement<T: LexerToken> {
     pub body: Vec<T>
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum BlockStatement<T: LexerToken> {
+    Using(String, Vec<T>)
+}
+
 
 // Macro Specific Tokens ------------------------------------------------------
 lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
@@ -121,6 +126,7 @@ lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
     BuiltinCall((Vec<Vec<MacroToken>>)),
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     ForStatement((ForStatement<MacroToken>)),
+    BlockStatement((BlockStatement<MacroToken>)),
     CompressedBlock((Vec<MacroToken>)),
     Comma(()),
     Point(()),
@@ -416,6 +422,24 @@ impl MacroStage {
                     inner,
                     Self::parse_statements(body_tokens)?
                 ));
+
+            // Parse BLOCKS
+            } else if token.is(TokenType::Reserved) && token.has_value("ENDBLOCK") {
+                return Err(token.error(format!("Unexpected \"{}\" token outside of BLOCK statement.", token.value())));
+
+            } else if token.is(TokenType::Reserved) && token.has_value("BLOCK") {
+                if tokens.peek_is(TokenType::Reserved, Some("USING")) {
+                    tokens.expect(TokenType::Reserved, Some("USING"), "when parsing USING BLOCK")?;
+                    let command = tokens.expect(TokenType::StringLiteral, None, "when parsing USING BLOCK")?;
+                    let body = Self::parse_block_body(&mut tokens)?;
+                    tokens_with_statements.push(MacroToken::BlockStatement(
+                        token.into_inner(),
+                        BlockStatement::Using(command.into_inner().value, body)
+                    ));
+
+                } else {
+                    return Err(token.error("Expected a USING keyword to BLOCK directive.".to_string()));
+                }
 
             } else {
                 tokens_with_statements.push(MacroToken::from(token));
@@ -827,6 +851,33 @@ impl MacroStage {
         Self::parse_statements(body_tokens)
     }
 
+    fn parse_block_body(
+        tokens: &mut TokenIterator<IncludeToken>
+
+    ) -> Result<Vec<MacroToken>, SourceError> {
+        let mut body_tokens = Vec::new();
+        let mut block_depth = 0;
+        while block_depth > 0 || !tokens.peek_is(TokenType::Reserved, Some("ENDBLOCK")) {
+
+            let token = tokens.get("Unexpected end of input while parsing BLOCK statement body.")?;
+
+            // Check for nested statements
+            if token.is(TokenType::Reserved) && token.has_value("BLOCK") {
+                block_depth += 1;
+
+            } else if token.is(TokenType::Reserved) && token.has_value("ENDBLOCK") {
+                block_depth -= 1;
+            }
+
+            body_tokens.push(token);
+
+        }
+        tokens.expect(TokenType::Reserved, Some("ENDBLOCK"), "when parsing BLOCK statement body")?;
+
+        // Parse nested statements
+        Self::parse_statements(body_tokens)
+    }
+
 }
 
 
@@ -844,7 +895,8 @@ mod test {
         InnerToken,
         IncludeToken,
         IfStatementBranch,
-        ForStatement
+        ForStatement,
+        BlockStatement
     };
 
     fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
@@ -1616,6 +1668,27 @@ mod test {
         assert_eq!(macro_lexer_error("COMPRESS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing COMPRESS block body.\n\nCOMPRESS\n^--- Here");
         assert_eq!(macro_lexer_error("ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDCOMPRESS\" token outside of COMPRESS block.\n\nENDCOMPRESS\n^--- Here");
         assert_eq!(macro_lexer_error("COMPRESS COMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Invalid nested COMPRESS block.\n\nCOMPRESS COMPRESS\n         ^--- Here");
+    }
+
+    // Blocks -----------------------------------------------------------------
+    #[test]
+    fn test_block_using() {
+        let lexer = macro_lexer("BLOCK USING 'cmd' DB 1 ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Using(
+                "cmd".to_string(),
+                vec![
+                    MacroToken::Reserved(itk!(18, 20, "DB")),
+                    MacroToken::NumberLiteral(itk!(21, 22, "1"))
+                ])
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_error_block() {
+        assert_eq!(macro_lexer_error("BLOCK"), "In file \"main.gb.s\" on line 1, column 1: Expected a USING keyword to BLOCK directive.\n\nBLOCK\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDBLOCK\" token outside of BLOCK statement.\n\nENDBLOCK\n^--- Here");
     }
 
 }

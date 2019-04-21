@@ -2,10 +2,6 @@
 use std::path::PathBuf;
 
 
-// External Dependencies ------------------------------------------------------
-use colored::Colorize;
-
-
 // Internal Dependencies ------------------------------------------------------
 use crate::traits::FileReader;
 use crate::error::SourceError;
@@ -101,12 +97,8 @@ impl IncludeStage {
 
         // Apply optional command to contents
         if let Some(using) = using {
-            contents = state.file_reader.execute_command(child_path.clone(), using.as_str(), contents).map_err(|err| {
-                SourceError::new(
-                    file_index,
-                    index,
-                    format!("Failed to execute command \"{}\" on included file \"{}\":\n\n{}\n{}{}", using, err.path.display(), "---".red(), err.stdout, "---".red())
-                )
+            contents = state.file_reader.execute_command(Some(child_path.clone()), using.as_str(), contents).map_err(|err| {
+                SourceError::new(file_index, index, err.to_string())
             })?;
         }
 
@@ -228,12 +220,8 @@ impl IncludeStage {
 
         // Apply optional command to bytes
         if let Some(using) = using {
-            bytes = state.file_reader.execute_binary_command(binary_path, using.as_str(), bytes).map_err(|err| {
-                SourceError::new(
-                    token.file_index,
-                    token.start_index,
-                    format!("Failed to execute command \"{}\" on included file \"{}\":\n\n{}\n{}{}", using, err.path.display(), "---".red(), err.stdout, "---".red())
-                )
+            bytes = state.file_reader.execute_binary_command(Some(binary_path), using.as_str(), &bytes).map_err(|err| {
+                SourceError::new( token.file_index, token.start_index, err.to_string())
             })?;
         }
         Ok(IncludeToken::BinaryFile(token, bytes))
@@ -260,9 +248,9 @@ impl IncludeStage {
                         "DS8" | "EQU" | "FOR" |
                         "DS16" | "EQUS" | "BANK" |
                         "THEN" | "ELSE" | "ENDIF" |
-                        "MACRO" | "USING" |
+                        "MACRO" | "USING" | "BLOCK" |
                         "ENDFOR" | "REPEAT" | "BINARY" | "SECTION" | "INCLUDE" | "SEGMENT" |
-                        "ENDMACRO" | "COMPRESS" |
+                        "ENDMACRO" | "COMPRESS" | "ENDBLOCK" |
                         "ENDCOMPRESS" => {
                             Some(IncludeToken::Reserved(name))
                         },
@@ -787,7 +775,15 @@ mod test {
 
     #[test]
     fn test_reserved() {
-        token_types!(Reserved, "DB", "DW", "BW", "IF", "TO", "IN", "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE", "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "SECTION", "ENDMACRO", "SEGMENT", "COMPRESS", "ENDCOMPRESS");
+        token_types!(
+            Reserved,
+            "DB", "DW", "BW", "IF", "TO", "IN",
+            "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE",
+            "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING",
+            "SECTION", "ENDMACRO", "SEGMENT", "COMPRESS",
+            "ENDBLOCK",
+            "ENDCOMPRESS"
+        );
     }
 
     #[test]

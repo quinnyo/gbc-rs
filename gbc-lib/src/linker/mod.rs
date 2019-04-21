@@ -14,6 +14,7 @@ use crate::error::SourceError;
 use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
+use crate::traits::FileReader;
 use self::section::Section;
 
 
@@ -36,7 +37,8 @@ pub struct Linker {
 
 impl Linker {
 
-    pub fn from_lexer(
+    pub fn from_lexer<R: FileReader>(
+        file_reader: &R,
         lexer: Lexer<EntryStage>,
         strip_debug: bool,
         optimize: bool
@@ -44,12 +46,13 @@ impl Linker {
     ) -> Result<Self, SourceError> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        Ok(Self::new(lexer.tokens, strip_debug, optimize).map_err(|err| {
+        Ok(Self::new(file_reader, lexer.tokens, strip_debug, optimize).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?)
     }
 
-    fn new(
+    fn new<R: FileReader>(
+        file_reader: &R,
         tokens: Vec<EntryToken>,
         strip_debug: bool,
         optimize: bool
@@ -111,7 +114,7 @@ impl Linker {
             }
         }
 
-        Self::initialize_sections(&mut sections);
+        Self::initialize_sections(&mut sections, file_reader)?;
         Self::resolve_sections(&mut sections, &mut context)?;
 
         if strip_debug {
@@ -256,6 +259,28 @@ impl Linker {
                     }
                 }
 
+            // Expand and verify tokens inside using statements
+            } else if let EntryToken::UsingStatement(inner, cmd, tokens) = token {
+
+                let mut data_tokens = Vec::new();
+                Self::parse_entries(context, tokens, true, &mut data_tokens)?;
+
+                for token in &data_tokens {
+                    match token {
+                        EntryToken::Data { is_constant, .. } => {
+                            if !is_constant {
+                                return Err(token.error(
+                                    "Only constant Data Declarations are allowed inside of USING BLOCK".to_string()
+                                ))
+                            }
+                        },
+                        _ => return Err(token.error(
+                            format!("Unexpected {:?}, only Data Declarations are allowed inside of USING BLOCK", token.typ())
+                        ))
+                    }
+                }
+                remaining_tokens.push(EntryToken::UsingStatement(inner, cmd, data_tokens));
+
             } else {
                 remaining_tokens.push(token);
             }
@@ -267,7 +292,7 @@ impl Linker {
 
 impl Linker {
 
-    fn initialize_sections(sections: &mut Vec<Section>) {
+    fn initialize_sections<R: FileReader>(sections: &mut Vec<Section>, file_reader: &R) -> Result<(), SourceError> {
         // Sort sections by base address
         sections.sort_by(|a, b| {
             if a.start_address == b.start_address {
@@ -290,10 +315,11 @@ impl Linker {
             }
         }
 
+        // Initialize using blocks
         for s in sections.iter_mut() {
-            s.combine_blocks();
+            s.initialize_using_blocks(file_reader)?;
         }
-
+        Ok(())
     }
 
     fn resolve_sections(
@@ -371,26 +397,40 @@ mod test {
     use super::{Linker, SegmentUsage};
     use super::section::entry::EntryData;
     use crate::expression::data::{DataAlignment, DataEndianess};
-    use crate::mocks::{entry_lex, entry_lex_binary};
+    use crate::mocks::{entry_lex, entry_lex_binary, MockFileReader};
+    use crate::traits::FileReader;
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
-        Linker::from_lexer(entry_lex(s.into()), false, false).expect("Linker failed")
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex(s.into()), false, false).expect("Linker failed")
+    }
+
+    pub fn linker_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> Linker {
+        Linker::from_lexer(reader, entry_lex(s.into()), false, false).expect("Linker failed")
+    }
+
+    pub fn linker_error_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> String {
+        Linker::from_lexer(reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_error<S: Into<String>>(s: S) -> String {
-        Linker::from_lexer(entry_lex(s.into()), false, false).err().unwrap().to_string()
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
-        Linker::from_lexer(entry_lex(s.into()), true, false).expect("Debug stripping failed")
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex(s.into()), true, false).expect("Debug stripping failed")
     }
 
     pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
-        Linker::from_lexer(entry_lex(s.into()), true, true).expect("Instruction optimization failed")
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex(s.into()), true, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {
-        Linker::from_lexer(entry_lex_binary(s.into(), d), false, false).expect("Binary Linker failed")
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), false, false).expect("Binary Linker failed")
     }
 
     pub fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {
@@ -961,6 +1001,15 @@ mod test {
     fn test_error_for_statement_max_iterations() {
         linker("SECTION ROM0\nFOR x IN 0 TO 2048 REPEAT ENDFOR");
         assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2049 REPEAT ENDFOR"), "In file \"main.gb.s\" on line 2, column 1: FOR statement with 2049 iterations exceeds the maximum of 2048 allowed iterations.\n\nFOR x IN 0 TO 2049 REPEAT ENDFOR\n^--- Here");
+    }
+
+
+    // Blocks -----------------------------------------------------------------
+    #[test]
+    fn test_error_block_using() {
+        assert_eq!(linker_error("BLOCK USING 'cmd' nop ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected Instruction, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' nop ENDBLOCK\n                  ^--- Here");
+        assert_eq!(linker_error("global:\nBLOCK USING 'cmd' DW global ENDBLOCK"), "In file \"main.gb.s\" on line 2, column 19: Only constant Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' DW global ENDBLOCK\n                  ^--- Here");
+        assert_eq!(linker_error("BLOCK USING 'cmd' global: ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected GlobalLabelDef, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' global: ENDBLOCK\n                  ^--- Here");
     }
 
 }

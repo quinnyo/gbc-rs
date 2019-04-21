@@ -12,7 +12,7 @@ use crate::lexer::ValueStage;
 use crate::error::SourceError;
 use crate::expression::{Expression, ExpressionValue};
 use super::value::ValueToken;
-use super::macros::{IfStatementBranch, ForStatement};
+use super::macros::{IfStatementBranch, ForStatement, BlockStatement};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
@@ -31,6 +31,7 @@ lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
     ConstExpression((Expression)),
     IfStatement((Vec<IfStatementBranch<ExpressionToken>>)),
     ForStatement((ForStatement<ExpressionToken>)),
+    BlockStatement((BlockStatement<ExpressionToken>)),
     CompressedBlock((Vec<ExpressionToken>)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize))
@@ -90,6 +91,11 @@ impl ExpressionToken {
                     from: ExpressionStage::parse_expression(for_statement.from, false)?,
                     to: ExpressionStage::parse_expression(for_statement.to, false)?,
                     body: ExpressionStage::parse_expression(for_statement.body, false)?
+                }))
+            },
+            ValueToken::BlockStatement(inner, block) => {
+                Ok(ExpressionToken::BlockStatement(inner, match block {
+                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, false)?)
                 }))
             },
             ValueToken::CompressedBlock(inner, tokens) => {
@@ -450,7 +456,7 @@ mod test {
     use crate::lexer::Lexer;
     use crate::mocks::value_lex;
     use crate::expression::{Expression, ExpressionValue, Operator};
-    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch, ForStatement};
+    use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch, ForStatement, BlockStatement};
 
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
         Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")
@@ -1191,6 +1197,24 @@ mod test {
                     Expression::Value(ExpressionValue::Integer(1))
                 )
             ])
+        ]);
+    }
+
+    // Blocks -----------------------------------------------------------------
+    #[test]
+    fn test_block_using_forwarding() {
+        let lexer = expr_lexer("BLOCK USING 'cmd' DB 1 ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            ExpressionToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Using(
+                "cmd".to_string(),
+                vec![
+                    ExpressionToken::Reserved(itk!(18, 20, "DB")),
+                    ExpressionToken::ConstExpression(
+                        itk!(21, 22, "1"),
+                        Expression::Value(ExpressionValue::Integer(1))
+                    )
+                ])
+            )
         ]);
     }
 

@@ -78,6 +78,20 @@ INCLUDE "src/music.mod" USING "mod2gb --to-asm"
 INCLUDE BINARY "src/tiles.png" USING "image2gb --some-palette -i"
 ```
 
+### Blocks
+
+gbc supports processing blocks of data with external commands:
+
+```asm
+; Pre-process the data declarations inside the block using another program.
+BLOCK USING `compress --level 9`
+    DB 1,1,1,1,1,1
+    DB 2,2,2,2,2,2
+ENDBLOCK
+```
+
+> Note: Only data declarations that reference no addresses are allowed in `USING` blocks.
+
 ### User defined Macros
 
 User Macros work by generating and substituting tokens.

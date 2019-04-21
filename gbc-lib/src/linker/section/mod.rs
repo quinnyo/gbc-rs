@@ -21,6 +21,7 @@ use crate::lexer::{InnerToken, EntryToken};
 use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
+use crate::traits::FileReader;
 use self::entry::{EntryData, SectionEntry};
 use super::util::{self, instruction};
 
@@ -296,98 +297,13 @@ impl Section {
                 self.any_compressed |= compress;
 
                 // Storage only consists of const expressions and can be evaluated here
-                let (size, bytes, expressions) = match storage {
-                    // RAM Only
-                    DataStorage::Byte => {
-                        self.check_ram(&inner, "Byte Variable")?;
-                        (1, None, None)
-                    },
-                    DataStorage::Word => {
-                        self.check_ram(&inner, "Word Variable")?;
-                        (2, None, None)
-                    },
-
-                    // ROM Only
-                    DataStorage::Array(bytes) => {
-                        self.check_rom(&inner, "Data Include")?;
-                        (bytes.len(), Some(bytes), None)
-                    },
-                    DataStorage::Bytes(exprs) => {
-                        self.check_rom(&inner, "Data Declaration")?;
-                        let length = exprs.len();
-                        let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (1, e)).collect();
-                        if is_constant {
-                            (length, Some(
-                                Self::resolve_expression_arguments_to_bytes(
-                                    &inner,
-                                    context,
-                                    &endianess,
-                                    &expressions
-                                )?
-                            ), None)
-
-                        } else {
-                            (length, None, Some(expressions))
-                        }
-                    },
-                    DataStorage::Words(exprs) => {
-                        self.check_rom(&inner, "Data Declaration")?;
-                        let length = exprs.len() * 2;
-                        let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (2, e)).collect();
-                        if is_constant {
-                            (length, Some(
-                                Self::resolve_expression_arguments_to_bytes(
-                                    &inner,
-                                    context,
-                                    &endianess,
-                                    &expressions
-                                )?
-                            ), None)
-
-                        } else {
-                            (length, None, Some(expressions))
-                        }
-                    },
-                    DataStorage::Buffer(length, fill) => {
-                        let length_or_string = context.resolve_expression(length)?;
-                        let fill = context.resolve_optional_expression(fill)?;
-                        match (length_or_string, fill) {
-                            // DS 15 "FOO"
-                            (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
-                                self.check_rom(&inner, "Data Declaration")?;
-                                let size = util::positive_integer(&inner, size, "Invalid storage capacity")?;
-                                let mut bytes = s.into_bytes();
-                                if bytes.len() > size {
-                                    return Err(inner.error("Invalid storage capacity, specified capacity must be >= length of stored string data.".to_string()));
-                                }
-                                let mut padding = iter::repeat(0u8).take(size - bytes.len()).collect();
-                                bytes.append(&mut padding);
-                                (size, Some(bytes), None)
-                            },
-                            // DS "Foo"
-                            (ExpressionResult::String(s), None) => {
-                                self.check_rom(&inner, "Data Declaration")?;
-                                let bytes = s.into_bytes();
-                                (bytes.len(), Some(bytes), None)
-                            },
-                            // DS 15
-                            (ExpressionResult::Integer(size), None) => {
-                                let size = util::positive_integer(&inner, size, "Invalid storage capacity")?;
-                                if self.is_rom {
-                                    let buffer = iter::repeat(0u8).take(size).collect();
-                                    (size, Some(buffer), None)
-
-                                } else {
-                                    (size, None, None)
-                                }
-                            },
-                            _ => {
-                                // TODO reachable?
-                                return Err(inner.error("Invalid Data Declaration format.".to_string()))
-                            }
-                        }
-                    }
-                };
+                let (size, bytes, expressions) = self.evaluate_data_storage(
+                    context,
+                    &inner,
+                    &endianess,
+                    storage,
+                    is_constant
+                )?;
 
                 // Enforce compressed blocks to only contain constant bytes
                 if compress && bytes.is_none() {
@@ -409,6 +325,42 @@ impl Section {
                 ));
 
             },
+            EntryToken::UsingStatement(inner, command, entries) => {
+                let mut bytes = Vec::new();
+                for entry in entries {
+                    let entry_bytes = if let EntryToken::Data { inner, endianess, storage, is_constant, .. } = entry {
+                        if is_constant {
+                            let (_, bytes, _) = self.evaluate_data_storage(
+                                context,
+                                &inner,
+                                &endianess,
+                                storage,
+                                true
+                            )?;
+                            bytes
+
+                        } else {
+                            None
+                        }
+
+                    } else {
+                        None
+                    };
+                    bytes.append(
+                        &mut entry_bytes.expect("Linker failed due to non-constant data storage in USING block")
+                    );
+                }
+                self.entries.push(SectionEntry::new_with_size(
+                    self.id,
+                    inner,
+                    bytes.len(),
+                    EntryData::Block {
+                        command,
+                        bytes
+                    },
+                    false
+                ));
+            },
             _ => unreachable!()
         }
         Ok(())
@@ -420,7 +372,11 @@ impl Section {
         }));
     }
 
-    pub fn combine_blocks(&mut self) {
+    pub fn initialize_using_blocks<R: FileReader>(
+        &mut self,
+        file_reader: &R
+
+    ) -> Result<(), SourceError> {
         if self.any_compressed {
             let entries: Vec<SectionEntry> = self.entries.drain(0..).collect();
             let mut entries = entries.into_iter().peekable();
@@ -452,6 +408,32 @@ impl Section {
                 }
             }
         }
+
+        // Process using blocks with their specified commands
+        for entry in &mut self.entries {
+            let bytes = if let EntryData::Block { command, bytes } = &entry.data {
+                let result_bytes = file_reader.execute_binary_command(None, command.as_str(), bytes).map_err(|err| {
+                    entry.inner.error(err.to_string())
+                })?;
+                Some(result_bytes)
+
+            } else {
+                None
+            };
+            if let Some(bytes) = bytes {
+                entry.size = bytes.len();
+                entry.data = EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(bytes),
+                    debug_only: false
+                };
+            }
+        }
+
+        Ok(())
+
     }
 
     pub fn resolve_addresses(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
@@ -669,6 +651,108 @@ impl Section {
         }
     }
 
+    fn evaluate_data_storage(
+        &self,
+        context: &mut EvaluatorContext,
+        inner: &InnerToken,
+        endianess: &DataEndianess,
+        storage: DataStorage,
+        is_constant: bool
+
+    ) -> Result<(usize, Option<Vec<u8>>, Option<Vec<(usize, DataExpression)>>), SourceError> {
+        Ok(match storage {
+            // RAM Only
+            DataStorage::Byte => {
+                self.check_ram(inner, "Byte Variable")?;
+                (1, None, None)
+            },
+            DataStorage::Word => {
+                self.check_ram(inner, "Word Variable")?;
+                (2, None, None)
+            },
+
+            // ROM Only
+            DataStorage::Array(bytes) => {
+                self.check_rom(inner, "Data Include")?;
+                (bytes.len(), Some(bytes), None)
+            },
+            DataStorage::Bytes(exprs) => {
+                self.check_rom(inner, "Data Declaration")?;
+                let length = exprs.len();
+                let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (1, e)).collect();
+                if is_constant {
+                    (length, Some(
+                        Self::resolve_expression_arguments_to_bytes(
+                            inner,
+                            context,
+                            endianess,
+                            &expressions
+                        )?
+                    ), None)
+
+                } else {
+                    (length, None, Some(expressions))
+                }
+            },
+            DataStorage::Words(exprs) => {
+                self.check_rom(inner, "Data Declaration")?;
+                let length = exprs.len() * 2;
+                let expressions: Vec<(usize, DataExpression)> = exprs.into_iter().map(|e| (2, e)).collect();
+                if is_constant {
+                    (length, Some(
+                        Self::resolve_expression_arguments_to_bytes(
+                            inner,
+                            context,
+                            endianess,
+                            &expressions
+                        )?
+                    ), None)
+
+                } else {
+                    (length, None, Some(expressions))
+                }
+            },
+            DataStorage::Buffer(length, fill) => {
+                let length_or_string = context.resolve_expression(length)?;
+                let fill = context.resolve_optional_expression(fill)?;
+                match (length_or_string, fill) {
+                    // DS 15 "FOO"
+                    (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
+                        self.check_rom(inner, "Data Declaration")?;
+                        let size = util::positive_integer(inner, size, "Invalid storage capacity")?;
+                        let mut bytes = s.into_bytes();
+                        if bytes.len() > size {
+                            return Err(inner.error("Invalid storage capacity, specified capacity must be >= length of stored string data.".to_string()));
+                        }
+                        let mut padding = iter::repeat(0u8).take(size - bytes.len()).collect();
+                        bytes.append(&mut padding);
+                        (size, Some(bytes), None)
+                    },
+                    // DS "Foo"
+                    (ExpressionResult::String(s), None) => {
+                        self.check_rom(inner, "Data Declaration")?;
+                        let bytes = s.into_bytes();
+                        (bytes.len(), Some(bytes), None)
+                    },
+                    // DS 15
+                    (ExpressionResult::Integer(size), None) => {
+                        let size = util::positive_integer(inner, size, "Invalid storage capacity")?;
+                        if self.is_rom {
+                            let buffer = iter::repeat(0u8).take(size).collect();
+                            (size, Some(buffer), None)
+
+                        } else {
+                            (size, None, None)
+                        }
+                    },
+                    _ => {
+                        // TODO reachable?
+                        return Err(inner.error("Invalid Data Declaration format.".to_string()))
+                    }
+                }
+            }
+        })
+    }
     fn resolve_expression_arguments_to_bytes(
         inner: &InnerToken,
         context: &mut EvaluatorContext,
@@ -837,8 +921,11 @@ impl Section {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
+    use std::path::PathBuf;
     use super::super::test::{
         linker,
+        linker_reader,
+        linker_error_reader,
         linker_binary,
         linker_strip_debug,
         linker_error,
@@ -849,6 +936,7 @@ mod test {
     use crate::lexer::InnerToken;
     use crate::expression::{Expression, ExpressionValue};
     use crate::expression::data::{DataAlignment, DataEndianess};
+    use crate::mocks::MockFileReader;
 
     macro_rules! itk {
         ($start:expr, $end:expr, $parsed:expr) => {
@@ -1838,6 +1926,61 @@ mod test {
     #[test]
     fn test_error_compressed_block() {
         assert_eq!(linker_error("SECTION ROM0\nglobal:\nCOMPRESS DW global ENDCOMPRESS"), "In file \"main.gb.s\" on line 3, column 10: Data Declarations inside of COMPRESS blocks may not resolve to label addresses.\n\nCOMPRESS DW global ENDCOMPRESS\n         ^--- Here");
+    }
+
+    // Using Blocks -----------------------------------------------------------
+    #[test]
+    fn test_section_block_using() {
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_command(
+            "cmd",
+            vec!["--arg".into(), "--arg-two".into()],
+            vec![1, 208, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 42],
+            vec![1, 2, 3, 4, 5],
+            None
+        );
+
+        let l = linker_reader(&reader, "SECTION ROM0\nBLOCK USING 'cmd --arg --arg-two' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (5, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1, 2, 3, 4, 5]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_section_block_using_missing_command() {
+        use colored;
+        colored::control::set_override(false);
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        let l = linker_error_reader(&reader, "SECTION ROM0\nBLOCK USING '' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK");
+        assert_eq!(l, "In file \"main.gb.s\" on line 2, column 1: Failed to execute command \"\":\n\n---\nMissing command name---\n\nBLOCK USING \'\' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_section_block_using_failed_command() {
+        use colored;
+        colored::control::set_override(false);
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_command(
+            "cmd",
+            vec![],
+            vec![1, 208, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 42],
+            vec![1, 2, 3, 4, 5],
+            Some("Command failed".to_string())
+        );
+
+        let l = linker_error_reader(&reader, "SECTION ROM0\nBLOCK USING 'cmd' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK");
+        assert_eq!(l, "In file \"main.gb.s\" on line 2, column 1: Failed to execute command \"cmd\":\n\n---\nCommand failed---\n\nBLOCK USING \'cmd\' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK\n^--- Here");
     }
 
 }

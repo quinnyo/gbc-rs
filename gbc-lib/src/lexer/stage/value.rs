@@ -11,7 +11,7 @@ use ordered_float::OrderedFloat;
 use crate::lexer::MacroStage;
 use crate::error::SourceError;
 use crate::expression::Operator;
-use super::macros::{MacroCall, MacroToken, IfStatementBranch, ForStatement};
+use super::macros::{MacroCall, MacroToken, IfStatementBranch, ForStatement, BlockStatement};
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
 
 
@@ -31,6 +31,7 @@ lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
     BuiltinCall((Vec<Vec<ValueToken>>)),
     IfStatement((Vec<IfStatementBranch<ValueToken>>)),
     ForStatement((ForStatement<ValueToken>)),
+    BlockStatement((BlockStatement<ValueToken>)),
     CompressedBlock((Vec<ValueToken>)),
     GlobalLabelDef((usize)),
     GlobalLabelRef((usize)),
@@ -137,6 +138,11 @@ impl ValueStage {
                         from: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.from)?,
                         to: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.to)?,
                         body: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.body)?
+                    })
+                },
+                MacroToken::BlockStatement(inner, block) => {
+                    ValueToken::BlockStatement(inner, match block {
+                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?)
                     })
                 },
                 MacroToken::CompressedBlock(inner, tokens) => {
@@ -626,7 +632,7 @@ mod test {
     use ordered_float::OrderedFloat;
     use crate::lexer::Lexer;
     use crate::mocks::{macro_lex, macro_lex_child};
-    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag, IfStatementBranch, ForStatement};
+    use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag, IfStatementBranch, ForStatement, BlockStatement};
 
     fn value_lexer<S: Into<String>>(s: S) -> Lexer<ValueStage> {
         Lexer::<ValueStage>::from_lexer(macro_lex(s)).expect("ValueLexer failed")
@@ -1292,6 +1298,24 @@ mod test {
                     value: 1
                 }
             ])
+        ]);
+    }
+
+    // Blocks -----------------------------------------------------------------
+    #[test]
+    fn test_block_using_forwarding() {
+        let lexer = value_lexer("BLOCK USING 'cmd' DB 1 ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Using(
+                "cmd".to_string(),
+                vec![
+                    ValueToken::Reserved(itk!(18, 20, "DB")),
+                    ValueToken::Integer {
+                        inner: itk!(21, 22, "1"),
+                        value: 1
+                    }
+                ])
+            )
         ]);
     }
 

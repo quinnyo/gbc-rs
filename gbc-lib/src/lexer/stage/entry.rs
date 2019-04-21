@@ -7,7 +7,7 @@ use gbc_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::macros::MacroCall;
+use super::macros::{MacroCall, BlockStatement};
 use crate::error::SourceError;
 use crate::lexer::ExpressionStage;
 use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator};
@@ -31,7 +31,6 @@ pub struct ForStatement {
     pub body: Vec<EntryToken>
 }
 
-
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     Instruction((usize)),
@@ -43,7 +42,8 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
     IfStatement((Vec<IfStatementBranch>)),
     // FOR [Sring] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
-    ForStatement((ForStatement))
+    ForStatement((ForStatement)),
+    UsingStatement((String, Vec<EntryToken>))
 
 }, {
     // Constant + EQU|EQUS + ConstExpression
@@ -203,6 +203,13 @@ impl EntryStage {
                         to,
                         body: Self::parse_entry_tokens(for_statement.body, layouts, inside_compressed)?
                     })
+                },
+
+                // Block Statements
+                (_, ExpressionToken::BlockStatement(inner, block)) => {
+                    match block {
+                        BlockStatement::Using(cmd, body) => EntryToken::UsingStatement(inner, cmd, Self::parse_entry_tokens(body, layouts, inside_compressed)?)
+                    }
                 },
 
                 // CompressedBlocks
@@ -3352,6 +3359,38 @@ mod test {
         assert_eq!(entry_lexer_error("COMPRESS foo EQU 2 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected Constant, expected a data directive instead.\n\nCOMPRESS foo EQU 2 ENDCOMPRESS\n         ^--- Here");
         assert_eq!(entry_lexer_error("COMPRESS DS8 1 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"DS8\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS DS8 1 ENDCOMPRESS\n         ^--- Here");
         assert_eq!(entry_lexer_error("COMPRESS DS16 1 ENDCOMPRESS"), "In file \"main.gb.s\" on line 1, column 10: Unexpected reserved keyword \"DS16\" inside compressed block, expected either DB, BW or DS instead.\n\nCOMPRESS DS16 1 ENDCOMPRESS\n         ^--- Here");
+    }
+
+    // Blocks -----------------------------------------------------------------
+    #[test]
+    fn test_block_using() {
+        let lexer = entry_lexer("BLOCK USING 'cmd' DB 1 DW 2000 ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            EntryToken::UsingStatement(
+                itk!(0, 5, "BLOCK"),
+                "cmd".to_string(),
+                vec![
+                    EntryToken::Data {
+                        inner: itk!(18, 20, "DB"),
+                        alignment: DataAlignment::Byte,
+                        endianess: DataEndianess::Little,
+                        storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::Integer(1))]),
+                        is_constant: true,
+                        compress: false,
+                        debug_only: false
+                    },
+                    EntryToken::Data {
+                        inner: itk!(23, 25, "DW"),
+                        alignment: DataAlignment::Byte,
+                        endianess: DataEndianess::Little,
+                        storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::Integer(2000))]),
+                        is_constant: true,
+                        compress: false,
+                        debug_only: false
+                    }
+                ]
+            )
+        ]);
     }
 
 }
