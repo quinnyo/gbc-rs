@@ -3,18 +3,18 @@ use std::cmp::Ordering;
 
 
 // Statics --------------------------------------------------------------------
-const FRAME_DURATION: f32 = 1.0 / 59.714;
+use super::parser::FRAME_DURATION;
 
 
 // MMP Commands ---------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct NoteCommand {
     pub wait_frames: usize,
-    pub flags: u8,
+    pub stops: bool,
     pub channel: u8,
     pub priority_frames: usize,
     pub instrument: usize,
-    pub length: usize,
+    pub length_counter: usize,
     pub offset: usize,
     pub end: usize
 }
@@ -127,6 +127,13 @@ impl Command {
         }
     }
 
+    pub fn is_loop_jump(&self) -> bool {
+        match self {
+            Command::LoopJump { .. } => true,
+            _ => false
+        }
+    }
+
     fn is_stop(&self) -> bool {
         match self {
             Command::Silence { .. } => true,
@@ -173,22 +180,23 @@ impl Command {
         }
 
         // We limit the wait command to 255 frames
-        let count = (frames_since_last / 64.0).floor() as usize;
-        let remainder = frames_since_last as usize % 64;
+        let abs_frames_since_last = frames_since_last.max(0.0) as usize;
+        let count = abs_frames_since_last / 64;
+        let remainder = abs_frames_since_last % 64;
 
         // So we need to insert multiple ones if required, this simpliflies
         // playback logic
         let mut commands = Vec::new();
         for _ in 0..count {
             commands.push(Command::Wait {
-                offset: previous_frames as usize,
+                offset: previous_start as usize,
                 frames: 63
             });
         }
 
         if remainder > 0 {
             commands.push(Command::Wait {
-                offset: previous_frames as usize,
+                offset: previous_start as usize,
                 frames: remainder
             });
         }

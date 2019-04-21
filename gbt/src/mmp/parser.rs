@@ -9,6 +9,7 @@ use super::{lmms, command::{Command, NoteCommand}};
 // Statics --------------------------------------------------------------------
 const NOTE_DURATION: f32 = 0.0125;
 const CUTOFF_FREQUENCY: f32 = 2015.0;
+pub const FRAME_DURATION: f32 = 1.0 / 59.714;
 
 
 // MMP Parser -----------------------------------------------------------------
@@ -68,7 +69,10 @@ impl Parser {
                         &track.instrument,
                         instrument_index,
                         note_duration
-                    ));
+
+                    ).map_err(|e| {
+                        format!("Track {}: {}", track_list.0, e)
+                    })?);
                 }
 
             }
@@ -118,18 +122,18 @@ impl Parser {
             commands.append(&mut wait_commands);
             commands.sort_by(Command::sort_by);
 
-            // When looping cutoff commands after loop point
+            // When looping cutoff commands after loop jump
             if timeline.is_looping {
-                /*
-                TODO
-                let loopIndex = -1;
-                commands.forEach((c, i) => {
-                    if (c instanceof LoopJumpCommand) {
-                        loopIndex = i;
+                let mut loop_index = None;
+                for (index, command) in commands.iter().enumerate() {
+                    if command.is_loop_jump() {
+                        loop_index = Some(index + 1);
+                        break;
                     }
-                });
-                commands.length = loopIndex + 1;
-                */
+                }
+                if let Some(index) = loop_index {
+                    commands.truncate(index);
+                }
             }
 
             Parser::check_command_overlap(&track_list.0, &commands, 1)?;
@@ -137,7 +141,6 @@ impl Parser {
             Parser::check_command_overlap(&track_list.0, &commands, 3)?;
             Parser::check_command_overlap(&track_list.0, &commands, 4)?;
 
-            println!("{:?}", commands);
             tracks.push(CommandTrack {
                 name: track_list.0.clone(),
                 commands
@@ -145,7 +148,9 @@ impl Parser {
 
         }
 
-        // println!("{:#?} {}", used_instruments, used_instruments.len());
+        tracks.sort_by(|a, b| a.name.cmp(&b.name));
+
+        println!("{:#?}", tracks);
         Ok(Self {
             instruments: used_instruments,
             tracks
@@ -159,15 +164,15 @@ impl Parser {
         instrument_index: usize,
         note_duration: f32
 
-    ) -> Vec<Command> {
+    ) -> Result<Vec<Command>, String> {
 
-        let command = NoteCommand {
+        let mut command = NoteCommand {
             wait_frames: 0,
-            flags: 0, // TODO set to if stops 128
+            stops: false,
             priority_frames: 0,
             channel: instrument.channel(),
             instrument: instrument_index,
-            length: 0,
+            length_counter: 0,
             offset: note.offset,
             end: note.offset + note.length
         };
@@ -175,6 +180,10 @@ impl Parser {
         // Channel Specific data
         let frequency = note.freq;
         let (key, frequency_shift, frequency_divisor) = if command.channel != 4 {
+            if note.key < 24 || note.key > 95 {
+                return Err(format!("Notes for Channels 1-3 must be within of range C2 to C7 ({})", note.key));
+            }
+
             // Channel 1-3
             (note.key, 0, 0)
 
@@ -184,89 +193,99 @@ impl Parser {
             (0, shift, divisor)
         };
 
-        /*
+
         // Calculate playback length
-        // Add one additional frame here to compensate for LMMS playback
+
+        // We add one additional frame here to compensate for LMMS playback
         // differences
-        const noteSeconds = (note.length * noteDuration) + FRAME_DURATION;
-        const lengthVolumeLimit = instrument.lengthSeconds !== -1.0;
+        let note_seconds = (note.length as f32 * note_duration) + FRAME_DURATION;
+        let env_duration = instrument.length_seconds();
 
-        const sweepSeconds = instrument.getSweepLength(this.key);
-        const sweepVolumentLimit = sweepSeconds !== -1.0;
-
-        let activeSeconds = lengthVolumeLimit ? instrument.lengthSeconds : noteSeconds;
-        if (sweepVolumentLimit && sweepSeconds < activeSeconds) {
-            activeSeconds = sweepSeconds;
+        // Check if sweep or envelope are the limiting factors for the length
+        let sweep_seconds = instrument.sweep_length(note.key);
+        let mut active_seconds = env_duration.unwrap_or(note_seconds);
+        if let Some(sweep_seconds) = sweep_seconds {
+            if sweep_seconds < active_seconds {
+                active_seconds = sweep_seconds
+            }
         }
 
-        if (!lengthVolumeLimit) {
+        if env_duration.is_none() {
             // PCM channel length counter
-            if (instrument.channel === 3 && activeSeconds <= 1.00) {
-                this.lengthFrames = Math.ceil(activeSeconds / FRAME_DURATION);
-                this.lengthCounter = 256 - Math.floor(activeSeconds / (1 / 256));
-                this.stops = true;
+            if command.channel == 3 && active_seconds <= 1.00 {
+                command.priority_frames = (active_seconds / FRAME_DURATION).ceil() as usize;
+                command.length_counter = 256 - (active_seconds / (1.0 / 256.0)).floor() as usize;
+                command.stops = true;
 
             // Other channels wave counter
-            } else if (activeSeconds < 0.25) {
-                this.lengthFrames = Math.ceil(activeSeconds / FRAME_DURATION);
-                this.lengthCounter = 64 - Math.floor(activeSeconds / (1 / 256));
-                this.stops = true;
+            } else if active_seconds < 0.25 {
+                command.priority_frames = (active_seconds / FRAME_DURATION).ceil() as usize;
+                command.length_counter = 64 - (active_seconds / (1.0 / 256.0)).floor() as usize;
+                command.stops = true;
 
             // Too long, requires a silence command
             } else {
-                this.lengthFrames = Math.min(Math.ceil(activeSeconds / FRAME_DURATION), 255);
-                if (instrument.channel === 3) {
-                    this.lengthCounter = 0;
+                command.priority_frames = (active_seconds / FRAME_DURATION).ceil().min(255.0) as usize;
+                if command.channel == 3 {
+                    command.length_counter = 0;
 
                 } else {
-                    this.lengthCounter = 0;
+                    command.length_counter = 0;
                 }
-                this.stops = false;
+                command.stops = false;
             }
 
         // If specified length is shorter than fade we need to manually stop
-        } else if (noteSeconds < activeSeconds - FRAME_DURATION) {
-
-            this.lengthFrames = Math.ceil(noteSeconds / FRAME_DURATION);
-
-            if (noteSeconds < 0.25) {
-                this.lengthCounter = 64 - Math.floor(noteSeconds / (1 / 256));
-                this.stops = true;
-                //console.log('COUNTER', this.instrument.name, this.lengthCounter);
+        } else if note_seconds < active_seconds - FRAME_DURATION {
+            command.priority_frames = (note_seconds / FRAME_DURATION).ceil() as usize;
+            if note_seconds < 0.25 {
+                command.length_counter = 64 - (note_seconds / (1.0 / 256.0)).floor() as usize;
+                command.stops = true;
 
             } else {
-                this.lengthCounter = 0;
-                this.stops = false;
-                //console.log('SILENCE', this.instrument.name, noteSeconds, activeSeconds, this.lengthFrames);
+                command.length_counter = 0;
+                command.stops = false;
             }
 
         // Otherwise fade out will already complete in time
         } else {
-            this.lengthFrames = Math.ceil(activeSeconds / FRAME_DURATION);
-            this.stops = true;
-            this.lengthCounter = 0;
-            // console.log('FADE', this.instrument.name);
+            command.priority_frames = (active_seconds / FRAME_DURATION).ceil() as usize;
+            command.length_counter = 0;
+            command.stops = true;
         }
 
-        const commands = [];
-        if (this.instrument.channel === 4) {
-            commands.push(new NoiseCommand(this.start, this, this.stops));
+        let mut commands = Vec::new();
+        if command.channel == 4 {
+            commands.push(Command::Noise {
+                note: command.clone(),
+                frequency_shift,
+                frequency_divisor
+            });
 
-        } else if (this.instrument.channel === 3) {
-            commands.push(new PcmCommand(this.start, this, this.stops));
+        } else if command.channel == 3 {
+            commands.push(Command::PCM {
+                note: command.clone(),
+                frequency,
+                key
+            });
 
         } else{
-            commands.push(new NoteCommand(this.start, this, this.stops));
+            commands.push(Command::Note {
+                note: command.clone(),
+                frequency,
+                key
+            });
         }
 
-        if (!this.stops) {
-            commands.push(new SilenceCommand(this.end, this));
+        if !command.stops {
+            commands.push(Command::Silence {
+                offset: command.end,
+                end: command.end,
+                channel: command.channel
+            });
         }
 
-        commands
-        */
-
-        Vec::new()
+        Ok(commands)
     }
 
     fn check_command_overlap(name: &str, commands: &[Command], channel: u8) -> Result<(), String> {
@@ -276,7 +295,7 @@ impl Parser {
                 if command.is_note() || command.is_silence() {
                     if let Some(p) = previous {
                         if p.end() > command.offset() {
-                            return Err(format!("Overlapping notes on channel {} @ {} in Track \"{}\"", channel, command.offset(), name));
+                            return Err(format!("Overlapping notes on channel {} @ {} in Track \"{}\" ({} {})", channel, command.offset(), name, p.end(), command.offset()));
                         }
                     }
                     previous = Some(command);
@@ -286,20 +305,20 @@ impl Parser {
         Ok(())
     }
 
-    fn gb_frequency(key: i32) -> u32 {
+    fn gb_frequency(key: usize) -> u32 {
         let f = Self::note_frequency(key);
         (2048 - ((4194304 / f) >> 5))
     }
 
-    fn note_frequency(key: i32) -> u32 {
+    fn note_frequency(key: usize) -> u32 {
         let pitch = (key as i32 - 57) as f32 / 12.0;
         (440.0 * 2f32.powf(pitch)).round() as u32
     }
 
-    fn note_key(hz: u32) -> i32 {
+    fn note_key(hz: u32) -> usize {
         let pitch_model = 0;
         let pitch = (hz as f32 / 440.0).log2() - pitch_model as f32 * (100.0 / 12.0);
-        ((pitch * 12.0) + 57.0).round() as i32
+        ((pitch * 12.0) + 57.0).round() as usize
     }
 }
 
@@ -337,12 +356,8 @@ impl ParserTrack {
 
         for p in t.patterns {
             for n in p.notes {
-                let freq = Parser::note_frequency(n.key as i32);
+                let freq = Parser::note_frequency(n.key);
                 let key = Parser::note_key(freq);
-                // TODO
-                // if (key < 25 || key > 95) && track.instrument.channel() != 4 {
-                //     return Err(format!("Notes for Channels 1-3 must be within of range C2 to C7"));
-                // }
                 track.notes.push(ParserNote {
                     offset: p.pos + n.pos,
                     length: n.len,
@@ -365,11 +380,11 @@ pub struct ParserNote {
     offset: usize,
     length: usize,
     freq: u32,
-    key: i32
+    key: usize
 }
 
 impl ParserNote {
-    fn freq_shift_divisor(&self) -> (u32, u32) {
+    fn freq_shift_divisor(&self) -> (u8, u8) {
         let mut shift = 0;
         let mut divisor = 1;
         let mut optimal_freq = 524288.0 / (divisor as f32 * 2f32.powf(shift as f32 + 1.0));
@@ -507,16 +522,14 @@ impl Instrument {
         }
     }
 
-    fn sweep_length(&self, key: usize) -> f32 {
+    fn sweep_length(&self, key: usize) -> Option<f32> {
         match self {
-            Instrument::Square1 { sweep, .. } => sweep.length_seconds(key),
-            Instrument::Square2 { .. } => 0.0,
-            Instrument::PCM { .. } => 0.0,
-            Instrument::Noise { .. } => 0.0
+            Instrument::Square1 { sweep, .. } => Some(sweep.length_seconds(key)),
+            _ => None
         }
     }
 
-    fn length_seconds(&self, key: usize) -> Option<f32> {
+    fn length_seconds(&self) -> Option<f32> {
         if let Some(e) = self.envelope() {
             e.length_seconds
 
@@ -599,7 +612,7 @@ impl Sweep {
         format!("sweep_{}_{}_{}", self.shift, self.time, self.direction)
     }
 
-    fn length_seconds(&self, key: i32) -> f32 {
+    fn length_seconds(&self, key: usize) -> f32 {
         let mut lx = Parser::gb_frequency(key) as f32;
         let mut t = 0.0f32;
         for _ in 0..20 {
