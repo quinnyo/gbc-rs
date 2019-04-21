@@ -18,7 +18,6 @@ mod util;
 // CLI Interface --------------------------------------------------------------
 fn main() {
 
-    // TODO MMP file conversion
     // TODO lz4 compression
 
     let matches = App::new("gbt")
@@ -87,7 +86,7 @@ fn main() {
                 .help("palette used for mapping colors to GameBoy palette indicies")
             )
         )
-        .subcommand(SubCommand::with_name("mmp")
+        .subcommand(SubCommand::with_name("lmms")
             .about("converts LMMS projects into a custom GameBoy music format")
             .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
             .version("0.1")
