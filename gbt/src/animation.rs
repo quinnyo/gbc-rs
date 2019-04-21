@@ -3,12 +3,9 @@ use std::iter;
 use std::path::PathBuf;
 
 
-// External Dependencies ------------------------------------------------------
-use gbc_lib::lz4::compress;
-
-
 // Internal Dependencies ------------------------------------------------------
 use super::util;
+use super::lz4::compress;
 
 
 // Structs --------------------------------------------------------------------

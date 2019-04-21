@@ -10,6 +10,8 @@ test:
   - rustc --version && cargo --version
   - cd gbc-lib
   - cargo test --all --verbose
+  - cd ../gbt
+  - cargo test --all --verbose
 
 linux-musl:
   stage: build

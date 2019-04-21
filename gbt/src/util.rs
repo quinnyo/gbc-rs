@@ -1,7 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fs::File;
 use std::path::PathBuf;
-use std::io::{stdout, BufReader, Error as IOError, ErrorKind, Read, Write};
+use std::io::{stdin, stdout, BufReader, Error as IOError, ErrorKind, Read, Write};
 
 
 // External Dependencies ------------------------------------------------------
@@ -104,6 +104,18 @@ pub fn load_image(path: &PathBuf) -> Result<DynamicImage, IOError> {
     image::load(reader, format).map_err(|_| {
         IOError::new(ErrorKind::InvalidInput, "Unsupported image format")
     })
+}
+
+pub fn load_binary(path: Option<PathBuf>) -> Result<Vec<u8>, IOError> {
+    let mut bytes = Vec::new();
+    if let Some(path) = path {
+        let mut file = File::open(path)?;
+        file.read_to_end(&mut bytes)?;
+
+    } else {
+        stdin().read_to_end(&mut bytes)?;
+    }
+    Ok(bytes)
 }
 
 pub fn save_binary(path: &PathBuf, bytes: Vec<u8>) -> Result<(), IOError> {

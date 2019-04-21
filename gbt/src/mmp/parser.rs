@@ -35,9 +35,9 @@ impl Parser {
         let mut combined_tracks: HashMap<String, (usize, String, Vec<ParserTrack>)> = HashMap::new();
         for (index, track) in project.song.track_container.tracks.into_iter().filter(|t| !t.is_muted).enumerate() {
             let t = ParserTrack::try_from(track)?;
-            let key = t.name.split("_").take(3).map(|s| s.to_string()).collect::<Vec<String>>().join("_");
-            let entry = combined_tracks.entry(key).or_insert_with(|| {
-                (index, t.name.clone(), vec![])
+            let track_name = t.name.split("_").take(3).map(|s| s.to_string()).collect::<Vec<String>>().join("_");
+            let entry = combined_tracks.entry(track_name.clone()).or_insert_with(|| {
+                (index, track_name, vec![])
             });
             entry.2.push(t);
         }

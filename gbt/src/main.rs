@@ -10,6 +10,8 @@ use clap::{Arg, App, SubCommand};
 
 // Internal Dependencies ------------------------------------------------------
 mod animation;
+mod compress;
+mod lz4;
 mod mmp;
 mod tiles;
 mod util;
@@ -17,8 +19,6 @@ mod util;
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
-
-    // TODO lz4 compression
 
     let matches = App::new("gbt")
         .version("0.1")
@@ -100,7 +100,22 @@ fn main() {
                 .long("out-file")
                 .short("o")
                 .takes_value(true)
-                .help("GameBoy music data to generate")
+                .help("GameBoy music file to generate")
+            )
+        )
+        .subcommand(SubCommand::with_name("compress")
+            .about("compresses data into custom GameBoy lz4 like format")
+            .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
+            .version("0.1")
+            .arg(Arg::with_name("INPUT_FILE")
+                .help("Input file (if none is provided STDIN is read)")
+                .index(1)
+            )
+            .arg(Arg::with_name("OUTPUT_FILE")
+                .long("out-file")
+                .short("o")
+                .takes_value(true)
+                .help("compressed GameBoy file ot generate")
             )
         )
         .get_matches();
@@ -128,9 +143,19 @@ fn main() {
             process::exit(1)
         }
 
-    } else if let Some(matches) = matches.subcommand_matches("mmp") {
+    } else if let Some(matches) = matches.subcommand_matches("lmms") {
         if let Err(err) = mmp::convert(
             matches.values_of("MMP_FILE").unwrap().into_iter().map(PathBuf::from).collect(),
+            matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
+
+        ) {
+            eprintln!("       {} {}", "Error".bright_red(), err);
+            process::exit(1)
+        }
+
+    } else if let Some(matches) = matches.subcommand_matches("compress") {
+        if let Err(err) = compress::convert(
+            matches.value_of("INPUT_FILE").map(|f| PathBuf::from(f)),
             matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
 
         ) {

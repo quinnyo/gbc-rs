@@ -136,7 +136,7 @@ impl Command {
 
     fn is_stop(&self) -> bool {
         match self {
-            Command::Silence { .. } => true,
+            Command::Stop { .. } => true,
             _ => false
         }
     }
@@ -156,6 +156,7 @@ impl Command {
         // For very short notes we want to remove the wait frames altogether
         let mut second_frames = seconds_since_last / FRAME_DURATION;
         if previous.as_ref().map(|p| p.is_note()).unwrap_or(false) && seconds_since_last <= 0.1 && self.is_stop() {
+            // Don't merge wait frames in case this is a stop note
             second_frames = 0.0;
         }
 
