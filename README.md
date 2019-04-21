@@ -1,3 +1,5 @@
+
+
 # A opinionated Gameboy Compiler
 
 **gbc** is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
@@ -8,6 +10,10 @@
 - Good error messages
 - High test coverages
 - Quality of life improvements via syntactic sugar
+
+## Games made via GBC
+
+- [Vectroid](https://gitlab.com/BonsaiDen/vectroid.gb)
 
 ## Usage
 
