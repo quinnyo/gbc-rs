@@ -50,7 +50,7 @@ impl MMP {
 
         let instruments: Vec<Instrument> = instruments.into_iter().map(|i| i.1).collect();
         let instrument_index: Vec<String> = instruments.iter().map(|i| {
-            format!("    BW Instrument_{}", i.name())
+            format!("    BW instrument_{}", i.name())
 
         }).collect();
 
@@ -77,7 +77,6 @@ mmp_player_instrument_index:
 {}
 
 {}
-
 ; MMP Song Table --------------------------------------------------------------
 {}"#,
             frequeny_table.join("\n    DW "),
@@ -88,34 +87,94 @@ mmp_player_instrument_index:
     }
 
     fn instrument_to_string(instrument: &Instrument) -> String {
+        let channel = instrument.channel() - 1;
         match instrument {
-            Instrument::Square1 { name, .. } => {
+            Instrument::Square1 { name, envelope, sweep, .. } => {
                 format!(r#"; Instrument
 instrument_{}:
     ; Channel (SQ1)
+    DB      ${:0>2X}
 
-"#, name)
+    ; Sweep(time={} direction={} shift={})
+    DB      ${:0>2X}
+
+    ; Envelope(initial={} direction={} step={})
+    DB      ${:0>2X}
+
+"#,
+                    name,
+                    channel,
+                    sweep.time,
+                    sweep.direction,
+                    sweep.shift,
+                    (sweep.time << 4) | (sweep.direction << 3) | sweep.shift,
+                    envelope.volume,
+                    envelope.direction,
+                    envelope.step,
+                    (envelope.volume << 4) | (envelope.direction << 3) | envelope.step
+                )
             },
-            Instrument::Square2 { name, .. } => {
+            Instrument::Square2 { name, envelope, .. } => {
                 format!(r#"; Instrument
 instrument_{}:
     ; Channel (SQ2)
+    DB      ${:0>2X}
 
-"#, name)
+    ; Envelope(initial={} direction={} step={})
+    DB      ${:0>2X}
+
+"#,
+                    name,
+                    channel,
+                    envelope.volume,
+                    envelope.direction,
+                    envelope.step,
+                    (envelope.volume << 4) | (envelope.direction << 3) | envelope.step
+                )
             },
-            Instrument::PCM { name, .. } => {
+            Instrument::PCM { name, volume, samples } => {
                 format!(r#"; Instrument
 instrument_{}:
     ; Channel (PCM)
+    DB      ${:0>2X}
 
-"#, name)
+    ; Output Level ({})
+    DB      ${:0>2X}
+
+    ; Samples
+    DB      ${}
+
+"#,
+                    name,
+                    channel,
+                    match volume {
+                        0 => "Silent",
+                        1 => "100%",
+                        2 => "50%",
+                        3 => "25%",
+                        _ => ""
+                    },
+                    volume << 5,
+                    samples.iter().map(|s| format!("${:0>2X}", s)).collect::<Vec<String>>().join(", ")
+                )
             },
-            Instrument::Noise { name, .. } => {
+            Instrument::Noise { name, envelope, .. } => {
                 format!(r#"; Instrument
 instrument_{}:
     ; Channel (Noise)
+    DB      ${:0>2X}
 
-"#, name)
+    ; Envelope(initial={} direction={} step={})
+    DB      ${:0>2X}
+
+"#,
+                    name,
+                    channel,
+                    envelope.volume,
+                    envelope.direction,
+                    envelope.step,
+                    (envelope.volume << 4) | (envelope.direction << 3) | envelope.step
+                )
             }
         }
     }
@@ -237,206 +296,7 @@ instrument_{}:
             },
         }
     }
-    /*
-
-class NoiseCommand extends Command {
-
-    serialize() {
-        return `
-    ; Flags(${this.waitFrames}), Instrument(${this.instrument.name}) / Priority Frames  / Length Counter / Frequency Shift(${this.frequencyShift}) & Shift Register Width(${this.instrument.shiftRegisterWidth ? 7 : 15}) & Divisor(${this.frequencyDivisor})
-    DB      ${toHex(this.flags | (this.waitFrames << 2))}, ${toHex(this.instrument.index)}, ${toHex(this.priorityFrames)}, ${toHex(this.length)}, ${toHex((this.frequencyShift << 4) | (this.instrument.shiftRegisterWidth << 3) | this.frequencyDivisor)}
-`;
-    }
-
 }
-
-
-
-    fn to_string(&self) -> String {
-        match self {
-            ParserInstrument::Square1 { .. } => {
-                /*
-                   TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (SQ1)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Sweep(time=${this.sweepTime} direction=${this.sweepDirection} shift=${this.sweepShift})
-    DB      ${toHex((this.sweepTime << 4) | (this.sweepDirection << 3) | this.sweepShift)}
-
-    ; Envelope(initial=${this.envelopeVolume} direction=${this.envelopeDirection} step=${this.envelopeStep})
-    DB      ${toHex((this.envelopeVolume  << 4) | (this.envelopeDirection << 3) | this.envelopeStep)}
-`;*/
-
-                format!("")
-            },
-            ParserInstrument::Square2 { .. } => {
-                /*
-                 TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (SQ2)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Envelope(initial=${this.envelopeVolume} direction=${this.envelopeDirection} step=${this.envelopeStep})
-    DB      ${toHex((this.envelopeVolume << 4) | (this.envelopeDirection << 3) | this.envelopeStep)}
-`;*/
-
-                format!("")
-            }
-            ParserInstrument::PCM { .. } => {
-            /*
-               TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (PCM)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Output Level (${toOutputLevel(this.volume)})
-    DB      ${toHex(this.volume << 5)}
-
-    ; Samples
-    DB      ${this.samples.map(toHex).join(', ')}
-`;
-*/
-                format!("")
-            },
-            ParserInstrument::Noise { .. } => {
-                /*
-            TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (Noise)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Envelope(initial=${this.envelopeVolume} direction=${this.envelopeDirection} step=${this.envelopeStep})
-    DB      ${toHex((this.envelopeVolume << 4) | (this.envelopeDirection << 3) | this.envelopeStep)}
-`;
-                 */
-                format!("")
-            }
-        }
-    }
-
-    fn to_string(&self) -> String {
-        match self {
-            ParserInstrument::Square1 { .. } => {
-                /*
-                   TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (SQ1)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Sweep(time=${this.sweepTime} direction=${this.sweepDirection} shift=${this.sweepShift})
-    DB      ${toHex((this.sweepTime << 4) | (this.sweepDirection << 3) | this.sweepShift)}
-
-    ; Envelope(initial=${this.envelopeVolume} direction=${this.envelopeDirection} step=${this.envelopeStep})
-    DB      ${toHex((this.envelopeVolume  << 4) | (this.envelopeDirection << 3) | this.envelopeStep)}
-`;*/
-
-                format!("")
-            },
-            ParserInstrument::Square2 { .. } => {
-                /*
-                 TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (SQ2)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Envelope(initial=${this.envelopeVolume} direction=${this.envelopeDirection} step=${this.envelopeStep})
-    DB      ${toHex((this.envelopeVolume << 4) | (this.envelopeDirection << 3) | this.envelopeStep)}
-`;*/
-
-                format!("")
-            }
-            ParserInstrument::PCM { .. } => {
-            /*
-               TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (PCM)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Output Level (${toOutputLevel(this.volume)})
-    DB      ${toHex(this.volume << 5)}
-
-    ; Samples
-    DB      ${this.samples.map(toHex).join(', ')}
-`;
-*/
-                format!("")
-            },
-            ParserInstrument::Noise { .. } => {
-                /*
-            TODO
-        return `
-; Instrument
-${this.serializeName()}:
-    ; Channel (Noise)
-    DB      ${toHex(this.channel - 1)}
-
-    ; Envelope(initial=${this.envelopeVolume} direction=${this.envelopeDirection} step=${this.envelopeStep})
-    DB      ${toHex((this.envelopeVolume << 4) | (this.envelopeDirection << 3) | this.envelopeStep)}
-`;
-                 */
-                format!("")
-            }
-        }
-    }*/
-
-
-}
-
-/*
-function toOutputLevel(d) {
-    return {
-        0: 'Silent',
-        1: '100%',
-        2: '50%',
-        3: '25%'
-    }[d];
-}
-
-function toDuty(d) {
-    return {
-        0: '12%',
-        1: '25%',
-        2: '50%',
-        3: '75%'
-    }[d];
-}
-
-function toHex(v) {
-    const h = v.toString(16).toUpperCase();
-    if (h.length === 1) {
-        return `$0${h}`;
-
-    } else {
-        return `$${h}`;
-    }
-}
-
-function toChannelName(c) {
-    return {
-        1: 'SQ1',
-        2: 'SQ2',
-        3: 'PCM',
-        4: 'Noise'
-    }[c];
-}
-
-
-*/
 
 // GameBoy Music Converter ----------------------------------------------------
 pub fn convert(

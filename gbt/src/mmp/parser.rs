@@ -501,7 +501,7 @@ impl Instrument {
         })
     }
 
-    fn channel(&self) -> u8 {
+    pub fn channel(&self) -> u8 {
         match self {
             Instrument::Square1 { .. } => 1,
             Instrument::Square2 { .. } => 2,
@@ -586,9 +586,9 @@ impl Instrument {
 
 #[derive(Debug, Clone)]
 pub struct Envelope {
-    volume: u8,
-    step: u8,
-    direction: u8,
+    pub volume: u8,
+    pub step: u8,
+    pub direction: u8,
     length_seconds: Option<f32>
 }
 
@@ -616,9 +616,9 @@ impl Envelope {
 
 #[derive(Debug, Clone)]
 pub struct Sweep {
-    shift: u8,
-    time: u8,
-    direction: u8
+    pub shift: u8,
+    pub time: u8,
+    pub direction: u8
 }
 
 impl Sweep {
