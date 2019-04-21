@@ -1,39 +1,257 @@
 // STD Dependencies -----------------------------------------------------------
 use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
 
 
 // Internal Dependencies ------------------------------------------------------
+use super::util;
+
 mod command;
 mod lmms;
 mod parser;
-use super::util;
+use command::Command;
+use parser::{CommandTrack, Instrument, Parser};
 
 
 // Structs --------------------------------------------------------------------
 struct MMP {
-    tracks: Vec<MMPTrack>,
-    instruments: Vec<MMPInstrument>
+    notes: HashSet<usize>,
+    instruments: HashMap<String, (usize, Instrument)>,
+    tracks: Vec<CommandTrack>
 }
 
 impl MMP {
 
     fn new() -> Self {
         Self {
-            instruments: Vec::new(),
+            notes: HashSet::new(),
+            instruments: HashMap::new(),
             tracks: Vec::new()
         }
     }
 
     fn add_project(&mut self, project: lmms::Project) -> Result<(), String> {
-        Self::parse_tracks(project, &mut self.instruments, &mut self.tracks)
-    }
-
-    fn parse_tracks(project: lmms::Project, instruments: &mut Vec<MMPInstrument>, tracks: &mut Vec<MMPTrack>) -> Result<(), String> {
-        let parser = parser::Parser::from_project(project)?;
+        let mut tracks = Parser::from_project(
+            project,
+            &mut self.instruments,
+            &mut self.notes
+        )?;
+        self.tracks.append(&mut tracks);
         Ok(())
     }
 
+    fn to_string(&self) -> String {
+
+        let mut unique_notes: Vec<usize> = self.notes.clone().drain().collect();
+        unique_notes.sort();
+
+        let mut instruments: Vec<(usize, Instrument)> = self.instruments.values().cloned().collect();
+        instruments.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let instruments: Vec<Instrument> = instruments.into_iter().map(|i| i.1).collect();
+        let instrument_index: Vec<String> = instruments.iter().map(|i| {
+            format!("    BW Instrument_{}", i.name())
+
+        }).collect();
+
+        let frequeny_table: Vec<String> = unique_notes.iter().map(|key| {
+            let f = Parser::note_frequency(*key);
+            let v = 2048 - ((4194304 / f) >> 5);
+            format!("{}; {}hz", v, f)
+
+        }).collect();
+
+        let tracks: Vec<String> = self.tracks.iter().map(|track| {
+            Self::track_to_string(&track, &unique_notes, &instruments)
+
+        }).collect();
+
+        let instruments: Vec<String> = instruments.iter().map(Self::instrument_to_string).collect();
+
+        format!(r#"; MMP Frequency Table ---------------------------------------------------------
+mmp_frequency_table:
+    DW {}
+
+; MMP Instrument Table --------------------------------------------------------
+mmp_player_instrument_index:
+{}
+
+{}
+
+; MMP Song Table --------------------------------------------------------------
+{}"#,
+            frequeny_table.join("\n    DW "),
+            instrument_index.join("\n"),
+            instruments.join(""),
+            tracks.join("")
+        )
+    }
+
+    fn instrument_to_string(instrument: &Instrument) -> String {
+        match instrument {
+            Instrument::Square1 { name, .. } => {
+                format!(r#"; Instrument
+instrument_{}:
+    ; Channel (SQ1)
+
+"#, name)
+            },
+            Instrument::Square2 { name, .. } => {
+                format!(r#"; Instrument
+instrument_{}:
+    ; Channel (SQ2)
+
+"#, name)
+            },
+            Instrument::PCM { name, .. } => {
+                format!(r#"; Instrument
+instrument_{}:
+    ; Channel (PCM)
+
+"#, name)
+            },
+            Instrument::Noise { name, .. } => {
+                format!(r#"; Instrument
+instrument_{}:
+    ; Channel (Noise)
+
+"#, name)
+            }
+        }
+    }
+
+    fn track_to_string(track: &CommandTrack, unique_notes: &[usize], instruments: &[Instrument]) -> String {
+        let commands: Vec<String> = track.commands.iter().map(|c| Self::command_to_string(c, unique_notes, instruments)).collect();
+        format!("mmp_track_{}:\n{}", track.name, commands.join(""))
+    }
+
+    fn command_to_string(command: &Command, unique_notes: &[usize], instruments: &[Instrument]) -> String {
+        fn note_index(unique_notes: &[usize], key: &usize) -> usize {
+            unique_notes.iter().position(|k| k == key).expect("Note Index not found")
+        }
+
+        match command {
+            Command::LoopMarker { name, ..  } => {
+                format!(".marker_{}", name)
+            },
+
+            Command::LoopJump { name, ..  } => {
+                format!(r#"
+    ; Loop Jump
+    DB      $03, .marker_{} >> 8, .marker_{} & $FF
+"#,
+                    name,
+                    name
+                )
+            },
+
+            Command::Silence { channel, .. } => {
+                let offset = (channel - 1) * 8;
+                format!(r#"
+    ; Silence / Channel Table Offset
+    DB      ${:0>2X}
+"#,
+                    (offset << 2) | 1
+                )
+            },
+
+            Command::Wait { frames, .. } => {
+                format!(r#"
+    ; Wait / Frames ({})
+    DB      ${:0>2X}
+"#,
+                    frames,
+                    (frames << 2) as u8 | 2
+                )
+            },
+
+            Command::Stop { .. } => {
+                format!(r#"
+    ; Stop
+    DB      ${:0>2X}
+"#,
+                    128 | 3
+                )
+            },
+
+            Command::Note { note, key, frequency, .. } => {
+                let instrument = &instruments[note.instrument];
+                let key = note_index(unique_notes, key);
+                let flags = if note.stops { 0 } else { 128 } | (note.wait_frames << 2);
+                format!(r#"
+    ; Flags({}), Instrument({}) / Priority Frames  / DutyCycle & Length Counter / Frequency ({}hz)
+    DB      ${:0>2X}, ${:0>2X}, ${:0>2X}, ${:0>2X}, ${:0>2X}
+"#,
+                    note.wait_frames,
+                    instrument.name(),
+                    frequency,
+
+                    flags,
+                    note.instrument,
+                    note.priority_frames,
+                    (instrument.duty_cycle() << 6) | note.length_counter as u8,
+                    key * 2
+                )
+            },
+
+            Command::PCM { note, key, frequency, .. } => {
+                let instrument = &instruments[note.instrument];
+                let key = note_index(unique_notes, key);
+                let flags = if note.stops { 0 } else { 128 } | (note.wait_frames << 2);
+                format!(r#"
+    ; Flags({}), Instrument({}) / Priority Frames  / Length Counter / Frequency ({}hz)
+    DB      ${:0>2X}, ${:0>2X}, ${:0>2X}, ${:0>2X}, ${:0>2X}
+"#,
+                    note.wait_frames,
+                    instrument.name(),
+                    frequency,
+
+                    flags,
+                    note.instrument,
+                    note.priority_frames,
+                    note.length_counter as u8,
+                    key * 2
+                )
+            },
+
+            Command::Noise { note, frequency_shift, frequency_divisor } => {
+                let instrument = &instruments[note.instrument];
+                let flags = if note.stops { 0 } else { 128 } | (note.wait_frames << 2);
+                let srw = instrument.shift_register_width();
+                format!(r#"
+    ; Flags({}), Instrument({}) / Priority Frames  / Length Counter / Frequency Shift({}) & Shift Register Width({}) & Divisor({})
+    DB      ${:0>2X}, ${:0>2X}, ${:0>2X}, ${:0>2X}, ${:0>2X}
+"#,
+                    note.wait_frames,
+                    instrument.name(),
+                    frequency_shift,
+                    if srw == 1 { 7 } else { 15 },
+                    frequency_divisor,
+
+                    flags,
+                    note.instrument,
+                    note.priority_frames,
+                    note.length_counter as u8,
+                    (frequency_shift << 4) | (srw << 3) | frequency_divisor
+                )
+            },
+        }
+    }
     /*
+
+class NoiseCommand extends Command {
+
+    serialize() {
+        return `
+    ; Flags(${this.waitFrames}), Instrument(${this.instrument.name}) / Priority Frames  / Length Counter / Frequency Shift(${this.frequencyShift}) & Shift Register Width(${this.instrument.shiftRegisterWidth ? 7 : 15}) & Divisor(${this.frequencyDivisor})
+    DB      ${toHex(this.flags | (this.waitFrames << 2))}, ${toHex(this.instrument.index)}, ${toHex(this.priorityFrames)}, ${toHex(this.length)}, ${toHex((this.frequencyShift << 4) | (this.instrument.shiftRegisterWidth << 3) | this.frequencyDivisor)}
+`;
+    }
+
+}
+
+
+
     fn to_string(&self) -> String {
         match self {
             ParserInstrument::Square1 { .. } => {
@@ -217,145 +435,8 @@ function toChannelName(c) {
     }[c];
 }
 
-    serialize() {
-
-        const uniqueKeys = Object.keys(this.keys).map((i) => +i);
-        const instrumentIndex = this.instruments.map((i) => {
-            return `    BW ${i.serializeName()}`;
-        })
-
-        const instruments = this.instruments.map((i) => i.serialize());
-        const tracks = this.tracks.map((s) => s.serialize(uniqueKeys));
-
-        const frequencyTable = uniqueKeys.map((i) => {
-            const f = Math.round(MMP.getNoteFrequency(i));
-            const v = (2048 - ((4194304 / f) >> 5));
-            return `${v}; ${f}hz`;
-        });
-
-        return `; MMP Frequency Table ---------------------------------------------------------
-mmp_frequency_table:\n    DW ${frequencyTable.join('\n    DW ')}
-
-; MMP Instrument Table --------------------------------------------------------
-mmp_player_instrument_index:
-${instrumentIndex.join('\n')}
-${instruments.join('')}
-
-; MMP Song Table --------------------------------------------------------------
-${tracks.join('')}`;
-    }
-
-class Track {
-
-    constructor(name, commands) {
-        this.name = name;
-        this.commands = commands;
-    }
-
-    serializeName() {
-        return `mmp_track_${this.name}:`;
-    }
-
-    serialize(uniqueKeys) {
-        return `mmp_track_${this.name}:\n` + this.commands.map((c) => c.serialize(uniqueKeys)).join('');
-    }
-
-}
-
-class LoopMarkerCommand extends Command {
-    serialize() {
-        return `.marker_${this.name}:`
-    }
-}
-
-class SilenceCommand extends Command {
-
-    serialize() {
-        const offset = (this.channel - 1) * 8;
-        return `
-    ; Silence / Channel Table Offset
-    DB      ${toHex((offset << 2) | 1)}
-`;
-    }
-
-}
-
-class NoteCommand extends Command {
-
-    serialize(uniqueKeys) {
-        const keyIndex = uniqueKeys.indexOf(this.key);
-        return `
-    ; Flags(${this.waitFrames}), Instrument(${this.instrument.name}) / Priority Frames  / DutyCycle & Length Counter / Frequency (${Math.floor(this.frequency)}hz)
-    DB      ${toHex(this.flags | (this.waitFrames << 2))}, ${toHex(this.instrument.index)}, ${toHex(this.priorityFrames)}, ${toHex((this.instrument.dutyCycle << 6) | this.length)}, ${toHex(keyIndex * 2)}
-`;
-    }
-}
-
-class PcmCommand extends Command {
-
-    serialize(uniqueKeys) {
-        const keyIndex = uniqueKeys.indexOf(this.key);
-        return `
-    ; Flags(${this.waitFrames}), Instrument(${this.instrument.name}) / Priority Frames  / Length Counter / Frequency (${Math.floor(this.frequency)}hz)
-    DB      ${toHex(this.flags | (this.waitFrames << 2))}, ${toHex(this.instrument.index)}, ${toHex(this.priorityFrames)}, ${toHex(this.length)}, ${toHex(keyIndex * 2)}
-`;
-    }
-
-}
-
-class NoiseCommand extends Command {
-
-    serialize() {
-        return `
-    ; Flags(${this.waitFrames}), Instrument(${this.instrument.name}) / Priority Frames  / Length Counter / Frequency Shift(${this.frequencyShift}) & Shift Register Width(${this.instrument.shiftRegisterWidth ? 7 : 15}) & Divisor(${this.frequencyDivisor})
-    DB      ${toHex(this.flags | (this.waitFrames << 2))}, ${toHex(this.instrument.index)}, ${toHex(this.priorityFrames)}, ${toHex(this.length)}, ${toHex((this.frequencyShift << 4) | (this.instrument.shiftRegisterWidth << 3) | this.frequencyDivisor)}
-`;
-    }
-
-}
-
-class LoopJumpCommand extends Command {
-
-    serialize() {
-        return `
-    ; Loop Jump
-    DB      $03, .marker_${this.name} >> 8, .marker_${this.name} & $FF
-`;
-    }
-
-}
-
-class WaitCommand extends Command {
-
-    serialize() {
-        return `
-    ; Wait / Frames (${this.frames})
-    DB      ${toHex((this.frames << 2) | 2)}
-`;
-    }
-
-}
-
-class StopCommand extends Command {
-
-    serialize() {
-        return `
-    ; Stop
-    DB      ${toHex(128 | 3)}
-`;
-    }
-
-}
 
 */
-
-struct MMPTrack {
-
-}
-
-struct MMPInstrument {
-
-}
 
 // GameBoy Music Converter ----------------------------------------------------
 pub fn convert(
@@ -376,6 +457,6 @@ pub fn convert(
         })?;
     }
 
-    util::output_text(output_file, "; Empty\n".to_string())
+    util::output_text(output_file, mmp.to_string())
 }
 

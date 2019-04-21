@@ -14,14 +14,15 @@ pub const FRAME_DURATION: f32 = 1.0 / 59.714;
 
 // MMP Parser -----------------------------------------------------------------
 #[derive(Debug)]
-pub struct Parser {
-    instruments: HashMap<String, (usize, Instrument)>,
-    tracks: Vec<CommandTrack>
-}
-
+pub struct Parser;
 impl Parser {
 
-    pub fn from_project(project: lmms::Project) -> Result<Parser, String> {
+    pub fn from_project(
+        project: lmms::Project,
+        used_instruments: &mut HashMap<String, (usize, Instrument)>,
+        used_notes: &mut HashSet<usize>
+
+    ) -> Result<Vec<CommandTrack>, String> {
 
         if project.head.master_pitch != 0 {
             return Err("Project MasterPitch must be 0".to_string());
@@ -30,28 +31,30 @@ impl Parser {
         let note_duration = NOTE_DURATION * (100.0 / project.head.bpm as f32);
         let timeline = project.song.timeline;
 
-        // Keep Track of Instrument Data
-        let mut used_notes = HashSet::new();
-        let mut used_instruments = HashMap::new();
-
         // Parse individual tracks and combine them based on a naming pattern
-        let mut combined_tracks: HashMap<String, (String, Vec<ParserTrack>)> = HashMap::new();
-        for track in project.song.track_container.tracks.into_iter().filter(|t| !t.is_muted) {
+        let mut combined_tracks: HashMap<String, (usize, String, Vec<ParserTrack>)> = HashMap::new();
+        for (index, track) in project.song.track_container.tracks.into_iter().filter(|t| !t.is_muted).enumerate() {
             let t = ParserTrack::try_from(track)?;
             let key = t.name.split("_").take(3).map(|s| s.to_string()).collect::<Vec<String>>().join("_");
             let entry = combined_tracks.entry(key).or_insert_with(|| {
-                (t.name.clone(), vec![])
+                (index, t.name.clone(), vec![])
             });
-            entry.1.push(t);
+            entry.2.push(t);
         }
 
+        // Ensure correct ordering that is equivialant to the LMMS project
+        let mut combined_tracks: Vec<(String, (usize, String, Vec<ParserTrack>))> = combined_tracks.drain().collect();
+        combined_tracks.sort_by(|a, b| {
+            (a.1).0.cmp(&(b.1).0)
+        });
+
         // Combine tracks based on naming pattern
-        let mut tracks = Vec::new();
-        for track_list in combined_tracks.values() {
+        let mut command_tracks = Vec::new();
+        for (_, (_, track_name, tracks)) in combined_tracks {
 
             // Parse Track Note Commands
             let mut commands: Vec<Command> = Vec::new();
-            for track in &track_list.1 {
+            for track in tracks {
 
                 // Get instrument index
                 let hash = track.instrument.hash();
@@ -71,7 +74,7 @@ impl Parser {
                         note_duration
 
                     ).map_err(|e| {
-                        format!("Track {}: {}", track_list.0, e)
+                        format!("Track {}: {}", track_name, e)
                     })?);
                 }
 
@@ -136,25 +139,19 @@ impl Parser {
                 }
             }
 
-            Parser::check_command_overlap(&track_list.0, &commands, 1)?;
-            Parser::check_command_overlap(&track_list.0, &commands, 2)?;
-            Parser::check_command_overlap(&track_list.0, &commands, 3)?;
-            Parser::check_command_overlap(&track_list.0, &commands, 4)?;
+            Parser::check_command_overlap(&track_name, &commands, 1)?;
+            Parser::check_command_overlap(&track_name, &commands, 2)?;
+            Parser::check_command_overlap(&track_name, &commands, 3)?;
+            Parser::check_command_overlap(&track_name, &commands, 4)?;
 
-            tracks.push(CommandTrack {
-                name: track_list.0.clone(),
+            command_tracks.push(CommandTrack {
+                name: track_name,
                 commands
             });
 
         }
 
-        tracks.sort_by(|a, b| a.name.cmp(&b.name));
-
-        println!("{:#?}", tracks);
-        Ok(Self {
-            instruments: used_instruments,
-            tracks
-        })
+        Ok(command_tracks)
 
     }
 
@@ -310,7 +307,7 @@ impl Parser {
         (2048 - ((4194304 / f) >> 5))
     }
 
-    fn note_frequency(key: usize) -> u32 {
+    pub fn note_frequency(key: usize) -> u32 {
         let pitch = (key as i32 - 57) as f32 / 12.0;
         (440.0 * 2f32.powf(pitch)).round() as u32
     }
@@ -324,8 +321,8 @@ impl Parser {
 
 #[derive(Debug)]
 pub struct CommandTrack {
-    name: String,
-    commands: Vec<Command>
+    pub name: String,
+    pub commands: Vec<Command>
 }
 
 #[derive(Debug)]
@@ -556,13 +553,31 @@ impl Instrument {
         }
     }
 
-    fn to_name(&self) -> String {
+    pub fn duty_cycle(&self) -> u8 {
+        match self {
+            Instrument::Square1 { duty_cycle, .. } => *duty_cycle,
+            Instrument::Square2 { duty_cycle, .. } => *duty_cycle,
+            Instrument::PCM { .. } => 0,
+            Instrument::Noise { .. } => 0
+        }
+    }
+
+    pub fn shift_register_width(&self) -> u8 {
+        match self {
+            Instrument::Square1 { .. } => 0,
+            Instrument::Square2 { .. } => 0,
+            Instrument::PCM { .. } => 0,
+            Instrument::Noise { shift_register_width, .. } => *shift_register_width
+        }
+    }
+
+    pub fn name(&self) -> String {
         match self {
             Instrument::Square1 { name, .. }
             | Instrument::Square2 { name, .. }
             | Instrument::Noise { name, .. }
             | Instrument::PCM { name, .. } => {
-                format!("instrument_{}", name)
+                name.to_string()
             }
         }
     }
