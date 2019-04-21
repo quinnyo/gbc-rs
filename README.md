@@ -1,6 +1,6 @@
-
-
 # A opinionated Gameboy Compiler
+
+[![pipeline status](https://gitlab.com/BonsaiDen/gbc-rs/badges/master/pipeline.svg)](https://gitlab.com/BonsaiDen/gbc-rs/commits/master)
 
 **gbc** is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
 
