@@ -1686,6 +1686,11 @@ mod test {
     }
 
     #[test]
+    fn test_error_const_default_double_override() {
+        assert_eq!(entry_lexer_error("foo DEFAULT EQU 1\nfoo EQU 2\nfoo EQU 3"), "In file \"main.gb.s\" on line 3, column 1: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 3\n^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 2, column 1:\n\nfoo EQU 2\n^--- Here");
+    }
+
+    #[test]
     fn test_error_const_redeclaration() {
         assert_eq!(entry_lexer_error("foo EQU 2 foo EQU 2"), "In file \"main.gb.s\" on line 1, column 11: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 2 foo EQU 2\n          ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo EQU 2 foo EQU 2\n^--- Here");
     }
