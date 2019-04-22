@@ -1005,6 +1005,35 @@ mod test {
         ]);
     }
 
+    #[test]
+    fn test_section_entry_constant_eval_default() {
+        let l = linker("A DEFAULT EQU 0\nA EQU 1\nB DEFAULT EQU 2\nC EQU 4\nC DEFAULT EQU 3\nSECTION ROM0\nDB A\nDB B\n DB C");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![4]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
 
     // Labels Entries ---------------------------------------------------------
     #[test]

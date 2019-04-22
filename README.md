@@ -78,8 +78,26 @@ INCLUDE "src/music.mod" USING "mod2gb --to-asm"
 INCLUDE BINARY "src/tiles.png" USING "image2gb --some-palette -i"
 ```
 
-### Blocks
+### Default Constant declarations
 
+In addition to the usual constant declarations of:
+
+```asm
+FOO EQU 1
+BAR EQUS "Hello World"
+```
+
+gbc supports `DEFAULT` declarations which can be later overwritten with a standard declaration:
+
+```asm
+; Inside of the library file
+LIBRARY_RAM_ADDRESS DEFAULT EQU $D000
+
+; In the actual project which already has other things reside at $D000
+LIBRARY_RAM_ADDRESS EQU $D100
+```
+
+### Blocks
 
 #### Using
 

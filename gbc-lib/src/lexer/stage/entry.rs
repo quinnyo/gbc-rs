@@ -50,6 +50,7 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     // Constant + EQU|EQUS + ConstExpression
     Constant {
         is_string => bool,
+        is_default => bool,
         value => DataExpression
     },
     // DS|DS8|DS16 + Size: ConstExpression [, fill value? (only in ROM segements)]
@@ -147,7 +148,8 @@ impl EntryStage {
 
     ) -> Result<Vec<EntryToken>, SourceError> {
 
-        let mut constants = HashMap::new();
+        let mut fixed_constants = HashMap::new();
+        let mut default_constants = HashMap::new();
         let mut entry_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
@@ -213,12 +215,12 @@ impl EntryStage {
                 },
 
                 // Constant Declarations
-                ExpressionToken::Constant(inner) => {
+                ExpressionToken::Constant(inner, is_default) => {
                     if tokens.peek_is(TokenType::Reserved, Some("EQU")) {
-                        Self::parse_constant_declaration(&mut tokens, &mut constants, inner, false)?
+                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, false, is_default)?
 
                     } else if tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
-                        Self::parse_constant_declaration(&mut tokens, &mut constants, inner, true)?
+                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, true, is_default)?
 
                     } else {
                         unreachable!("Expression lexer failed to return \"Constant\" token only if followed by EQU / EQUS");
@@ -356,26 +358,48 @@ impl EntryStage {
 
     fn parse_constant_declaration(
         tokens: &mut TokenIterator<ExpressionToken>,
-        constants: &mut HashMap<String, InnerToken>,
+        fixed_constants: &mut HashMap<String, InnerToken>,
+        default_constants: &mut HashMap<String, InnerToken>,
         inner: InnerToken,
-        is_string: bool
+        is_string: bool,
+        is_default: bool
 
     ) -> Result<EntryToken, SourceError> {
         tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
         if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
-            if let Some(constant_def) = constants.get(&inner.value) {
-                Err(inner.error(
-                    format!("Re-definition of previously declared constant \"{}\".", inner.value)
+            if is_default {
+                if let Some(constant_def) = default_constants.get(&inner.value) {
+                    Err(inner.error(
+                        format!("Re-definition of previously declared constant default \"{}\".", inner.value)
 
-                ).with_reference(&constant_def, "Original definition was"))
+                    ).with_reference(&constant_def, "Original definition was"))
+
+                } else {
+                    default_constants.insert(inner.value.clone(), inner.clone());
+                    Ok(EntryToken::Constant {
+                        inner,
+                        is_string,
+                        is_default,
+                        value: expr
+                    })
+                }
 
             } else {
-                constants.insert(inner.value.clone(), inner.clone());
-                Ok(EntryToken::Constant {
-                    inner,
-                    is_string,
-                    value: expr
-                })
+                if let Some(constant_def) = fixed_constants.get(&inner.value) {
+                    Err(inner.error(
+                        format!("Re-definition of previously declared constant \"{}\".", inner.value)
+
+                    ).with_reference(&constant_def, "Original definition was"))
+
+                } else {
+                    fixed_constants.insert(inner.value.clone(), inner.clone());
+                    Ok(EntryToken::Constant {
+                        inner,
+                        is_string,
+                        is_default,
+                        value: expr
+                    })
+                }
             }
 
         } else {
@@ -1589,13 +1613,24 @@ mod test {
         assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: false,
+            is_default: false,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: false,
+            is_default: false,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
+                "bar".to_string()
+            ))
+        }]);
+        assert_eq!(tfe("foo DEFAULT EQU bar"), vec![EntryToken::Constant {
+            inner: itk!(0, 3, "foo"),
+            is_string: false,
+            is_default: true,
+            value: Expression::Value(ExpressionValue::ConstantValue(
+                itk!(16, 19, "bar"),
                 "bar".to_string()
             ))
         }]);
@@ -1606,17 +1641,50 @@ mod test {
         assert_eq!(tfe("foo EQUS 'test'"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: true,
+            is_default: false,
             value: Expression::Value(ExpressionValue::String("test".to_string()))
         }]);
         assert_eq!(tfe("foo EQUS bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_string: true,
+            is_default: false,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(9, 12, "bar"),
                 "bar".to_string()
             ))
         }]);
+        assert_eq!(tfe("foo DEFAULT EQUS bar"), vec![EntryToken::Constant {
+            inner: itk!(0, 3, "foo"),
+            is_string: true,
+            is_default: true,
+            value: Expression::Value(ExpressionValue::ConstantValue(
+                itk!(17, 20, "bar"),
+                "bar".to_string()
+            ))
+        }]);
     }
+
+    #[test]
+    fn test_const_default_declaration() {
+        assert_eq!(tfe("foo DEFAULT EQU 1\nfoo EQU 2"), vec![EntryToken::Constant {
+            inner: itk!(0, 3, "foo"),
+            is_string: false,
+            is_default: true,
+            value: Expression::Value(ExpressionValue::Integer(1))
+
+        }, EntryToken::Constant {
+            inner: itk!(18, 21, "foo"),
+            is_string: false,
+            is_default: false,
+            value: Expression::Value(ExpressionValue::Integer(2))
+        }]);
+    }
+
+    #[test]
+    fn test_error_const_default_redeclaration() {
+        assert_eq!(entry_lexer_error("foo DEFAULT EQU 1\nfoo DEFAULT EQU 2"), "In file \"main.gb.s\" on line 2, column 1: Re-definition of previously declared constant default \"foo\".\n\nfoo DEFAULT EQU 2\n^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo DEFAULT EQU 1\n^--- Here");
+    }
+
     #[test]
     fn test_error_const_redeclaration() {
         assert_eq!(entry_lexer_error("foo EQU 2 foo EQU 2"), "In file \"main.gb.s\" on line 1, column 11: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 2 foo EQU 2\n          ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo EQU 2 foo EQU 2\n^--- Here");

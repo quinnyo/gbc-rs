@@ -198,13 +198,30 @@ impl Linker {
     ) -> Result<(), SourceError> {
         for token in tokens {
             // Record constants
-            if let EntryToken::Constant { inner, is_string, value } = token {
+            if let EntryToken::Constant { inner, is_string, is_default, value } = token {
                 if allow_constant_declaration {
-                    context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
-                        inner,
-                        is_string,
-                        expression: value
-                    });
+                    let existing_default = context.raw_constants.get(&inner.value).map(|c| c.is_default);
+                    let set = match (is_default, existing_default) {
+                        // Constant does not yet exist at all, set eith default or actual value
+                        (_, None) => true,
+                        // Constant already exists as a default, override with it with the actual value
+                        (false, Some(true)) => true,
+                        // Don't override existing actual value with a later declared default
+                        (true, Some(false)) => false,
+                        // Should not happen due to expression and entry stage filtering this case
+                        // out
+                        _ => {
+                            unreachable!("Invalid constant declaration order: {} {:?}", is_default, existing_default)
+                        }
+                    };
+                    if set {
+                        context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
+                            inner,
+                            is_string,
+                            is_default,
+                            expression: value
+                        });
+                    }
 
                 } else {
                     return Err(inner.error(

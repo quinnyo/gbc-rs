@@ -18,6 +18,7 @@ use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionR
 pub struct EvaluatorConstant {
     pub inner: InnerToken,
     pub is_string: bool,
+    pub is_default: bool,
     pub expression: DataExpression,
 }
 
