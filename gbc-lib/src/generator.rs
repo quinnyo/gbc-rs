@@ -178,7 +178,7 @@ pub struct ROMInfo {
 
 impl ROMInfo {
     fn from_buffer(buffer: &[u8]) -> Self {
-        let title = buffer[0x134..=0x13E].iter().map(|c| *c).take_while(|c| *c > 0).collect();
+        let title = buffer[0x134..=0x13E].iter().cloned().take_while(|c| *c > 0).collect();
         let rom_size = ROM_KB_SIZES.get(&(buffer[0x148], 0)).unwrap_or(&[0, 0]);
         let ram_size = RAM_KB_SIZES.get(&(buffer[0x149], 0)).unwrap_or(&[0, 0]);
         Self {
@@ -188,14 +188,14 @@ impl ROMInfo {
             cgb_flag: buffer[0x143],
             sgb_license_code: [buffer[0x144], buffer[0x145]],
             sgb_flag: buffer[0x146],
-            cart_type: CART_TYPES.get(&buffer[0x147]).map(|s| s.clone()),
+            cart_type: CART_TYPES.get(&buffer[0x147]).cloned(),
             rom_size: rom_size[0],
             ram_size: ram_size[0],
             country_code: buffer[0x14A],
             licensee_code: buffer[0x14B],
             mask_rom_version: buffer[0x14C],
             checksum_header: buffer[0x14D],
-            checksum_rom: (buffer[0x14E] as u16) << 8 | (buffer[0x14F] as u16),
+            checksum_rom: u16::from(buffer[0x14E]) << 8 | u16::from(buffer[0x14F]),
             size: buffer.len()
         }
     }
@@ -245,14 +245,14 @@ impl Generator {
     fn write_checksum(&mut self) {
         let mut header_checksum: i16 = 0;
         for i in 0x134..=0x14C {
-            header_checksum = (((header_checksum - self.buffer[i] as i16) & 0xff) - 1) & 0xff;
+            header_checksum = (((header_checksum - i16::from(self.buffer[i])) & 0xff) - 1) & 0xff;
         }
         self.buffer[0x14D] = header_checksum as u8;
 
         let mut rom_checksum: u32 = 0;
         for i in 0..self.buffer.len() {
             if i != 0x14E && i != 0x14F {
-                rom_checksum += self.buffer[i] as u32;
+                rom_checksum += u32::from(self.buffer[i]);
             }
         }
         self.buffer[0x14E] = (rom_checksum >> 8) as u8;

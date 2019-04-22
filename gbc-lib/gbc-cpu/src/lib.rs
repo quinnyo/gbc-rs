@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
+use std::convert::Into;
 use std::collections::HashMap;
 
 
@@ -13,7 +14,7 @@ pub type InstructionLayouts = HashMap<(String, Vec<LexerArgument>), usize>;
 pub fn instruction_layouts() -> InstructionLayouts {
     let mut layouts = HashMap::new();
     for (index, instr) in instructions::instructions().into_iter().enumerate() {
-        let layout = instr.layout.into_iter().map(|a| a.into()).collect();
+        let layout = instr.layout.into_iter().map(Into::into).collect();
         let key: (String, Vec<LexerArgument>) = (instr.name, layout);
         layouts.entry(key).or_insert(index);
     }

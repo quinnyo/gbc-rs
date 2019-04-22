@@ -30,6 +30,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             silent: false,
@@ -170,9 +171,9 @@ impl Compiler {
         self.info(format!("ROM Title: {}", info.title));
         self.info(format!("ROM Version: {}", info.mask_rom_version));
         self.info(format!("ROM Checksum: ${:0>2X} / ${:0>4X}", info.checksum_header, info.checksum_rom));
-        self.info(format!("ROM Size: {} bytes", info.rom_size as u32 * 1024));
+        self.info(format!("ROM Size: {} bytes", u32::from(info.rom_size) * 1024));
         if info.ram_size > 0 {
-            self.info(format!("RAM Size: {} bytes", info.ram_size as u32 * 1024));
+            self.info(format!("RAM Size: {} bytes", u32::from(info.ram_size) * 1024));
         }
 
         if let Some(cart_type) = info.cart_type {

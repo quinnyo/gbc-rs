@@ -237,7 +237,7 @@ impl ValueStage {
                     } else {
                         Self::parse_operator_single(&inner)?
                     };
-                    inner.end_index = inner.start_index + typ.len();
+                    inner.end_index = inner.start_index + typ.width();
                     ValueToken::Operator {
                         inner,
                         typ

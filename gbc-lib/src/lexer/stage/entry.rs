@@ -384,22 +384,20 @@ impl EntryStage {
                     })
                 }
 
+            } else if let Some(constant_def) = fixed_constants.get(&inner.value) {
+                Err(inner.error(
+                    format!("Re-definition of previously declared constant \"{}\".", inner.value)
+
+                ).with_reference(&constant_def, "Original definition was"))
+
             } else {
-                if let Some(constant_def) = fixed_constants.get(&inner.value) {
-                    Err(inner.error(
-                        format!("Re-definition of previously declared constant \"{}\".", inner.value)
-
-                    ).with_reference(&constant_def, "Original definition was"))
-
-                } else {
-                    fixed_constants.insert(inner.value.clone(), inner.clone());
-                    Ok(EntryToken::Constant {
-                        inner,
-                        is_string,
-                        is_default,
-                        value: expr
-                    })
-                }
+                fixed_constants.insert(inner.value.clone(), inner.clone());
+                Ok(EntryToken::Constant {
+                    inner,
+                    is_string,
+                    is_default,
+                    value: expr
+                })
             }
 
         } else {
@@ -1073,7 +1071,7 @@ impl EntryStage {
                         inner,
                         alignment,
                         endianess: DataEndianess::Little,
-                        storage: DataStorage::Buffer(expr, Some(data_expr)),
+                        storage: DataStorage::Buffer(Box::new(expr), Some(data_expr)),
                         is_constant: true,
                         debug_only: false
                     })
@@ -1087,7 +1085,7 @@ impl EntryStage {
                     inner,
                     alignment,
                     endianess: DataEndianess::Little,
-                    storage: DataStorage::Buffer(expr, None),
+                    storage: DataStorage::Buffer(Box::new(expr), None),
                     is_constant: true,
                     debug_only: false
                 })
@@ -1890,13 +1888,13 @@ mod test {
             inner: itk!(0, 2, "DS"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Buffer(Expression::Binary {
+            storage: DataStorage::Buffer(Box::new(Expression::Binary {
                 inner: itk!(5, 6, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }, None),
+            }), None),
             is_constant: true,
             debug_only: false
         }]);
@@ -1909,7 +1907,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Buffer(
-                Expression::Value(ExpressionValue::Integer(15)),
+                Box::new(Expression::Value(ExpressionValue::Integer(15))),
                 Some(Expression::Value(ExpressionValue::String("Hello World".to_string())))
             ),
             is_constant: true,
@@ -1924,7 +1922,7 @@ mod test {
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
             storage: DataStorage::Buffer(
-                Expression::Value(ExpressionValue::String("Hello World".to_string())),
+                Box::new(Expression::Value(ExpressionValue::String("Hello World".to_string()))),
                 None
             ),
             is_constant: true,
@@ -1938,13 +1936,13 @@ mod test {
             inner: itk!(0, 3, "DS8"),
             alignment: DataAlignment::WithinWord,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Buffer(Expression::Binary {
+            storage: DataStorage::Buffer(Box::new(Expression::Binary {
                 inner: itk!(6, 7, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }, None),
+            }), None),
             is_constant: true,
             debug_only: false
         }]);
@@ -1956,13 +1954,13 @@ mod test {
             inner: itk!(0, 4, "DS16"),
             alignment: DataAlignment::Word,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Buffer(Expression::Binary {
+            storage: DataStorage::Buffer(Box::new(Expression::Binary {
                 inner: itk!(7, 8, "+"),
                 op: Operator::Plus,
                 left: Box::new(Expression::Value(ExpressionValue::Integer(2))),
                 right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
 
-            }, None),
+            }), None),
             is_constant: true,
             debug_only: false
         }]);

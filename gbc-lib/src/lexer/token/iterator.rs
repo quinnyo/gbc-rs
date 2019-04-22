@@ -21,7 +21,7 @@ impl<T: LexerToken> TokenIterator<T> {
     }
 
     pub fn peek_typ(&mut self) -> Option<TokenType> {
-        self.tokens.peek().map(|t| t.typ())
+        self.tokens.peek().map(LexerToken::typ)
     }
 
     pub fn peek_is(&mut self, typ: TokenType, value: Option<&str>) -> bool {
@@ -99,7 +99,11 @@ impl<T: LexerToken> TokenIterator<T> {
         }
     }
 
-    pub fn next(&mut self) -> Option<T> {
+}
+
+impl<T: LexerToken> Iterator for TokenIterator<T>  {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
         match self.tokens.next() {
             Some(token) => {
                 let (file_index, index) = token.index();
@@ -110,6 +114,5 @@ impl<T: LexerToken> TokenIterator<T> {
             None => None
         }
     }
-
 }
 

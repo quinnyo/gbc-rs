@@ -672,7 +672,7 @@ impl Section {
                 }
             },
             DataStorage::Buffer(length, fill) => {
-                let length_or_string = context.resolve_expression(length, inner.file_index)?;
+                let length_or_string = context.resolve_expression(*length, inner.file_index)?;
                 let fill = context.resolve_optional_expression(fill, inner.file_index)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"

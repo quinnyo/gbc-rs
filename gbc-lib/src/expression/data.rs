@@ -34,7 +34,7 @@ pub enum DataStorage {
     /// DW 1[, 2, 3]
     Words(Vec<DataExpression>),
     /// DS [length] [fill]
-    Buffer(DataExpression, Option<DataExpression>)
+    Buffer(Box<DataExpression>, Option<DataExpression>)
 }
 
 impl DataStorage {

@@ -35,6 +35,7 @@ pub struct EvaluatorContext {
 
 impl EvaluatorContext {
 
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             constants: HashMap::new(),

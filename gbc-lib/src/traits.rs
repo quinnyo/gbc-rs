@@ -59,7 +59,7 @@ pub trait FileReader {
             Err("Missing command name".to_string())
 
         } else {
-            let mut args: Vec<String> = args.into_iter().map(|arg| arg.to_string()).collect();
+            let mut args: Vec<String> = args.map(|arg| arg.to_string()).collect();
             if let Some(path) = path {
                 args.push(path.display().to_string());
             }

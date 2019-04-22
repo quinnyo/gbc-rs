@@ -44,7 +44,7 @@ impl Expression {
             Expression::Binary { left, right, .. } => right.is_constant() && left.is_constant(),
             Expression::Unary { right, .. } => right.is_constant(),
             Expression::Value(value) => value.is_constant(),
-            Expression::BuiltinCall { args, .. } => args.iter().all(|arg| arg.is_constant())
+            Expression::BuiltinCall { args, .. } => args.iter().all(Expression::is_constant)
         }
     }
 
@@ -227,7 +227,7 @@ impl Operator {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn width(&self) -> usize {
         match self {
             Operator::ShiftRight | Operator::ShiftLeft | Operator::LogicalAnd | Operator::LogicalOr |
             Operator::Equals | Operator::Unequals | Operator::GreaterThanEqual | Operator::LessThanEqual |
