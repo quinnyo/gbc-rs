@@ -45,6 +45,12 @@ ARGS:
 
 ## General Syntax
 
+### File locality
+
+Labels and constants that start with underscore (`_`) are only visible within
+the file they are declared in.
+
+
 ### Includes
 
 gbc supports two types of includes:
