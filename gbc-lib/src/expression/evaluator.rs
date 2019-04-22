@@ -14,20 +14,23 @@ use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionR
 
 
 // Expression Evaluator -------------------------------------------------------
+type FileIndex = Option<usize>;
+type ConstantIndex = (String, FileIndex);
+
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct EvaluatorConstant {
-    pub inner: InnerToken,
-    pub is_string: bool,
-    pub is_default: bool,
-    pub expression: DataExpression,
+struct EvaluatorConstant {
+    inner: InnerToken,
+    is_string: bool,
+    is_default: bool,
+    expression: DataExpression,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct EvaluatorContext {
-    pub constants: HashMap<String, ExpressionResult>,
-    pub raw_constants: HashMap<String, EvaluatorConstant>,
-    pub label_addresses: HashMap<usize, usize>,
-    pub rom_offset: i32
+    constants: HashMap<ConstantIndex, ExpressionResult>,
+    raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,
+    label_addresses: HashMap<usize, usize>,
+    relative_address_offset: i32
 }
 
 impl EvaluatorContext {
@@ -37,21 +40,57 @@ impl EvaluatorContext {
             constants: HashMap::new(),
             raw_constants: HashMap::new(),
             label_addresses: HashMap::new(),
-            rom_offset: 0
+            relative_address_offset: 0
         }
     }
 
+    pub fn declare_constant(&mut self, inner: InnerToken, is_string: bool, is_default: bool, value: DataExpression) {
+
+        let index = constant_index(&inner);
+        let existing_default = self.raw_constants.get(&index).map(|c| c.is_default);
+        let set = match (is_default, existing_default) {
+            // Constant does not yet exist at all, set eith default or actual value
+            (_, None) => true,
+            // Constant already exists as a default, override with it with the actual value
+            (false, Some(true)) => true,
+            // Don't override existing actual value with a later declared default
+            (true, Some(false)) => false,
+            // Should not happen due to expression and entry stage filtering this case
+            // out
+            _ => {
+                unreachable!("Invalid constant declaration order: {} {:?}", is_default, existing_default)
+            }
+        };
+        if set {
+            self.raw_constants.insert(index, EvaluatorConstant {
+                inner,
+                is_string,
+                is_default,
+                expression: value
+            });
+        }
+    }
+
+    pub fn update_label_address(&mut self, label_id: usize, address: usize) {
+        self.label_addresses.insert(label_id, address);
+    }
+
+    pub fn set_relative_address_offset(&mut self, offset: i32) {
+        self.relative_address_offset = offset;
+    }
+
     pub fn resolve_constants(&mut self) -> Result<(), SourceError> {
-        let mut names: Vec<String> = self.raw_constants.keys().cloned().collect();
+        let mut names: Vec<ConstantIndex> = self.raw_constants.keys().cloned().collect();
         names.sort_by(|a, b| {
             a.cmp(&b)
         });
         for name in names {
             let constant = self.raw_constants[&name].clone();
-            let stack = vec![name.as_str()];
+            let stack = vec![name.0.as_str()];
             let c = self.resolve_expression_inner(
                 &stack,
-                constant.expression
+                constant.expression,
+                constant.inner.file_index
             )?;
 
             // Check result matches desired type
@@ -70,55 +109,25 @@ impl EvaluatorContext {
         Ok(())
     }
 
-    pub fn resolve_constant_expression(
-        &mut self,
-        parent: &InnerToken,
-        constant_stack: &[&str],
-        name: &str
-
-    ) -> Result<ExpressionResult, SourceError> {
-        if let Some(result) = self.constants.get(name) {
-            Ok(result.clone())
-
-        } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(name).cloned() {
-            let value = expression.clone();
-            if constant_stack.contains(&name) {
-                Err(parent.error(
-                    format!("Recursive declaration of constant \"{}\".", name)
-
-                ).with_reference(&inner, "Initial declaration was"))
-
-            } else {
-                let mut child_stack = constant_stack.to_vec();
-                child_stack.push(name);
-                self.resolve_expression_inner(
-                    &child_stack,
-                    value
-                )
-            }
-
-        } else {
-            Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
-        }
-    }
-
     pub fn resolve_expression(
         &mut self,
-        expression: DataExpression
+        expression: DataExpression,
+        from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::with_capacity(8);
-        self.resolve_expression_inner(&stack, expression)
+        self.resolve_expression_inner(&stack, expression, from_file_index)
     }
 
     pub fn resolve_optional_expression(
         &mut self,
-        expression: OptionalDataExpression
+        expression: OptionalDataExpression,
+        from_file_index: usize
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
             let stack = Vec::with_capacity(8);
-            Ok(Some(self.resolve_expression_inner(&stack, expr)?))
+            Ok(Some(self.resolve_expression_inner(&stack, expr, from_file_index)?))
 
         } else {
             Ok(None)
@@ -128,25 +137,29 @@ impl EvaluatorContext {
     fn resolve_expression_inner(
         &mut self,
         constant_stack: &[&str],
-        expression: Expression
+        expression: Expression,
+        from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         Ok(match expression {
             Expression::Binary { inner, op, left, right } => {
                 let left = self.resolve_expression_inner(
                     constant_stack,
-                    *left
+                    *left,
+                    from_file_index
                 )?;
                 let right = self.resolve_expression_inner(
                     constant_stack,
-                    *right
+                    *right,
+                    from_file_index
                 )?;
                 Self::apply_binary_operator(&inner, op.clone(), left, right)?
             },
             Expression::Unary { inner, op, right  } => {
                 let right = self.resolve_expression_inner(
                     constant_stack,
-                    *right
+                    *right,
+                    from_file_index
                 )?;
                 Self::apply_unary_operator(&inner, op.clone(), right)?
             },
@@ -156,16 +169,18 @@ impl EvaluatorContext {
                         let c = self.resolve_constant_expression(
                             &inner,
                             constant_stack,
-                            &name
+                            &name,
+                            inner.file_index
                         )?;
-                        self.constants.insert(name.clone(), c.clone());
+                        let index = constant_index(&inner);
+                        self.constants.insert(index, c.clone());
                         c
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(i),
                     ExpressionValue::Float(f) => ExpressionResult::Float(f),
                     ExpressionValue::String(s) => ExpressionResult::String(s),
                     ExpressionValue::OffsetAddress(_, offset) => {
-                        ExpressionResult::Integer(self.rom_offset + offset)
+                        ExpressionResult::Integer(self.relative_address_offset + offset)
                     },
                     ExpressionValue::GlobalLabelAddress(_, id) => {
                         ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
@@ -180,12 +195,48 @@ impl EvaluatorContext {
                 for arg in args {
                     arguments.push(self.resolve_expression_inner(
                         constant_stack,
-                        arg
+                        arg,
+                        from_file_index
                     )?);
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)?
             }
         })
+    }
+
+    fn resolve_constant_expression(
+        &mut self,
+        parent: &InnerToken,
+        constant_stack: &[&str],
+        name: &str,
+        from_file_index: usize
+
+    ) -> Result<ExpressionResult, SourceError> {
+        let index = constant_index_raw(name, from_file_index);
+        if let Some(result) = self.constants.get(&index) {
+            Ok(result.clone())
+
+        } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(&index).cloned() {
+            let value = expression.clone();
+            if constant_stack.contains(&name) {
+                Err(parent.error(
+                    format!("Recursive declaration of constant \"{}\".", name)
+
+                ).with_reference(&inner, "Initial declaration was"))
+
+            } else {
+                let mut child_stack = constant_stack.to_vec();
+                child_stack.push(name);
+                self.resolve_expression_inner(
+                    &child_stack,
+                    value,
+                    from_file_index
+                )
+            }
+
+        } else {
+            Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
+        }
     }
 
     fn execute_builtin_call(
@@ -650,6 +701,24 @@ impl EvaluatorContext {
 
 }
 
+fn constant_index(inner: &InnerToken) -> ConstantIndex {
+    if inner.value.starts_with('_') {
+        (inner.value.clone(), Some(inner.file_index))
+
+    } else {
+        (inner.value.clone(), None)
+    }
+}
+
+fn constant_index_raw(name: &str, file_index: usize) -> ConstantIndex {
+    if name.starts_with('_') {
+        (name.to_string(), Some(file_index))
+
+    } else {
+        (name.to_string(), None)
+    }
+}
+
 fn b2i(m: bool) -> i32 {
     if m {
         1
@@ -684,7 +753,7 @@ mod test {
         if let ExpressionToken::ConstExpression(_, expr) = token {
             let mut context = EvaluatorContext::new();
             let stack = Vec::new();
-            context.resolve_expression_inner(&stack, expr)
+            context.resolve_expression_inner(&stack, expr, 0)
 
         } else {
             panic!("Not a constant expression");

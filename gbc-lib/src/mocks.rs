@@ -135,6 +135,13 @@ pub fn entry_lex<S: Into<String>>(s: S) -> Lexer<EntryStage> {
     Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
 }
 
+pub fn entry_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<EntryStage> {
+    let lexer = macro_lex_child(s, c);
+    let lexer = Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed");
+    let lexer = Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed");
+    Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
+}
+
 pub fn expr_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<ExpressionStage> {
     let mut reader = MockFileReader::default();
     reader.add_file("main.gb.s", s.into().as_str());
