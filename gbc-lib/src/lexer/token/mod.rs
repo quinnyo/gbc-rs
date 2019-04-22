@@ -99,8 +99,8 @@ pub enum TokenType {
     DebugInstruction,
     DebugInstructionWithArg,
     SectionDeclaration,
-    UsingStatement
-
+    UsingStatement,
+    VolatileStatement
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

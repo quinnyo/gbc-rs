@@ -26,6 +26,7 @@ pub enum EntryData {
         op_code: usize,
         expression: OptionalDataExpression,
         bytes: Vec<u8>,
+        volatile: bool,
         debug_only: bool
     },
     Block {

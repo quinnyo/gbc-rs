@@ -106,7 +106,8 @@ pub struct ForStatement<T: LexerToken> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum BlockStatement<T: LexerToken> {
-    Using(String, Vec<T>)
+    Using(String, Vec<T>),
+    Volatile(Vec<T>)
 }
 
 
@@ -412,8 +413,16 @@ impl MacroStage {
                         BlockStatement::Using(command.into_inner().value, body)
                     ));
 
+                } else if tokens.peek_is(TokenType::Reserved, Some("VOLATILE")) {
+                    tokens.expect(TokenType::Reserved, Some("VOLATILE"), "when parsing VOLATILE BLOCK")?;
+                    let body = Self::parse_block_body(&mut tokens)?;
+                    tokens_with_statements.push(MacroToken::BlockStatement(
+                        token.into_inner(),
+                        BlockStatement::Volatile(body)
+                    ));
+
                 } else {
-                    return Err(token.error("Expected a USING keyword to BLOCK directive.".to_string()));
+                    return Err(token.error("Expected either a USING or VOLATILE keyword to BLOCK directive.".to_string()));
                 }
 
             } else {
@@ -1642,8 +1651,20 @@ mod test {
     }
 
     #[test]
+    fn test_block_volatile() {
+        let lexer = macro_lexer("BLOCK VOLATILE nop ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
+                vec![
+                    MacroToken::Instruction(itk!(15, 18, "nop"))
+                ])
+            )
+        ]);
+    }
+
+    #[test]
     fn test_error_block() {
-        assert_eq!(macro_lexer_error("BLOCK"), "In file \"main.gb.s\" on line 1, column 1: Expected a USING keyword to BLOCK directive.\n\nBLOCK\n^--- Here");
+        assert_eq!(macro_lexer_error("BLOCK"), "In file \"main.gb.s\" on line 1, column 1: Expected either a USING or VOLATILE keyword to BLOCK directive.\n\nBLOCK\n^--- Here");
         assert_eq!(macro_lexer_error("ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDBLOCK\" token outside of BLOCK statement.\n\nENDBLOCK\n^--- Here");
     }
 

@@ -94,7 +94,8 @@ impl ExpressionToken {
             },
             ValueToken::BlockStatement(inner, block) => {
                 Ok(ExpressionToken::BlockStatement(inner, match block {
-                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, false)?)
+                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, false)?),
+                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, false)?)
                 }))
             },
             token => Err(token.error(
@@ -1191,6 +1192,18 @@ mod test {
                         itk!(21, 22, "1"),
                         Expression::Value(ExpressionValue::Integer(1))
                     )
+                ])
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_block_volatile_forwarding() {
+        let lexer = expr_lexer("BLOCK VOLATILE nop ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            ExpressionToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
+                vec![
+                    ExpressionToken::Instruction(itk!(15, 18, "nop"))
                 ])
             )
         ]);

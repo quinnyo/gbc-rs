@@ -227,11 +227,17 @@ impl Section {
         (&self.segment, self.bank)
     }
 
-    pub fn add_entry(&mut self, context: &mut EvaluatorContext, token: EntryToken) -> Result<(), SourceError> {
+    pub fn add_entry(
+        &mut self,
+        context: &mut EvaluatorContext,
+        token: EntryToken,
+        volatile: bool
+
+    ) -> Result<(), SourceError> {
         match token {
             EntryToken::Instruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, None, false)?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, None, volatile, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -241,7 +247,7 @@ impl Section {
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), false)?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), volatile, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -251,7 +257,7 @@ impl Section {
             },
             EntryToken::DebugInstruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, None, true)?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, None, volatile, true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -261,7 +267,7 @@ impl Section {
             },
             EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), true)?;
+                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), volatile, true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -821,6 +827,7 @@ impl Section {
         context: &mut EvaluatorContext,
         op_code: usize,
         expression: Option<DataExpression>,
+        volatile: bool,
         debug_only: bool
 
     ) -> Result<EntryData, SourceError> {
@@ -838,6 +845,7 @@ impl Section {
                         op_code,
                         expression: None,
                         bytes,
+                        volatile,
                         debug_only
                     })
 
@@ -846,6 +854,7 @@ impl Section {
                         op_code,
                         expression: Some(expression),
                         bytes: instruction::bytes(op_code),
+                        volatile,
                         debug_only
                     })
                 }
@@ -855,6 +864,7 @@ impl Section {
                     op_code,
                     expression: Some(expression),
                     bytes: instruction::bytes(op_code),
+                    volatile,
                     debug_only
                 })
             }
@@ -864,6 +874,7 @@ impl Section {
                 op_code,
                 expression: None,
                 bytes: instruction::bytes(op_code),
+                volatile,
                 debug_only
             })
         }
@@ -1451,18 +1462,21 @@ mod test {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 25,
                     expression: None,
                     bytes: vec![25],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 319,
                     expression: None,
                     bytes: vec![203, 63],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -1477,12 +1491,14 @@ mod test {
                     op_code: 62,
                     expression: None,
                     bytes: vec![62, 32],
+                    volatile: false,
                     debug_only: false
                 }),
                 (3, EntryData::Instruction {
                     op_code: 33,
                     expression: None,
                     bytes: vec![33, 0, 64],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -1504,6 +1520,7 @@ mod test {
                         op_code: 327,
                         expression: None,
                         bytes: vec![203, op],
+                        volatile: false,
                         debug_only: false
                     })
                 ]
@@ -1517,6 +1534,7 @@ mod test {
                         op_code: 391,
                         expression: None,
                         bytes: vec![203, op],
+                        volatile: false,
                         debug_only: false
                     })
                 ]
@@ -1530,6 +1548,7 @@ mod test {
                         op_code: 455,
                         expression: None,
                         bytes: vec![203, op],
+                        volatile: false,
                         debug_only: false
                     })
                 ]
@@ -1543,6 +1562,7 @@ mod test {
                         op_code: 199,
                         expression: None,
                         bytes: vec![op],
+                        volatile: false,
                         debug_only: false
                     })
                 ]
@@ -1571,18 +1591,21 @@ mod test {
                     op_code: 40,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(26, 32, "global"), 1))),
                     bytes: vec![40, 254],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(36, 39, "+4"), 4))),
                     bytes: vec![24, 4],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(43, 46, "-1"), -1))),
                     bytes: vec![24, 255],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -1593,18 +1616,21 @@ mod test {
                     op_code: 240,
                     expression: None,
                     bytes: vec![240, 65],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 230,
                     expression: None,
                     bytes: vec![230, 2],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 32,
                     expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 18, "vsync"), -6))),
                     bytes: vec![32, 250],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -1615,6 +1641,7 @@ mod test {
                     op_code: 248,
                     expression: None,
                     bytes: vec![248, 253],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -1625,6 +1652,7 @@ mod test {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 19, "foo"), 1))),
                     bytes: vec![24, 0],
+                    volatile: false,
                     debug_only: false
                 }),
                 (0, EntryData::Label {
@@ -1636,12 +1664,14 @@ mod test {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(28, 31, "bar"), 2))),
                     bytes: vec![24, 1],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 }),
                 (0, EntryData::Label {
@@ -1674,12 +1704,14 @@ mod test {
                     op_code: 195,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(24, 27, "foo"), 2))),
                     bytes: vec![195, 6, 0],
-                    debug_only: false }),
-
+                    volatile: false,
+                    debug_only: false
+                }),
                 (3, EntryData::Instruction {
                     op_code: 195,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(31, 37, "global"), 1))),
                     bytes: vec![195, 0, 0],
+                    volatile: false,
                     debug_only: false
                 }),
                 (0, EntryData::Label {
@@ -1699,6 +1731,7 @@ mod test {
                     op_code: 64,
                     expression: None,
                     bytes: vec![64],
+                    volatile: false,
                     debug_only: true
                 })
             ]
@@ -1725,6 +1758,7 @@ mod test {
                     op_code: 82,
                     expression: None,
                     bytes: vec![82],
+                    volatile: false,
                     debug_only: true
                 }),
                 (2, EntryData::Instruction {
@@ -1733,30 +1767,35 @@ mod test {
                         Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 15))
                     ),
                     bytes: vec![24, 15],
+                    volatile: false,
                     debug_only: true
                 }),
                 (1, EntryData::Instruction {
                     op_code: 100,
                     expression: None,
                     bytes: vec![100],
+                    volatile: false,
                     debug_only: true
                 }),
                 (1, EntryData::Instruction {
                     op_code: 100,
                     expression: None,
                     bytes: vec![100],
+                    volatile: false,
                     debug_only: true
                 }),
                 (1, EntryData::Instruction {
                     op_code: 0,
                     expression: None,
                     bytes: vec![0],
+                    volatile: false,
                     debug_only: true
                 }),
                 (1, EntryData::Instruction {
                     op_code: 0,
                     expression: None,
                     bytes: vec![0],
+                    volatile: false,
                     debug_only: true
                 }),
                 (11, EntryData::Data {
@@ -1787,6 +1826,7 @@ mod test {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![24, 0],
+                    volatile: false,
                     debug_only: false
                 }),
                 (0, EntryData::Label {
@@ -1798,6 +1838,7 @@ mod test {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ]

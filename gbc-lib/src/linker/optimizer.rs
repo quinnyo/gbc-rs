@@ -13,8 +13,13 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
 
     fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(usize, i32, &OptionalDataExpression, &[u8])> {
         if let Some(entry) = entries.get(i) {
-            if let EntryData::Instruction { ref op_code, ref bytes, ref expression, .. } = entry.data {
-                Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes))
+            if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
+                if volatile {
+                    None
+
+                } else {
+                    Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes))
+                }
 
             } else {
                 None
@@ -55,6 +60,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                                 op_code,
                                 expression,
                                 bytes,
+                                volatile: false,
                                 debug_only: false
                             }
                         ))
@@ -105,6 +111,7 @@ fn optimize_instructions(
                 op_code: 175,
                 expression: None,
                 bytes: instruction::bytes(175),
+                volatile: false,
                 debug_only: false
             }]))
         },
@@ -117,6 +124,7 @@ fn optimize_instructions(
                 op_code: 183,
                 expression: None,
                 bytes: instruction::bytes(183),
+                volatile: false,
                 debug_only: false
             }]))
         },
@@ -127,6 +135,7 @@ fn optimize_instructions(
                 op_code: 0xF0,
                 expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),
                 bytes: instruction::bytes(0xF0),
+                volatile: false,
                 debug_only: false
             }]))
         },
@@ -137,6 +146,7 @@ fn optimize_instructions(
                 op_code: 0xE0,
                 expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),
                 bytes: instruction::bytes(0xE0),
+                volatile: false,
                 debug_only: false
             }]))
         },
@@ -167,6 +177,7 @@ fn optimize_instructions(
                         op_code: 0x18,
                         expression: expression.clone(),
                         bytes: instruction::bytes(0x18),
+                        volatile: false,
                         debug_only: false
                     }]))
 
@@ -176,6 +187,7 @@ fn optimize_instructions(
                         op_code: op_code - 0xA2,
                         expression: expression.clone(),
                         bytes: instruction::bytes(op_code - 0xA2),
+                        volatile: false,
                         debug_only: false
                     }]))
                 }
@@ -195,6 +207,7 @@ fn optimize_instructions(
                 op_code: 0xC3,
                 expression: expression.clone(),
                 bytes: instruction::bytes(0xC3),
+                volatile: false,
                 debug_only: false
             }]))
         },
@@ -253,24 +266,28 @@ fn optimize_instructions(
                     op_code: 0x0F,
                     expression: None,
                     bytes: instruction::bytes(0x0F),
+                    volatile: false,
                     debug_only: false
                 },
                 EntryData::Instruction {
                     op_code: 0x0F,
                     expression: None,
                     bytes: instruction::bytes(0x0F),
+                    volatile: false,
                     debug_only: false
                 },
                 EntryData::Instruction {
                     op_code: 0x0F,
                     expression: None,
                     bytes: instruction::bytes(0x0F),
+                    volatile: false,
                     debug_only: false
                 },
                 EntryData::Instruction {
                     op_code: 0xE6,
                     expression: Some(Expression::Value(ExpressionValue::Integer(0x1F))),
                     bytes: instruction::bytes(0xE6),
+                    volatile: false,
                     debug_only: false
                 }
             ]))
@@ -308,6 +325,7 @@ mod test {
                     op_code: 205,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 2))),
                     bytes: vec![205, 130, 0],
+                    volatile: false,
                     debug_only: false
                 }),
                 (0, EntryData::Label {
@@ -319,12 +337,14 @@ mod test {
                     op_code: 201,
                     expression: None,
                     bytes: vec![201],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -348,12 +368,14 @@ mod test {
                     op_code: 175,
                     expression: None,
                     bytes: vec![175],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -369,12 +391,14 @@ mod test {
                     op_code: 183,
                     expression: None,
                     bytes: vec![183],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -390,12 +414,14 @@ mod test {
                     op_code: 240,
                     expression: Some(Expression::Value(ExpressionValue::Integer(5))),
                     bytes: vec![240, 5],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -411,12 +437,14 @@ mod test {
                     op_code: 224,
                     expression: Some(Expression::Value(ExpressionValue::Integer(5))),
                     bytes: vec![224, 5],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -432,12 +460,14 @@ mod test {
                     op_code: 195,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![195, 130, 0],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -460,12 +490,14 @@ mod test {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![24, 127],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 127,
                     expression: None,
                     bytes: vec![127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -488,6 +520,7 @@ mod test {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![24, 127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -513,6 +546,7 @@ mod test {
                     op_code: 24,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1))),
                     bytes: vec![24, 130],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -525,6 +559,7 @@ mod test {
                     op_code: 56,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![56, 127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -543,6 +578,7 @@ mod test {
                     op_code: 48,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1))),
                     bytes: vec![48, 127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -561,6 +597,7 @@ mod test {
                     op_code: 40,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![40, 127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -579,6 +616,7 @@ mod test {
                     op_code: 32,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1))),
                     bytes: vec![32, 127],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -601,12 +639,14 @@ mod test {
                     op_code: 195,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![195, 129, 0],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 0,
                     expression: None,
                     bytes: vec![0],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -629,6 +669,7 @@ mod test {
                     op_code: 195,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![195, 130, 0],
+                    volatile: false,
                     debug_only: false
                 })
             ],
@@ -654,6 +695,7 @@ mod test {
                     op_code: 195,
                     expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1))),
                     bytes: vec![195, 0, 0],
+                    volatile: false,
                     debug_only: false
                 })
             ]
@@ -669,30 +711,59 @@ mod test {
                     op_code: 15,
                     expression: None,
                     bytes: vec![15],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 15,
                     expression: None,
                     bytes: vec![15],
+                    volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
                     op_code: 15,
                     expression: None,
                     bytes: vec![15],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 230,
                     expression: Some(Expression::Value(ExpressionValue::Integer(0x1F))),
                     bytes: vec![230, 31],
+                    volatile: false,
                     debug_only: false
                 }),
                 (2, EntryData::Instruction {
                     op_code: 319,
                     expression: None,
                     bytes: vec![203, 63],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    // Volatile Blocks --------------------------------------------------------
+    #[test]
+    fn test_volatile_block_no_optimize() {
+        let l = linker_optimize("SECTION ROM0\nBLOCK VOLATILE\nld a,0\ncp 0\nENDBLOCK");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 62,
+                    expression: None,
+                    bytes: vec![62, 0],
+                    volatile: true,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 254,
+                    expression: None,
+                    bytes: vec![254, 0],
+                    volatile: true,
                     debug_only: false
                 })
             ]

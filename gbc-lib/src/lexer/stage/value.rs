@@ -141,7 +141,8 @@ impl ValueStage {
                 },
                 MacroToken::BlockStatement(inner, block) => {
                     ValueToken::BlockStatement(inner, match block {
-                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?)
+                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?),
+                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?)
                     })
                 },
 
@@ -1292,6 +1293,18 @@ mod test {
                         inner: itk!(21, 22, "1"),
                         value: 1
                     }
+                ])
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_block_volatile_forwarding() {
+        let lexer = value_lexer("BLOCK VOLATILE nop ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
+                vec![
+                    ValueToken::Instruction(itk!(15, 18, "nop"))
                 ])
             )
         ]);

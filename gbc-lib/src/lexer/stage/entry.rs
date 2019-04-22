@@ -43,7 +43,8 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch>)),
     // FOR [Sring] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
     ForStatement((ForStatement)),
-    UsingStatement((String, Vec<EntryToken>))
+    UsingStatement((String, Vec<EntryToken>)),
+    VolatileStatement((Vec<EntryToken>))
 
 }, {
     // Constant + EQU|EQUS + ConstExpression
@@ -206,7 +207,8 @@ impl EntryStage {
                 // Block Statements
                 ExpressionToken::BlockStatement(inner, block) => {
                     match block {
-                        BlockStatement::Using(cmd, body) => EntryToken::UsingStatement(inner, cmd, Self::parse_entry_tokens(body, layouts)?)
+                        BlockStatement::Using(cmd, body) => EntryToken::UsingStatement(inner, cmd, Self::parse_entry_tokens(body, layouts)?),
+                        BlockStatement::Volatile(body) => EntryToken::VolatileStatement(inner, Self::parse_entry_tokens(body, layouts)?)
                     }
                 },
 
@@ -3269,6 +3271,21 @@ mod test {
                         is_constant: true,
                         debug_only: false
                     }
+                ]
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_block_volatile() {
+        let lexer = entry_lexer("BLOCK VOLATILE nop\nld a,a\nccf ENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            EntryToken::VolatileStatement(
+                itk!(0, 5, "BLOCK"),
+                vec![
+                    EntryToken::Instruction(itk!(15, 18, "nop"), 0),
+                    EntryToken::Instruction(itk!(19, 21, "ld"), 127),
+                    EntryToken::Instruction(itk!(26, 29, "ccf"), 63)
                 ]
             )
         ]);

@@ -61,7 +61,7 @@ impl Linker {
 
         let mut context = EvaluatorContext::new();
         let mut entry_tokens = Vec::with_capacity(tokens.len());
-        Self::parse_entries(&mut context, tokens, true, &mut entry_tokens)?;
+        Self::parse_entries(&mut context, tokens, true, false, &mut entry_tokens)?;
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
@@ -70,7 +70,7 @@ impl Linker {
         // Map entries to sections
         let mut section_index = 0;
         let mut sections: Vec<Section> = Vec::new();
-        for token in entry_tokens {
+        for (volatile, token) in entry_tokens {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
@@ -110,7 +110,7 @@ impl Linker {
                 return Err(token.error("Unexpected ROM entry before any section declaration".to_string()))
 
             } else if let Some(section) = sections.get_mut(section_index) {
-                section.add_entry(&mut context, token)?;
+                section.add_entry(&mut context, token, volatile)?;
             }
         }
 
@@ -192,7 +192,8 @@ impl Linker {
         context: &mut EvaluatorContext,
         tokens: Vec<EntryToken>,
         allow_constant_declaration: bool,
-        remaining_tokens: &mut Vec<EntryToken>
+        volatile_instructions: bool,
+        remaining_tokens: &mut Vec<(bool, EntryToken)>
 
     ) -> Result<(), SourceError> {
         for token in tokens {
@@ -222,7 +223,7 @@ impl Linker {
                         ExpressionResult::Integer(1)
                     };
                     if result.is_truthy() {
-                        Self::parse_entries(context, branch.body, true, remaining_tokens)?;
+                        Self::parse_entries(context, branch.body, true, false, remaining_tokens)?;
                         break;
                     }
                 }
@@ -255,7 +256,7 @@ impl Linker {
                             token
 
                         }).collect();
-                        Self::parse_entries(context, body_tokens, false, remaining_tokens)?;
+                        Self::parse_entries(context, body_tokens, false, false, remaining_tokens)?;
                     }
                 }
 
@@ -263,12 +264,16 @@ impl Linker {
             } else if let EntryToken::UsingStatement(inner, cmd, tokens) = token {
 
                 let mut data_tokens = Vec::new();
-                Self::parse_entries(context, tokens, true, &mut data_tokens)?;
+                Self::parse_entries(context, tokens, true, false, &mut data_tokens)?;
 
-                for token in &data_tokens {
+                let mut body_tokens = Vec::new();
+                for (_, token) in data_tokens {
                     match token {
                         EntryToken::Data { is_constant, .. } => {
-                            if !is_constant {
+                            if is_constant {
+                                body_tokens.push(token);
+
+                            } else {
                                 return Err(token.error(
                                     "Only constant Data Declarations are allowed inside of USING BLOCK".to_string()
                                 ))
@@ -279,10 +284,14 @@ impl Linker {
                         ))
                     }
                 }
-                remaining_tokens.push(EntryToken::UsingStatement(inner, cmd, data_tokens));
+                remaining_tokens.push((false, EntryToken::UsingStatement(inner, cmd, body_tokens)));
+
+            // Expand and set instructions to volatile inside volatile statements
+            } else if let EntryToken::VolatileStatement(_, tokens) = token {
+                Self::parse_entries(context, tokens, true, true, remaining_tokens)?;
 
             } else {
-                remaining_tokens.push(token);
+                remaining_tokens.push((volatile_instructions, token));
             }
         }
         Ok(())
@@ -1010,6 +1019,36 @@ mod test {
         assert_eq!(linker_error("BLOCK USING 'cmd' nop ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected Instruction, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' nop ENDBLOCK\n                  ^--- Here");
         assert_eq!(linker_error("global:\nBLOCK USING 'cmd' DW global ENDBLOCK"), "In file \"main.gb.s\" on line 2, column 19: Only constant Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' DW global ENDBLOCK\n                  ^--- Here");
         assert_eq!(linker_error("BLOCK USING 'cmd' global: ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected GlobalLabelDef, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' global: ENDBLOCK\n                  ^--- Here");
+    }
+
+    #[test]
+    fn test_block_volatile() {
+        let l = linker("SECTION ROM0\nBLOCK VOLATILE nop\nld a,a\nccf ENDBLOCK");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 0,
+                    expression: None,
+                    bytes: vec![0],
+                    volatile: true,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    volatile: true,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 63,
+                    expression: None,
+                    bytes: vec![63],
+                    volatile: true,
+                    debug_only: false
+                })
+            ]
+        ]);
     }
 
 }

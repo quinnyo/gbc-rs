@@ -249,7 +249,7 @@ impl IncludeStage {
                         "DS16" | "EQUS" | "BANK" |
                         "THEN" | "ELSE" | "ENDIF" |
                         "MACRO" | "USING" | "BLOCK" |
-                        "ENDFOR" | "REPEAT" | "BINARY" | "SECTION" | "INCLUDE" | "SEGMENT" |
+                        "ENDFOR" | "REPEAT" | "BINARY" | "SECTION" | "INCLUDE" | "SEGMENT" | "VOLATILE" |
                         "ENDMACRO" |  "ENDBLOCK" => {
                             Some(IncludeToken::Reserved(name))
                         },
@@ -779,7 +779,7 @@ mod test {
             "DB", "DW", "BW", "IF", "TO", "IN",
             "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE",
             "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING",
-            "SECTION", "ENDMACRO", "SEGMENT", "ENDBLOCK"
+            "SECTION", "VOLATILE", "ENDMACRO", "SEGMENT", "ENDBLOCK"
         );
     }
 
