@@ -456,15 +456,20 @@ enum LocalLabelRef {
         index: usize,
         target: usize
     },
-    InsideCall {
+    InsideBranch {
         index: usize,
         arg_index: usize,
+        inner_index: usize,
+        target: usize
+    },
+    InsideBody {
+        index: usize,
         inner_index: usize,
         target: usize
     }
 }
 
-type GlobalLabelEntry = Option<(usize, Vec<(String, usize)>, Vec<(String, usize, LocalCallIndex)>)>;
+type GlobalLabelEntry = Option<(usize, Vec<(String, usize)>, Vec<(String, usize, LocalCallIndex, Option<usize>)>)>;
 type LocalCallIndex = Option<(usize, usize)>;
 type LocalLabelError = (usize, usize, LocalCallIndex);
 
@@ -477,6 +482,8 @@ impl ValueStage {
             &mut tokens,
             &mut global_label_map,
             &mut local_label_refs,
+            true,
+            None,
             None
         );
 
@@ -519,12 +526,38 @@ impl ValueStage {
                         continue;
                     }
                 },
-                LocalLabelRef::InsideCall { index, arg_index, inner_index, target} => {
+                LocalLabelRef::InsideBranch { index, arg_index, inner_index, target} => {
                     if let Some(ValueToken::BuiltinCall(_, ref mut arguments)) = tokens.get_mut(index) {
                         if let Some(arg_tokens) = arguments.get_mut(arg_index) {
                             if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = arg_tokens.get_mut(inner_index) {
                                 *id = target;
                                 continue;
+                            }
+                        }
+
+                    } else if let Some(ValueToken::IfStatement(_, ref mut if_branches)) = tokens.get_mut(index) {
+                        if let Some(branch) = if_branches.get_mut(arg_index) {
+                            if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = branch.body.get_mut(inner_index) {
+                                *id = target;
+                                continue;
+                            }
+                        }
+                    }
+                },
+                LocalLabelRef::InsideBody { index, inner_index, target} => {
+                    if let Some(ValueToken::ForStatement(_, ref mut for_statement)) = tokens.get_mut(index) {
+                        if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = for_statement.body.get_mut(inner_index) {
+                            *id = target;
+                            continue;
+                        }
+
+                    } else if let Some(ValueToken::BlockStatement(_, ref mut block)) = tokens.get_mut(index) {
+                        match block {
+                            BlockStatement::Using(_, body) | BlockStatement::Volatile(body) => {
+                                if let Some(ValueToken::LocalLabelRef(_, ref mut id)) = body.get_mut(inner_index) {
+                                    *id = target;
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -540,12 +573,14 @@ impl ValueStage {
         tokens: &mut [ValueToken],
         global_label_map: &mut HashMap<Option<usize>, GlobalLabelEntry>,
         local_label_refs: &mut Vec<LocalLabelRef>,
-        call_parent: LocalCallIndex
+        global_def_allowed: bool,
+        call_parent: LocalCallIndex,
+        stmt_parent: Option<usize>
 
     ) -> Option<LocalLabelError> {
         for (index, token) in tokens.iter_mut().enumerate() {
             match token {
-                ValueToken::GlobalLabelDef(inner, _) if call_parent.is_none() => {
+                ValueToken::GlobalLabelDef(inner, _) if global_def_allowed => {
                     let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(error) = Self::verify_local_label_refs_under_global(global_label.take(), local_label_refs) {
                         return Some(error);
@@ -561,7 +596,7 @@ impl ValueStage {
                 ValueToken::LocalLabelRef(inner, _) => {
                     let global_label = global_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(global_label) = global_label.as_mut() {
-                        global_label.2.push((inner.value.clone(), index, call_parent));
+                        global_label.2.push((inner.value.clone(), index, call_parent, stmt_parent));
                     }
                 },
                 ValueToken::BuiltinCall(_, arguments) => {
@@ -570,9 +605,53 @@ impl ValueStage {
                             arg_tokens,
                             global_label_map,
                             local_label_refs,
-                            Some((index, arg_index))
+                            false,
+                            Some((index, arg_index)),
+                            None
                         ) {
                             return Some(error);
+                        }
+                    }
+                },
+                ValueToken::ForStatement(_, for_statement) => {
+                    if let Some(error) = Self::inner_assign_and_verify_local_label_refs(
+                        &mut for_statement.body,
+                        global_label_map,
+                        local_label_refs,
+                        true,
+                        None,
+                        Some(index)
+                    ) {
+                        return Some(error);
+                    }
+                },
+                ValueToken::IfStatement(_, if_branches) => {
+                    for (branch_index, branch) in if_branches.iter_mut().enumerate() {
+                        if let Some(error) = Self::inner_assign_and_verify_local_label_refs(
+                            &mut branch.body,
+                            global_label_map,
+                            local_label_refs,
+                            true,
+                            Some((index, branch_index)),
+                            None
+                        ) {
+                            return Some(error);
+                        }
+                    }
+                },
+                ValueToken::BlockStatement(_, block) => {
+                    match block {
+                        BlockStatement::Using(_, body) | BlockStatement::Volatile(body) => {
+                            if let Some(error) = Self::inner_assign_and_verify_local_label_refs(
+                                body,
+                                global_label_map,
+                                local_label_refs,
+                                true,
+                                None,
+                                Some(index)
+                            ) {
+                                return Some(error);
+                            }
                         }
                     }
                 },
@@ -588,15 +667,22 @@ impl ValueStage {
 
     ) -> Option<LocalLabelError> {
         if let Some((previous_index, local_defs, local_refs)) = global_label {
-            for (ref_name, token_index, call_parent) in &local_refs {
+            for (ref_name, token_index, call_parent, stmt_parent) in &local_refs {
                 let mut label_exists = false;
                 for (def_name, label_id) in &local_defs {
                     if def_name == ref_name {
                         label_exists = true;
                         if let Some((index, arg_index)) = call_parent {
-                            local_label_refs.push(LocalLabelRef::InsideCall {
+                            local_label_refs.push(LocalLabelRef::InsideBranch {
                                 index: *index,
                                 arg_index: *arg_index,
+                                inner_index: *token_index,
+                                target: *label_id
+                            });
+
+                        } else if let Some(index) = stmt_parent {
+                            local_label_refs.push(LocalLabelRef::InsideBody {
+                                index: *index,
                                 inner_index: *token_index,
                                 target: *label_id
                             });
@@ -1307,6 +1393,64 @@ mod test {
                     ValueToken::Instruction(itk!(15, 18, "nop"))
                 ])
             )
+        ]);
+    }
+
+    // Block Label IDs --------------------------------------------------------
+    #[test]
+    fn test_label_ref_block() {
+        let lexer = value_lexer("BLOCK VOLATILE\nglobal:\n.local:\nDB .local\nENDBLOCK");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
+                vec![
+                    ValueToken::GlobalLabelDef(itk!(15, 22, "global"), 1),
+                    ValueToken::LocalLabelDef(itk!(23, 30, "local"), 2),
+                    ValueToken::Reserved(itk!(31, 33, "DB")),
+                    ValueToken::LocalLabelRef(itk!(34, 40, "local"), 2)
+                ]
+            ))
+        ]);
+    }
+
+    #[test]
+    fn test_label_ref_if_statement() {
+        let lexer = value_lexer("IF foo THEN\nglobal:\n.local:\nDB .local\nENDIF");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![ValueToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![
+                        ValueToken::GlobalLabelDef(itk!(12, 19, "global"), 1),
+                        ValueToken::LocalLabelDef(itk!(20, 27, "local"), 2),
+                        ValueToken::Reserved(itk!(28, 30, "DB")),
+                        ValueToken::LocalLabelRef(itk!(31, 37, "local"), 2)
+                    ]
+                }
+            ])
+        ]);
+    }
+
+    #[test]
+    fn test_label_ref_for_statement() {
+        let lexer = value_lexer("FOR x IN 0 TO 10 REPEAT\nglobal:\n.local:\nDB .local\nENDFOR");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
+                binding: Box::new(ValueToken::Name(itk!(4, 5, "x"))),
+                from: vec![ValueToken::Integer {
+                    inner: itk!(9, 10, "0"),
+                    value: 0
+                }],
+                to: vec![ValueToken::Integer {
+                    inner: itk!(14, 16, "10"),
+                    value: 10
+                }],
+                body: vec![
+                    ValueToken::GlobalLabelDef(itk!(24, 31, "global"), 1),
+                    ValueToken::LocalLabelDef(itk!(32, 39, "local"), 2),
+                    ValueToken::Reserved(itk!(40, 42, "DB")),
+                    ValueToken::LocalLabelRef(itk!(43, 49, "local"), 2)
+                ]
+            })
         ]);
     }
 
