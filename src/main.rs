@@ -57,10 +57,9 @@ fn main() {
             .short("s")
             .help("Surpresses all output")
         )
-        .arg(Arg::with_name("optimize")
-            .long("optimize")
-            .short("O")
-            .help("Apply instruction optimizations")
+        .arg(Arg::with_name("no-optimize")
+            .long("no-optimize")
+            .help("Disable instruction optimizations")
         )
         .arg(Arg::with_name("debug")
             .long("debug")
@@ -87,7 +86,7 @@ fn main() {
             compiler.set_strip_debug_code();
         }
 
-        if matches.occurrences_of("optimize") > 0 {
+        if matches.occurrences_of("no-optimize") == 0 {
             compiler.set_optimize_instructions();
         }
 
