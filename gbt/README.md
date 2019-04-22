@@ -7,9 +7,11 @@ Binaries:
 - [Linux](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/gbt/target/x86_64-unknown-linux-musl/release/gbt?job=linux-musl)
 - [Windows](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/gbt/target/x86_64-pc-windows-gnu/release/gbt.exe?job=windows-mingw)
 
-## Features
+## Commands
 
-- [  ] Convert graphics to GameBoy tile format (WIP)
+- `tiles`: Converts image files into the GameBoy tile data format.
+- `lmms`: Converts [LMMS Projects](https://lmms.io/) that use the GameBoy Audio Plugin to a custom GameBoy format.
+- `compress`: Compresses input files using a custo LZ4 variant for decompression on the GameBoy.
 
 ## License
 

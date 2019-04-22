@@ -80,6 +80,9 @@ INCLUDE BINARY "src/tiles.png" USING "image2gb --some-palette -i"
 
 ### Blocks
 
+
+#### Using
+
 gbc supports processing blocks of data with external commands:
 
 ```asm
@@ -91,6 +94,22 @@ ENDBLOCK
 ```
 
 > Note: Only data declarations that reference no addresses are allowed in `USING` blocks.
+
+
+#### Volatile
+
+gbc does perform automatic optimization when passed the `-O` flag. This can save
+valuable bytes without resorting to heavy obfuscation of things like `cp 0` -> `or a`.
+
+However, in certain situations this might break things which depend on fixed
+cycles / code sizes by wrapping these code sections in a `VOLATILE` block optimizations
+can be disabled.
+
+```asm
+BLOCK VOLATILE
+    cp 0; will not be optimized to "or a"
+ENDBLOCK
+```
 
 ### User defined Macros
 
