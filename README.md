@@ -27,20 +27,20 @@ USAGE:
     gbc [FLAGS] [OPTIONS] <SOURCE_FILE>
 
 FLAGS:
-    -D, --debug       Enable debug instructions for BGB debugger
-    -h, --help        Prints help information
-    -i, --info        Display ROM info
-    -O, --optimize    Apply instruction optimizations
-    -S, --segments    Display segments usage
-    -s, --silent      Surpresses all output
-    -V, --version     Prints version information
+    -D, --debug          Enable debug instructions for BGB debugger
+    -h, --help           Prints help information
+    -i, --info           Display ROM info
+        --no-optimize    Disable instruction optimizations
+    -S, --segments       Display segments usage
+    -s, --silent         Surpresses all output
+    -V, --version        Prints version information
 
 OPTIONS:
     -m, --symbol-map <FILE>    Output symbol mapping for BGB debugger
     -o, --output-rom <FILE>    ROM file to generate
 
 ARGS:
-    <SOURCE_FILE>    Sets the input source file to use
+    <SOURCE_FILE>    Input source file
 ```
 
 ## General Syntax
