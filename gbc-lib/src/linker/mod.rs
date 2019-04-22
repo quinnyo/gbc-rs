@@ -13,7 +13,7 @@ mod util;
 use crate::error::SourceError;
 use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
 use crate::expression::{ExpressionResult, ExpressionValue};
-use crate::expression::evaluator::{EvaluatorConstant, EvaluatorContext};
+use crate::expression::evaluator::EvaluatorContext;
 use crate::traits::FileReader;
 use self::section::Section;
 
@@ -74,10 +74,10 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_optional_expression(name)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_optional_expression(segment_offset)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_optional_expression(segment_size)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_optional_expression(bank_index)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_optional_expression(name, inner.file_index)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_optional_expression(segment_offset, inner.file_index)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_optional_expression(segment_size, inner.file_index)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_optional_expression(bank_index, inner.file_index)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
@@ -200,28 +200,7 @@ impl Linker {
             // Record constants
             if let EntryToken::Constant { inner, is_string, is_default, value } = token {
                 if allow_constant_declaration {
-                    let existing_default = context.raw_constants.get(&inner.value).map(|c| c.is_default);
-                    let set = match (is_default, existing_default) {
-                        // Constant does not yet exist at all, set eith default or actual value
-                        (_, None) => true,
-                        // Constant already exists as a default, override with it with the actual value
-                        (false, Some(true)) => true,
-                        // Don't override existing actual value with a later declared default
-                        (true, Some(false)) => false,
-                        // Should not happen due to expression and entry stage filtering this case
-                        // out
-                        _ => {
-                            unreachable!("Invalid constant declaration order: {} {:?}", is_default, existing_default)
-                        }
-                    };
-                    if set {
-                        context.raw_constants.insert(inner.value.clone(), EvaluatorConstant {
-                            inner,
-                            is_string,
-                            is_default,
-                            expression: value
-                        });
-                    }
+                    context.declare_constant(inner, is_string, is_default, value);
 
                 } else {
                     return Err(inner.error(
@@ -231,10 +210,10 @@ impl Linker {
 
             // Evaluate if conditions and insert the corresponding branch into
             // the output tokens
-            } else if let EntryToken::IfStatement(_, branches) = token {
+            } else if let EntryToken::IfStatement(inner, branches) = token {
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
-                        context.resolve_expression(condition)?
+                        context.resolve_expression(condition, inner.file_index)?
 
                     } else {
                         ExpressionResult::Integer(1)
@@ -250,8 +229,8 @@ impl Linker {
             } else if let EntryToken::ForStatement(inner, for_statement) = token {
 
                 let binding = for_statement.binding;
-                let from = util::integer_value(&inner, context.resolve_expression(for_statement.from)?, "Invalid for range argument")?;
-                let to = util::integer_value(&inner, context.resolve_expression(for_statement.to)?, "Invalid for range argument")?;
+                let from = util::integer_value(&inner, context.resolve_expression(for_statement.from, inner.file_index)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_expression(for_statement.to, inner.file_index)?, "Invalid for range argument")?;
 
                 let iterations = to - from;
                 if iterations > 2048 {
@@ -423,7 +402,7 @@ mod test {
     use super::{Linker, SegmentUsage};
     use super::section::entry::EntryData;
     use crate::expression::data::{DataAlignment, DataEndianess};
-    use crate::mocks::{entry_lex, entry_lex_binary, MockFileReader};
+    use crate::mocks::{entry_lex, entry_lex_binary, MockFileReader, entry_lex_child};
     use crate::traits::FileReader;
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
@@ -442,6 +421,16 @@ mod test {
     pub fn linker_error<S: Into<String>>(s: S) -> String {
         let reader = MockFileReader::default();
         Linker::from_lexer(&reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
+    }
+
+    pub fn linker_child<S: Into<String>>(s: S, c: S) -> Linker {
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false).expect("Linker failed")
+    }
+
+    pub fn linker_error_child<S: Into<String>>(s: S, c: S) -> String {
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
@@ -521,6 +510,14 @@ mod test {
     #[test]
     fn test_error_constant_eval_equ_string() {
         assert_eq!(linker_error("A EQU 'A'"), "In file \"main.gb.s\" on line 1, column 1: Constant declaration expected a Number but got a String instead.\n\nA EQU \'A\'\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_constant_eval_file_local() {
+        assert_eq!(linker_error_child("A EQU _B\nINCLUDE 'child.gb.s'", "_B EQU 1"), "In file \"main.gb.s\" on line 1, column 7: Reference to undeclared constant \"_B\".\n\nA EQU _B\n      ^--- Here");
+        assert_eq!(linker_error_child("A EQU 1 + _B\nINCLUDE 'child.gb.s'", "_B EQU 1"), "In file \"main.gb.s\" on line 1, column 11: Reference to undeclared constant \"_B\".\n\nA EQU 1 + _B\n          ^--- Here");
+        assert_eq!(linker_error_child("_A EQU 1\nINCLUDE 'child.gb.s'", "B EQU _A"), "In file \"child.gb.s\" on line 1, column 7: Reference to undeclared constant \"_A\".\n\nB EQU _A\n      ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9");
+        assert_eq!(linker_error_child("_A EQU 1\nINCLUDE 'child.gb.s'", "B EQU 1 + _A"), "In file \"child.gb.s\" on line 1, column 11: Reference to undeclared constant \"_A\".\n\nB EQU 1 + _A\n          ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9");
     }
 
     // Section Mapping --------------------------------------------------------

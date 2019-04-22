@@ -403,8 +403,8 @@ impl Section {
             entry.offset = self.start_address + offset;
 
             // Update label addresses
-            if let EntryData::Label { ref id, ..} = entry.data {
-                context.label_addresses.insert(*id, entry.offset);
+            if let EntryData::Label { id, ..} = entry.data {
+                context.update_label_address(id, entry.offset);
 
             // Verify alignment requirements
             } else if let EntryData::Data { ref alignment, .. } = entry.data {
@@ -433,7 +433,7 @@ impl Section {
 
             // Set context rom_offset for relative offset calculation
             let end_of_instruction = (entry.offset + entry.size) as i32;
-            context.rom_offset = end_of_instruction;
+            context.set_relative_address_offset(end_of_instruction);
 
             // Resolve Data Argument Expressions
             if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
@@ -672,8 +672,8 @@ impl Section {
                 }
             },
             DataStorage::Buffer(length, fill) => {
-                let length_or_string = context.resolve_expression(length)?;
-                let fill = context.resolve_optional_expression(fill)?;
+                let length_or_string = context.resolve_expression(length, inner.file_index)?;
+                let fill = context.resolve_optional_expression(fill, inner.file_index)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"
                     (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
@@ -723,11 +723,11 @@ impl Section {
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_expression(expression.clone())?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -754,7 +754,7 @@ impl Section {
 
             // Handle constant/offset -> op code mapping
             if let Some(offsets) = instruction::offsets(op_code) {
-                let value = util::integer_value(inner, context.resolve_expression(expression.clone())?, "Invalid constant argument")?;
+                let value = util::integer_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid constant argument")?;
                 let mut mapped_op_code = None;
                 for (constant_value, constant_op_code) in offsets {
                     if value == *constant_value as i32 {
@@ -779,11 +779,11 @@ impl Section {
                 let mut arg_bytes: Vec<u8> = match argument {
                     Argument::MemoryLookupByteValue | Argument::ByteValue => {
                         vec![
-                            util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid byte argument")?
+                            util::byte_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid byte argument")?
                         ]
                     },
                     Argument::MemoryLookupWordValue | Argument::WordValue => {
-                        let word = util::word_value(inner, context.resolve_expression(expression.clone())?, "Invalid word argument")?;
+                        let word = util::word_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid word argument")?;
                         vec![
                             word as u8,
                             (word >> 8) as u8
@@ -793,12 +793,12 @@ impl Section {
                         // ldsp hl,X
                         if op_code == 248 {
                             vec![
-                                util::byte_value(inner, context.resolve_expression(expression.clone())?, "Invalid signed byte argument")?
+                                util::byte_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid signed byte argument")?
                             ]
 
                         // jr
                         } else if let Some(end_of_instruction) = end_of_instruction {
-                            let address = util::address_word_value(inner, context.resolve_expression(expression.clone())?, "Invalid address")?;
+                            let address = util::address_word_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid address")?;
                             let target = address as i32 - end_of_instruction;
                             vec![
                                 util::signed_byte_value(inner, target, "").map_err(|mut e| {
@@ -888,6 +888,7 @@ mod test {
     use std::path::PathBuf;
     use super::super::test::{
         linker,
+        linker_child,
         linker_reader,
         linker_error_reader,
         linker_binary,
@@ -1029,6 +1030,38 @@ mod test {
                     endianess: DataEndianess::Little,
                     expressions: None,
                     bytes: Some(vec![4]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_local_constant_eval() {
+        let l = linker("_LOCAL EQU 1\nSECTION ROM0\nDB _LOCAL");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_child_constant_eval() {
+        let l = linker_child("PARENT EQU CHILD + 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB PARENT", "CHILD EQU 1");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
                     debug_only: false
                 })
             ]
