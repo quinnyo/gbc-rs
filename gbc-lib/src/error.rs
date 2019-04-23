@@ -64,17 +64,19 @@ impl SourceError {
 
     fn extend(self, files: &[LexerFile], macro_calls: Option<&[MacroCall]>) -> SourceError {
 
-        let file = &files[self.file_index];
-
         // Add file include stacktrace
-        let stack = if !file.include_stack.is_empty() {
-            format!("\n\n{}", file.include_stack.iter().rev().map(|token| {
-                let file = &files[token.file_index];
-                let (line, col) = file.get_line_and_col(token.start_index);
-                format!("included from file \"{}\" on line {}, column {}", file.path.display(), line + 1, col + 1)
+        let stack = if let Some(file) = files.get(self.file_index) {
+            if !file.include_stack.is_empty() {
+                format!("\n\n{}", file.include_stack.iter().rev().map(|token| {
+                    let file = &files[token.file_index];
+                    let (line, col) = file.get_line_and_col(token.start_index);
+                    format!("included from file \"{}\" on line {}, column {}", file.path.display(), line + 1, col + 1)
 
-            }).collect::<Vec<String>>().join("\n"))
+                }).collect::<Vec<String>>().join("\n"))
 
+            } else {
+                "".to_string()
+            }
         } else {
             "".to_string()
         };
@@ -127,41 +129,44 @@ impl SourceError {
     }
 
     fn format_location(files: &[LexerFile], file_index: usize, index: usize, message: String, prefix_message: bool) -> String {
-        let file = &files[file_index];
-        let (line, col) = file.get_line_and_col(index);
-        let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
-        let col_pointer = str::repeat(" ", col);
-        if prefix_message {
-            let location = format!(
-                "{} in file \"{}\" on line {}, column {}:",
-                message,
-                file.path.display(),
-                line + 1,
-                col + 1,
-            );
-            format!(
-                "{}\n\n{}\n{}{}",
-                location.bright_red(),
-                line_source,
-                col_pointer,
-                "^--- Here".bright_red()
-            )
+        if let Some(file) = files.get(file_index) {
+            let (line, col) = file.get_line_and_col(index);
+            let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
+            let col_pointer = str::repeat(" ", col);
+            if prefix_message {
+                let location = format!(
+                    "{} in file \"{}\" on line {}, column {}:",
+                    message,
+                    file.path.display(),
+                    line + 1,
+                    col + 1,
+                );
+                format!(
+                    "{}\n\n{}\n{}{}",
+                    location.bright_red(),
+                    line_source,
+                    col_pointer,
+                    "^--- Here".bright_red()
+                )
 
+            } else {
+                let location = format!(
+                    "In file \"{}\" on line {}, column {}:",
+                    file.path.display(),
+                    line + 1,
+                    col + 1,
+                );
+                format!(
+                    "{} {}\n\n{}\n{}{}",
+                    location.bright_red(),
+                    message,
+                    line_source,
+                    col_pointer,
+                    "^--- Here".bright_red()
+                )
+            }
         } else {
-            let location = format!(
-                "In file \"{}\" on line {}, column {}:",
-                file.path.display(),
-                line + 1,
-                col + 1,
-            );
-            format!(
-                "{} {}\n\n{}\n{}{}",
-                location.bright_red(),
-                message,
-                line_source,
-                col_pointer,
-                "^--- Here".bright_red()
-            )
+            message
         }
     }
 
