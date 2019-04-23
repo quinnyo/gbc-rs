@@ -74,10 +74,10 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_opt_const_expression(name, inner.file_index)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(segment_offset, inner.file_index)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(segment_size, inner.file_index)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(bank_index, inner.file_index)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, inner.file_index)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, inner.file_index)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, inner.file_index)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, inner.file_index)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
@@ -114,12 +114,17 @@ impl Linker {
             }
         }
 
-        Self::initialize_sections(&mut sections, file_reader)?;
-        Self::resolve_sections(&mut sections, &mut context)?;
+        Self::setup_sections(&mut sections)?;
 
-        if strip_debug {
-            Self::strip_debug(&mut sections, &mut context)?;
+        // Initialize
+        for s in sections.iter_mut() {
+            if strip_debug {
+                s.strip_debug();
+            }
+            s.initialize_using_blocks(file_reader)?;
         }
+
+        Self::resolve_sections(&mut sections, &mut context)?;
 
         if optimize {
             // Run passes until no more optimizations were applied
@@ -128,7 +133,11 @@ impl Linker {
             }
         }
 
-        Self::verify_sections(&sections)?;
+        // Verify
+        for s in sections.iter() {
+            s.validate_jump_targets(&sections)?;
+            s.validate_bounds()?;
+        }
 
         Ok(Self {
             sections
@@ -213,7 +222,7 @@ impl Linker {
             } else if let EntryToken::IfStatement(inner, branches) = token {
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
-                        context.resolve_const_expression(condition, inner.file_index)?
+                        context.resolve_const_expression(&condition, inner.file_index)?
 
                     } else {
                         ExpressionResult::Integer(1)
@@ -229,8 +238,8 @@ impl Linker {
             } else if let EntryToken::ForStatement(inner, for_statement) = token {
 
                 let binding = for_statement.binding;
-                let from = util::integer_value(&inner, context.resolve_const_expression(for_statement.from, inner.file_index)?, "Invalid for range argument")?;
-                let to = util::integer_value(&inner, context.resolve_const_expression(for_statement.to, inner.file_index)?, "Invalid for range argument")?;
+                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, inner.file_index)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, inner.file_index)?, "Invalid for range argument")?;
 
                 let iterations = to - from;
                 if iterations > 2048 {
@@ -297,7 +306,7 @@ impl Linker {
 
 impl Linker {
 
-    fn initialize_sections<R: FileReader>(sections: &mut Vec<Section>, file_reader: &R) -> Result<(), SourceError> {
+    fn setup_sections(sections: &mut Vec<Section>) -> Result<(), SourceError> {
         // Sort sections by base address
         sections.sort_by(|a, b| {
             if a.start_address == b.start_address {
@@ -320,10 +329,6 @@ impl Linker {
             }
         }
 
-        // Initialize using blocks
-        for s in sections.iter_mut() {
-            s.initialize_using_blocks(file_reader)?;
-        }
         Ok(())
     }
 
@@ -341,13 +346,6 @@ impl Linker {
         Ok(())
     }
 
-    fn strip_debug(sections: &mut [Section], context: &mut EvaluatorContext) -> Result<(), SourceError> {
-        for s in sections.iter_mut() {
-            s.strip_debug();
-        }
-        Self::resolve_sections(sections, context)
-    }
-
     fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
         let mut optimizations_applied = false;
         for s in sections.iter_mut() {
@@ -356,14 +354,6 @@ impl Linker {
             }
         }
         optimizations_applied
-    }
-
-    fn verify_sections(sections: &[Section]) -> Result<(), SourceError> {
-        for s in sections.iter() {
-            s.validate_jump_targets(&sections)?;
-            s.validate_bounds()?;
-        }
-        Ok(())
     }
 
     fn required_rom_size(sections: &[Section]) -> usize {

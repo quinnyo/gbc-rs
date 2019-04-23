@@ -46,7 +46,6 @@ impl EvaluatorContext {
     }
 
     pub fn declare_constant(&mut self, inner: InnerToken, is_string: bool, is_default: bool, value: DataExpression) {
-
         let index = constant_index(&inner);
         let existing_default = self.raw_constants.get(&index).map(|c| c.is_default);
         let set = match (is_default, existing_default) {
@@ -87,7 +86,7 @@ impl EvaluatorContext {
             let stack = vec![name.0.as_str()];
             let c = self.inner_const_resolve(
                 &stack,
-                constant.expression,
+                &constant.expression,
                 constant.inner.file_index
             )?;
 
@@ -109,22 +108,22 @@ impl EvaluatorContext {
 
     pub fn resolve_const_expression(
         &mut self,
-        expression: DataExpression,
+        expression: &DataExpression,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
-        let stack = Vec::with_capacity(8);
+        let stack = Vec::new();
         self.inner_const_resolve(&stack, expression, from_file_index)
     }
 
     pub fn resolve_opt_const_expression(
         &mut self,
-        expression: OptionalDataExpression,
+        expression: &OptionalDataExpression,
         from_file_index: usize
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            let stack = Vec::with_capacity(8);
+            let stack = Vec::new();
             Ok(Some(self.inner_const_resolve(&stack, expr, from_file_index)?))
 
         } else {
@@ -135,7 +134,7 @@ impl EvaluatorContext {
     // Dynamic Expressions ----------------------------------------------------
     pub fn resolve_dyn_expression(
         &self,
-        expression: DataExpression,
+        expression: &DataExpression,
         address_offset: Option<i32>,
         from_file_index: usize
 
@@ -145,7 +144,7 @@ impl EvaluatorContext {
 
     pub fn resolve_opt_dyn_expression(
         &self,
-        expression: OptionalDataExpression,
+        expression: &OptionalDataExpression,
         address_offset: Option<i32>,
         from_file_index: usize
 
@@ -160,32 +159,20 @@ impl EvaluatorContext {
 
     fn inner_dyn_resolve(
         &self,
-        expression: Expression,
+        expression: &Expression,
         address_offset: Option<i32>,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         Ok(match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_dyn_resolve(
-                    *left,
-                    address_offset,
-                    from_file_index
-                )?;
-                let right = self.inner_dyn_resolve(
-                    *right,
-                    address_offset,
-                    from_file_index
-                )?;
-                Self::apply_binary_operator(&inner, op.clone(), left, right)?
+                let left = self.inner_dyn_resolve(left, address_offset, from_file_index)?;
+                let right = self.inner_dyn_resolve(right, address_offset, from_file_index)?;
+                Self::apply_binary_operator(&inner, op, left, right)?
             },
-            Expression::Unary { inner, op, right  } => {
-                let right = self.inner_dyn_resolve(
-                    *right,
-                    address_offset,
-                    from_file_index
-                )?;
-                Self::apply_unary_operator(&inner, op.clone(), right)?
+            Expression::Unary { inner, op, right } => {
+                let right = self.inner_dyn_resolve(right, address_offset, from_file_index)?;
+                Self::apply_unary_operator(&inner, op, right)?
             },
             Expression::Value(value) => {
                 match value {
@@ -193,9 +180,9 @@ impl EvaluatorContext {
                         let index = constant_index_raw(&name, from_file_index);
                         self.constants.get(&index).expect("Constants must all be evaluated before dynamic expressions are evaluated").clone()
                     },
-                    ExpressionValue::Integer(i) => ExpressionResult::Integer(i),
-                    ExpressionValue::Float(f) => ExpressionResult::Float(f),
-                    ExpressionValue::String(s) => ExpressionResult::String(s),
+                    ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
+                    ExpressionValue::Float(f) => ExpressionResult::Float(*f),
+                    ExpressionValue::String(s) => ExpressionResult::String(s.to_string()),
                     ExpressionValue::OffsetAddress(_, offset) => {
                         let relative_address_offset = address_offset.expect("Address offset without supplied base address");
                         ExpressionResult::Integer(relative_address_offset + offset)
@@ -225,31 +212,19 @@ impl EvaluatorContext {
     fn inner_const_resolve(
         &mut self,
         constant_stack: &[&str],
-        expression: Expression,
+        expression: &Expression,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         Ok(match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_const_resolve(
-                    constant_stack,
-                    *left,
-                    from_file_index
-                )?;
-                let right = self.inner_const_resolve(
-                    constant_stack,
-                    *right,
-                    from_file_index
-                )?;
-                Self::apply_binary_operator(&inner, op.clone(), left, right)?
+                let left = self.inner_const_resolve(constant_stack, left, from_file_index)?;
+                let right = self.inner_const_resolve(constant_stack, right, from_file_index)?;
+                Self::apply_binary_operator(&inner, op, left, right)?
             },
-            Expression::Unary { inner, op, right  } => {
-                let right = self.inner_const_resolve(
-                    constant_stack,
-                    *right,
-                    from_file_index
-                )?;
-                Self::apply_unary_operator(&inner, op.clone(), right)?
+            Expression::Unary { inner, op, right } => {
+                let right = self.inner_const_resolve(constant_stack, right, from_file_index)?;
+                Self::apply_unary_operator(&inner, op, right)?
             },
             Expression::Value(value) => {
                 match value {
@@ -264,9 +239,9 @@ impl EvaluatorContext {
                         self.constants.insert(index, c.clone());
                         c
                     },
-                    ExpressionValue::Integer(i) => ExpressionResult::Integer(i),
-                    ExpressionValue::Float(f) => ExpressionResult::Float(f),
-                    ExpressionValue::String(s) => ExpressionResult::String(s),
+                    ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
+                    ExpressionValue::Float(f) => ExpressionResult::Float(*f),
+                    ExpressionValue::String(s) => ExpressionResult::String(s.to_string()),
                     ExpressionValue::OffsetAddress(_, _) => {
                         unreachable!("Invalid constant expression containing OffsetAddress");
                     },
@@ -304,20 +279,19 @@ impl EvaluatorContext {
         if let Some(result) = self.constants.get(&index) {
             Ok(result.clone())
 
-        } else if let Some(EvaluatorConstant { inner, expression, .. }) = self.raw_constants.get(&index).cloned() {
-            let value = expression.clone();
+        } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&index).cloned() {
             if constant_stack.contains(&name) {
                 Err(parent.error(
                     format!("Recursive declaration of constant \"{}\".", name)
 
-                ).with_reference(&inner, "Initial declaration was"))
+                ).with_reference(inner, "Initial declaration was"))
 
             } else {
                 let mut child_stack = constant_stack.to_vec();
                 child_stack.push(name);
                 self.inner_const_resolve(
                     &child_stack,
-                    value,
+                    expression,
                     from_file_index
                 )
             }
@@ -518,12 +492,12 @@ impl EvaluatorContext {
 
     fn apply_binary_operator(
         inner: &InnerToken,
-        op: Operator,
+        op: &Operator,
         left: ExpressionResult,
         right: ExpressionResult
 
     ) -> Result<ExpressionResult, SourceError> {
-        match (&op, &left, &right) {
+        match (op, &left, &right) {
             // Integer
             (Operator::ShiftRight, ExpressionResult::Integer(l), ExpressionResult::Integer(r)) => {
                 Ok(ExpressionResult::Integer(l >> r))
@@ -734,7 +708,7 @@ impl EvaluatorContext {
 
     fn apply_unary_operator(
         inner: &InnerToken,
-        op: Operator,
+        op: &Operator,
         right: ExpressionResult
 
     ) -> Result<ExpressionResult, SourceError> {
@@ -837,8 +811,8 @@ mod test {
     }
 
     fn const_expression_result<S: Into<String>>(s: S) -> Result<ExpressionResult, SourceError> {
-        let token = expr_lex(s).tokens.remove(0);
-        if let ExpressionToken::ConstExpression(_, expr) = token {
+        let token = &expr_lex(s).tokens[0];
+        if let ExpressionToken::ConstExpression(_, ref expr) = token {
             let mut context = EvaluatorContext::new();
             let stack = Vec::new();
             context.inner_const_resolve(&stack, expr, 0)
