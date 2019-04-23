@@ -76,11 +76,8 @@ impl EvaluatorContext {
         self.label_addresses.insert(label_id, address);
     }
 
-    pub fn set_relative_address_offset(&mut self, offset: i32) {
-        self.relative_address_offset = offset;
-    }
-
-    pub fn resolve_constants(&mut self) -> Result<(), SourceError> {
+    // Constant Expressions ---------------------------------------------------
+    pub fn resolve_all_constants(&mut self) -> Result<(), SourceError> {
         let mut names: Vec<ConstantIndex> = self.raw_constants.keys().cloned().collect();
         names.sort_by(|a, b| {
             a.cmp(&b)
@@ -88,7 +85,7 @@ impl EvaluatorContext {
         for name in names {
             let constant = self.raw_constants[&name].clone();
             let stack = vec![name.0.as_str()];
-            let c = self.resolve_expression_inner(
+            let c = self.inner_const_resolve(
                 &stack,
                 constant.expression,
                 constant.inner.file_index
@@ -110,17 +107,17 @@ impl EvaluatorContext {
         Ok(())
     }
 
-    pub fn resolve_expression(
+    pub fn resolve_const_expression(
         &mut self,
         expression: DataExpression,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::with_capacity(8);
-        self.resolve_expression_inner(&stack, expression, from_file_index)
+        self.inner_const_resolve(&stack, expression, from_file_index)
     }
 
-    pub fn resolve_optional_expression(
+    pub fn resolve_opt_const_expression(
         &mut self,
         expression: OptionalDataExpression,
         from_file_index: usize
@@ -128,60 +125,80 @@ impl EvaluatorContext {
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
             let stack = Vec::with_capacity(8);
-            Ok(Some(self.resolve_expression_inner(&stack, expr, from_file_index)?))
+            Ok(Some(self.inner_const_resolve(&stack, expr, from_file_index)?))
 
         } else {
             Ok(None)
         }
     }
 
-    fn resolve_expression_inner(
-        &mut self,
-        constant_stack: &[&str],
+    // Dynamic Expressions ----------------------------------------------------
+    pub fn resolve_dyn_expression(
+        &self,
+        expression: DataExpression,
+        address_offset: Option<i32>,
+        from_file_index: usize
+
+    ) -> Result<ExpressionResult, SourceError> {
+        self.inner_dyn_resolve(expression, address_offset, from_file_index)
+    }
+
+    pub fn resolve_opt_dyn_expression(
+        &self,
+        expression: OptionalDataExpression,
+        address_offset: Option<i32>,
+        from_file_index: usize
+
+    ) -> Result<Option<ExpressionResult>, SourceError> {
+        if let Some(expr) = expression {
+            Ok(Some(self.inner_dyn_resolve(expr, address_offset, from_file_index)?))
+
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn inner_dyn_resolve(
+        &self,
         expression: Expression,
+        address_offset: Option<i32>,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         Ok(match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.resolve_expression_inner(
-                    constant_stack,
+                let left = self.inner_dyn_resolve(
                     *left,
+                    address_offset,
                     from_file_index
                 )?;
-                let right = self.resolve_expression_inner(
-                    constant_stack,
+                let right = self.inner_dyn_resolve(
                     *right,
+                    address_offset,
                     from_file_index
                 )?;
                 Self::apply_binary_operator(&inner, op.clone(), left, right)?
             },
             Expression::Unary { inner, op, right  } => {
-                let right = self.resolve_expression_inner(
-                    constant_stack,
+                let right = self.inner_dyn_resolve(
                     *right,
+                    address_offset,
                     from_file_index
                 )?;
                 Self::apply_unary_operator(&inner, op.clone(), right)?
             },
             Expression::Value(value) => {
                 match value {
-                    ExpressionValue::ConstantValue(inner, name) => {
-                        let c = self.resolve_constant_expression(
-                            &inner,
-                            constant_stack,
-                            &name,
-                            inner.file_index
-                        )?;
-                        let index = constant_index(&inner);
-                        self.constants.insert(index, c.clone());
-                        c
+                    ExpressionValue::ConstantValue(_, name) => {
+                        let index = constant_index_raw(&name, from_file_index);
+                        self.constants.get(&index).expect("Constants must all be evaluated before dynamic expressions are evaluated").clone()
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(i),
                     ExpressionValue::Float(f) => ExpressionResult::Float(f),
                     ExpressionValue::String(s) => ExpressionResult::String(s),
                     ExpressionValue::OffsetAddress(_, offset) => {
-                        ExpressionResult::Integer(self.relative_address_offset + offset)
+                        let relative_address_offset = address_offset.expect("Address offset without supplied base address");
+                        ExpressionResult::Integer(relative_address_offset + offset)
                     },
                     ExpressionValue::GlobalLabelAddress(_, id) => {
                         ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
@@ -194,7 +211,77 @@ impl EvaluatorContext {
             Expression::BuiltinCall { inner, name, args } => {
                 let mut arguments = Vec::with_capacity(args.len());
                 for arg in args {
-                    arguments.push(self.resolve_expression_inner(
+                    arguments.push(self.inner_dyn_resolve(
+                        arg,
+                        address_offset,
+                        from_file_index
+                    )?);
+                }
+                Self::execute_builtin_call(&inner, &name, arguments)?
+            }
+        })
+    }
+
+    fn inner_const_resolve(
+        &mut self,
+        constant_stack: &[&str],
+        expression: Expression,
+        from_file_index: usize
+
+    ) -> Result<ExpressionResult, SourceError> {
+        Ok(match expression {
+            Expression::Binary { inner, op, left, right } => {
+                let left = self.inner_const_resolve(
+                    constant_stack,
+                    *left,
+                    from_file_index
+                )?;
+                let right = self.inner_const_resolve(
+                    constant_stack,
+                    *right,
+                    from_file_index
+                )?;
+                Self::apply_binary_operator(&inner, op.clone(), left, right)?
+            },
+            Expression::Unary { inner, op, right  } => {
+                let right = self.inner_const_resolve(
+                    constant_stack,
+                    *right,
+                    from_file_index
+                )?;
+                Self::apply_unary_operator(&inner, op.clone(), right)?
+            },
+            Expression::Value(value) => {
+                match value {
+                    ExpressionValue::ConstantValue(inner, name) => {
+                        let c = self.resolve_const_name(
+                            &inner,
+                            constant_stack,
+                            &name,
+                            inner.file_index
+                        )?;
+                        let index = constant_index(&inner);
+                        self.constants.insert(index, c.clone());
+                        c
+                    },
+                    ExpressionValue::Integer(i) => ExpressionResult::Integer(i),
+                    ExpressionValue::Float(f) => ExpressionResult::Float(f),
+                    ExpressionValue::String(s) => ExpressionResult::String(s),
+                    ExpressionValue::OffsetAddress(_, _) => {
+                        unreachable!("Invalid constant expression containing OffsetAddress");
+                    },
+                    ExpressionValue::GlobalLabelAddress(_, _) => {
+                        unreachable!("Invalid constant expression containing GlobalLabelAddress");
+                    },
+                    ExpressionValue::LocalLabelAddress(_, _) => {
+                        unreachable!("Invalid constant expression containing LocalLabelAddress");
+                    }
+                }
+            },
+            Expression::BuiltinCall { inner, name, args } => {
+                let mut arguments = Vec::with_capacity(args.len());
+                for arg in args {
+                    arguments.push(self.inner_const_resolve(
                         constant_stack,
                         arg,
                         from_file_index
@@ -205,7 +292,7 @@ impl EvaluatorContext {
         })
     }
 
-    fn resolve_constant_expression(
+    fn resolve_const_name(
         &mut self,
         parent: &InnerToken,
         constant_stack: &[&str],
@@ -228,7 +315,7 @@ impl EvaluatorContext {
             } else {
                 let mut child_stack = constant_stack.to_vec();
                 child_stack.push(name);
-                self.resolve_expression_inner(
+                self.inner_const_resolve(
                     &child_stack,
                     value,
                     from_file_index
@@ -754,7 +841,7 @@ mod test {
         if let ExpressionToken::ConstExpression(_, expr) = token {
             let mut context = EvaluatorContext::new();
             let stack = Vec::new();
-            context.resolve_expression_inner(&stack, expr, 0)
+            context.inner_const_resolve(&stack, expr, 0)
 
         } else {
             panic!("Not a constant expression");

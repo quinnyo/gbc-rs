@@ -65,7 +65,7 @@ impl Linker {
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
-        context.resolve_constants()?;
+        context.resolve_all_constants()?;
 
         // Map entries to sections
         let mut section_index = 0;
@@ -74,10 +74,10 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_optional_expression(name, inner.file_index)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_optional_expression(segment_offset, inner.file_index)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_optional_expression(segment_size, inner.file_index)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_optional_expression(bank_index, inner.file_index)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_opt_const_expression(name, inner.file_index)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(segment_offset, inner.file_index)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(segment_size, inner.file_index)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(bank_index, inner.file_index)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
@@ -213,7 +213,7 @@ impl Linker {
             } else if let EntryToken::IfStatement(inner, branches) = token {
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
-                        context.resolve_expression(condition, inner.file_index)?
+                        context.resolve_const_expression(condition, inner.file_index)?
 
                     } else {
                         ExpressionResult::Integer(1)
@@ -229,8 +229,8 @@ impl Linker {
             } else if let EntryToken::ForStatement(inner, for_statement) = token {
 
                 let binding = for_statement.binding;
-                let from = util::integer_value(&inner, context.resolve_expression(for_statement.from, inner.file_index)?, "Invalid for range argument")?;
-                let to = util::integer_value(&inner, context.resolve_expression(for_statement.to, inner.file_index)?, "Invalid for range argument")?;
+                let from = util::integer_value(&inner, context.resolve_const_expression(for_statement.from, inner.file_index)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_const_expression(for_statement.to, inner.file_index)?, "Invalid for range argument")?;
 
                 let iterations = to - from;
                 if iterations > 2048 {

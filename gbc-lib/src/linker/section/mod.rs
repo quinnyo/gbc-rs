@@ -229,7 +229,7 @@ impl Section {
 
     pub fn add_entry(
         &mut self,
-        context: &mut EvaluatorContext,
+        context: &EvaluatorContext,
         token: EntryToken,
         volatile: bool
 
@@ -403,7 +403,7 @@ impl Section {
             entry.offset = self.start_address + offset;
 
             // Update label addresses
-            if let EntryData::Label { id, ..} = entry.data {
+            if let EntryData::Label { id, .. } = entry.data {
                 context.update_label_address(id, entry.offset);
 
             // Verify alignment requirements
@@ -428,12 +428,11 @@ impl Section {
         Ok(())
     }
 
-    pub fn resolve_arguments(&mut self, context: &mut EvaluatorContext) -> Result<(), SourceError> {
+    pub fn resolve_arguments(&mut self, context: &EvaluatorContext) -> Result<(), SourceError> {
         for entry in &mut self.entries {
 
             // Set context rom_offset for relative offset calculation
             let end_of_instruction = (entry.offset + entry.size) as i32;
-            context.set_relative_address_offset(end_of_instruction);
 
             // Resolve Data Argument Expressions
             if let EntryData::Data { ref mut bytes, ref expressions, ref endianess, .. } = entry.data {
@@ -442,7 +441,8 @@ impl Section {
                         &entry.inner,
                         context,
                         endianess,
-                        expressions
+                        expressions,
+                        Some(end_of_instruction)
                     )?);
                 }
                 debug_assert_eq!(self.is_rom, bytes.is_some());
@@ -612,7 +612,7 @@ impl Section {
 
     fn evaluate_data_storage(
         &self,
-        context: &mut EvaluatorContext,
+        context: &EvaluatorContext,
         inner: &InnerToken,
         endianess: &DataEndianess,
         storage: DataStorage,
@@ -645,7 +645,8 @@ impl Section {
                             inner,
                             context,
                             endianess,
-                            &expressions
+                            &expressions,
+                            None
                         )?
                     ), None)
 
@@ -663,7 +664,8 @@ impl Section {
                             inner,
                             context,
                             endianess,
-                            &expressions
+                            &expressions,
+                            None
                         )?
                     ), None)
 
@@ -672,8 +674,8 @@ impl Section {
                 }
             },
             DataStorage::Buffer(length, fill) => {
-                let length_or_string = context.resolve_expression(*length, inner.file_index)?;
-                let fill = context.resolve_optional_expression(fill, inner.file_index)?;
+                let length_or_string = context.resolve_dyn_expression(*length, None, inner.file_index)?;
+                let fill = context.resolve_opt_dyn_expression(fill, None, inner.file_index)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"
                     (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
@@ -712,22 +714,24 @@ impl Section {
             }
         })
     }
+
     fn resolve_expression_arguments_to_bytes(
         inner: &InnerToken,
-        context: &mut EvaluatorContext,
+        context: &EvaluatorContext,
         endianess: &DataEndianess,
-        expressions: &[(usize, DataExpression)]
+        expressions: &[(usize, DataExpression)],
+        end_of_instruction: Option<i32>
 
     ) -> Result<Vec<u8>, SourceError> {
         let mut data_bytes = Vec::new();
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_dyn_expression(expression.clone(), end_of_instruction, inner.file_index)?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_dyn_expression(expression.clone(), end_of_instruction, inner.file_index)?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -744,7 +748,7 @@ impl Section {
 
     fn resolve_instruction_argument_to_bytes(
         inner: &InnerToken,
-        context: &mut EvaluatorContext,
+        context: &EvaluatorContext,
         op_code: usize,
         expression: &DataExpression,
         end_of_instruction: Option<i32>
@@ -754,7 +758,7 @@ impl Section {
 
             // Handle constant/offset -> op code mapping
             if let Some(offsets) = instruction::offsets(op_code) {
-                let value = util::integer_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid constant argument")?;
+                let value = util::integer_value(inner, context.resolve_dyn_expression(expression.clone(), end_of_instruction, inner.file_index)?, "Invalid constant argument")?;
                 let mut mapped_op_code = None;
                 for (constant_value, constant_op_code) in offsets {
                     if value == *constant_value as i32 {
@@ -779,11 +783,11 @@ impl Section {
                 let mut arg_bytes: Vec<u8> = match argument {
                     Argument::MemoryLookupByteValue | Argument::ByteValue => {
                         vec![
-                            util::byte_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid byte argument")?
+                            util::byte_value(inner, context.resolve_dyn_expression(expression.clone(), end_of_instruction, inner.file_index)?, "Invalid byte argument")?
                         ]
                     },
                     Argument::MemoryLookupWordValue | Argument::WordValue => {
-                        let word = util::word_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid word argument")?;
+                        let word = util::word_value(inner, context.resolve_dyn_expression(expression.clone(), end_of_instruction, inner.file_index)?, "Invalid word argument")?;
                         vec![
                             word as u8,
                             (word >> 8) as u8
@@ -793,12 +797,12 @@ impl Section {
                         // ldsp hl,X
                         if op_code == 248 {
                             vec![
-                                util::byte_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid signed byte argument")?
+                                util::byte_value(inner, context.resolve_dyn_expression(expression.clone(), end_of_instruction, inner.file_index)?, "Invalid signed byte argument")?
                             ]
 
                         // jr
                         } else if let Some(end_of_instruction) = end_of_instruction {
-                            let address = util::address_word_value(inner, context.resolve_expression(expression.clone(), inner.file_index)?, "Invalid address")?;
+                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression.clone(), Some(end_of_instruction), inner.file_index)?, "Invalid address")?;
                             let target = address as i32 - end_of_instruction;
                             vec![
                                 util::signed_byte_value(inner, target, "").map_err(|mut e| {
@@ -824,7 +828,7 @@ impl Section {
 
     fn instruction_entry(
         inner: &InnerToken,
-        context: &mut EvaluatorContext,
+        context: &EvaluatorContext,
         op_code: usize,
         expression: Option<DataExpression>,
         volatile: bool,
@@ -1638,6 +1642,28 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0\nbit 8,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 8, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit 8,a\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nrst 2"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 2, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 2\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nrst 41"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 41, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 41\n^--- Here");
+    }
+
+    #[test]
+    fn test_section_data_offset() {
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nDS 5\nDB @+1")), vec![
+            vec![
+                (5, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![0, 0, 0, 0, 0]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![(1, Expression::Value(ExpressionValue::OffsetAddress(itk!(21, 24, "+1"), 1)))]),
+                    bytes: Some(vec![7]),
+                    debug_only: false
+                })
+            ]
+        ]);
     }
 
     #[test]
