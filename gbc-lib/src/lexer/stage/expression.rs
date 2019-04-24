@@ -1183,6 +1183,27 @@ mod test {
         ]);
     }
 
+    #[test]
+    fn test_unary_precedence() {
+        assert_eq!(tfe("-2 * 6"), vec![
+            ExpressionToken::ConstExpression(
+                itk!(0, 1, "-"),
+                Expression::Unary {
+                    inner: itk!(0, 1, "-"),
+                    op: Operator::Minus,
+                    right: Box::new(
+                        Expression::Binary {
+                            inner: itk!(3, 4, "*"),
+                            op: Operator::Mul,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(6))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                        }
+                    )
+                }
+            )
+        ]);
+    }
+
     // If Statements ----------------------------------------------------------
     #[test]
     fn test_if_statment_forwarding() {
