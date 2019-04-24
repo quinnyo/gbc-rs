@@ -306,7 +306,6 @@ impl IncludeStage {
                 },
                 // NumberLiteral
                 '0'...'9' => Some(Self::collect_number_literal(iter)?),
-                '-' => Some(IncludeToken::Operator(iter.collect_single())),
                 '$' => if let Some('0'...'9') | Some('a'...'f') | Some('A'...'F') = iter.peek() {
                     Some(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
                         if let '_' = c {
@@ -359,7 +358,7 @@ impl IncludeStage {
                     Some(IncludeToken::TokenGroup(index_token, tokens))
                 },
                 // Operator
-                '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
+                '-' | '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
                     Some(IncludeToken::Operator(iter.collect_single()))
                 },
                 // Punctation
