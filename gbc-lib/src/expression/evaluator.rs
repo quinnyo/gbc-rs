@@ -408,7 +408,27 @@ impl EvaluatorContext {
             "COS" => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).cos())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.cos())),
-                _ => unreachable!("Invalid SIN arguments")
+                _ => unreachable!("Invalid COS arguments")
+            },
+            "TAN" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).tan())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.tan())),
+                _ => unreachable!("Invalid TAN arguments")
+            },
+            "ASIN" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).asin())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.asin())),
+                _ => unreachable!("Invalid ASIN arguments")
+            },
+            "ACOS" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).acos())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.acos())),
+                _ => unreachable!("Invalid ACOS arguments")
+            },
+            "ATAN" => match args[0] {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).atan())),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.atan())),
+                _ => unreachable!("Invalid ATAN arguments")
             },
             "ATAN2" => match (&args[0], &args[1]) {
                 (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
@@ -1075,16 +1095,28 @@ mod test {
         assert_eq!(const_expression("ABS(-1)"), ExpressionResult::Integer(1));
         assert_eq!(const_expression("ABS(-1.5)"), ExpressionResult::Float(OrderedFloat(1.5)));
 
-        assert_eq!(const_expression("ATAN2(1, 2)"), ExpressionResult::Float(OrderedFloat(0.4636476)));
-        assert_eq!(const_expression("ATAN2(2, 1)"), ExpressionResult::Float(OrderedFloat(1.1071488)));
-        assert_eq!(const_expression("ATAN2(2.5, 1)"), ExpressionResult::Float(OrderedFloat(1.19029)));
-        assert_eq!(const_expression("ATAN2(2.5, 1.5)"), ExpressionResult::Float(OrderedFloat(1.0303768)));
-
         assert_eq!(const_expression("SIN(1)"), ExpressionResult::Float(OrderedFloat(0.84147096)));
         assert_eq!(const_expression("SIN(2.5)"), ExpressionResult::Float(OrderedFloat(0.5984721)));
 
         assert_eq!(const_expression("COS(1)"), ExpressionResult::Float(OrderedFloat(0.5403023)));
         assert_eq!(const_expression("COS(2.5)"), ExpressionResult::Float(OrderedFloat(-0.8011436)));
+
+        assert_eq!(const_expression("TAN(1)"), ExpressionResult::Float(OrderedFloat(1.5574077)));
+        assert_eq!(const_expression("TAN(2.5)"), ExpressionResult::Float(OrderedFloat(-0.74702233)));
+
+        assert_eq!(const_expression("ASIN(1)"), ExpressionResult::Float(OrderedFloat(1.5707964)));
+        assert_eq!(const_expression("ASIN(0.5)"), ExpressionResult::Float(OrderedFloat(0.5235988)));
+
+        assert_eq!(const_expression("ACOS(1)"), ExpressionResult::Float(OrderedFloat(0.0)));
+        assert_eq!(const_expression("ACOS(0.5)"), ExpressionResult::Float(OrderedFloat(1.0471976)));
+
+        assert_eq!(const_expression("ATAN(1)"), ExpressionResult::Float(OrderedFloat(0.7853982)));
+        assert_eq!(const_expression("ATAN(0.5)"), ExpressionResult::Float(OrderedFloat(0.4636476)));
+
+        assert_eq!(const_expression("ATAN2(1, 2)"), ExpressionResult::Float(OrderedFloat(0.4636476)));
+        assert_eq!(const_expression("ATAN2(2, 1)"), ExpressionResult::Float(OrderedFloat(1.1071488)));
+        assert_eq!(const_expression("ATAN2(2.5, 1)"), ExpressionResult::Float(OrderedFloat(1.19029)));
+        assert_eq!(const_expression("ATAN2(2.5, 1.5)"), ExpressionResult::Float(OrderedFloat(1.0303768)));
 
         // TODO implement and test rand macro
         // assert_eq!(const_expression("RAND(0, 10)"), ExpressionResult::Integer(3));

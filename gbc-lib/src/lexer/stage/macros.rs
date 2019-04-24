@@ -48,15 +48,11 @@ lazy_static! {
         // Geometry
         MacroDefinition::builtin("SIN", vec![(ExpressionArgumenType::Number, "radians")]),
         MacroDefinition::builtin("COS", vec![(ExpressionArgumenType::Number, "radians")]),
-        // MacroDefinition::builtin("TAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-        // MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-        // MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
-        // MacroDefinition::builtin("ATAN", vec![(ExpressionArgumenType::Number, "radians")], ExpressionReturnType::Float),
+        MacroDefinition::builtin("TAN", vec![(ExpressionArgumenType::Number, "radians")]),
+        MacroDefinition::builtin("ASIN", vec![(ExpressionArgumenType::Number, "radians")]),
+        MacroDefinition::builtin("ACOS", vec![(ExpressionArgumenType::Number, "radians")]),
+        MacroDefinition::builtin("ATAN", vec![(ExpressionArgumenType::Number, "radians")]),
         MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")])
-
-        // Code
-        // MacroDefinition::builtin("BYTESIZE", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
-        // MacroDefinition::builtin("CYCLES", vec![(ExpressionArgumenType::Tokens, "tokens")], ExpressionReturnType::Integer),
     ];
     pub static ref BUILTIN_MACRO_INDEX: HashMap<String, usize> = {
         let mut map = HashMap::new();
