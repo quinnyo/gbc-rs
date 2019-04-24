@@ -247,15 +247,15 @@ impl Operator {
         match self {
             Operator::LogicalOr => 1,
             Operator::LogicalAnd => 2,
-            Operator::BitOr => 3,
-            Operator::BitXor => 4,
-            Operator::BitAnd => 5,
-            Operator::Equals | Operator::Unequals => 6,
-            Operator::GreaterThanEqual | Operator::LessThanEqual | Operator::LessThan | Operator::GreaterThan => 7,
-            Operator::ShiftRight | Operator::ShiftLeft => 8,
-            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => 9,
-            Operator::Mul | Operator::Div | Operator::Modulo | Operator::DivInt => 11,
-            Operator::Pow => 12,
+            Operator::Equals | Operator::Unequals | Operator::GreaterThanEqual | Operator::LessThanEqual |
+            Operator::LessThan | Operator::GreaterThan => 3,
+            Operator::BitOr => 4,
+            Operator::BitXor => 5,
+            Operator::BitAnd => 6,
+            Operator::ShiftRight | Operator::ShiftLeft => 7,
+            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => 8,
+            Operator::Mul | Operator::Div | Operator::Modulo | Operator::DivInt => 10,
+            Operator::Pow => 11
         }
     }
 

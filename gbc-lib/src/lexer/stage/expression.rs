@@ -882,6 +882,27 @@ mod test {
     }
 
     #[test]
+    fn test_unary_precedence() {
+        assert_eq!(tfe("-2 * 6"), vec![
+            ExpressionToken::ConstExpression(
+                itk!(0, 1, "-"),
+                Expression::Unary {
+                    inner: itk!(0, 1, "-"),
+                    op: Operator::Minus,
+                    right: Box::new(
+                        Expression::Binary {
+                            inner: itk!(3, 4, "*"),
+                            op: Operator::Mul,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(6))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                        }
+                    )
+                }
+            )
+        ]);
+    }
+
+    #[test]
     fn test_unary_error_no_righthand() {
         assert_eq!(expr_lexer_error("+"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n+\n^--- Here");
     }
@@ -1184,24 +1205,159 @@ mod test {
     }
 
     #[test]
-    fn test_unary_precedence() {
-        assert_eq!(tfe("-2 * 6"), vec![
-            ExpressionToken::ConstExpression(
-                itk!(0, 1, "-"),
-                Expression::Unary {
-                    inner: itk!(0, 1, "-"),
+    fn test_binary_equal_precedence() {
+        assert_eq!(tfe("1 + 2 == 3 - 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::Equals,
+                inner: itk!(6, 8, "="),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Plus,
+                    inner: itk!(2, 3, "+"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
                     op: Operator::Minus,
-                    right: Box::new(
-                        Expression::Binary {
-                            inner: itk!(3, 4, "*"),
-                            op: Operator::Mul,
-                            right: Box::new(Expression::Value(ExpressionValue::Integer(6))),
-                            left: Box::new(Expression::Value(ExpressionValue::Integer(2)))
-                        }
-                    )
-                }
-            )
+                    inner: itk!(11, 12, "-"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
         ]);
+
+        assert_eq!(tfe("1 + 2 != 3 - 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::Unequals,
+                inner: itk!(6, 8, "!"),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Plus,
+                    inner: itk!(2, 3, "+"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
+                    op: Operator::Minus,
+                    inner: itk!(11, 12, "-"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
+        ]);
+
+        assert_eq!(tfe("1 + 2 >= 3 - 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::GreaterThanEqual,
+                inner: itk!(6, 8, ">"),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Plus,
+                    inner: itk!(2, 3, "+"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
+                    op: Operator::Minus,
+                    inner: itk!(11, 12, "-"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
+        ]);
+
+        assert_eq!(tfe("1 + 2 <= 3 - 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::LessThanEqual,
+                inner: itk!(6, 8, "<"),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Plus,
+                    inner: itk!(2, 3, "+"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
+                    op: Operator::Minus,
+                    inner: itk!(11, 12, "-"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
+        ]);
+
+        assert_eq!(tfe("1 + 2 > 3 - 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::GreaterThan,
+                inner: itk!(6, 7, ">"),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Plus,
+                    inner: itk!(2, 3, "+"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
+                    op: Operator::Minus,
+                    inner: itk!(10, 11, "-"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
+        ]);
+
+        assert_eq!(tfe("1 + 2 < 3 - 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::LessThan,
+                inner: itk!(6, 7, "<"),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Plus,
+                    inner: itk!(2, 3, "+"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
+                    op: Operator::Minus,
+                    inner: itk!(10, 11, "-"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
+        ]);
+
+        assert_eq!(tfe("1 | 2 == 3 & 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::Equals,
+                inner: itk!(6, 8, "="),
+                left: Box::new(Expression::Binary {
+                    op: Operator::BitOr,
+                    inner: itk!(2, 3, "|"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }),
+                right: Box::new(Expression::Binary {
+                    op: Operator::BitAnd,
+                    inner: itk!(11, 12, "&"),
+                    left: Box::new(Expression::Value(ExpressionValue::Integer(3))),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                })
+            })
+        ]);
+
+        assert_eq!(tfe("1 && 2 == 3 || 4"), vec![
+            ExpressionToken::ConstExpression(itk!(0, 1, "1"), Expression::Binary {
+                op: Operator::LogicalOr,
+                inner: itk!(12, 14, "|"),
+                left: Box::new(Expression::Binary {
+                    op: Operator::Equals,
+                    inner: itk!(7, 9, "="),
+                    left: Box::new(Expression::Binary {
+                        op: Operator::LogicalAnd,
+                        inner: itk!(2, 4, "&"),
+                        left: Box::new(Expression::Value(ExpressionValue::Integer(1))),
+                        right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                    }),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(3)))
+                }),
+                right: Box::new(Expression::Value(ExpressionValue::Integer(4))),
+            })
+        ]);
+
     }
 
     // If Statements ----------------------------------------------------------
