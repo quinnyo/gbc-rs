@@ -903,7 +903,7 @@ mod test {
     };
     use super::EntryData;
     use crate::lexer::InnerToken;
-    use crate::expression::{Expression, ExpressionValue};
+    use crate::expression::{Operator, Expression, ExpressionValue};
     use crate::expression::data::{DataAlignment, DataEndianess};
     use crate::mocks::MockFileReader;
 
@@ -1070,6 +1070,39 @@ mod test {
                 })
             ]
         ]);
+    }
+
+    #[test]
+    fn test_section_entry_local_dyn_eval() {
+        let l = linker("A EQU 1\nSECTION ROM0\nglobal:\nDB global + A");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global".to_string()
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: Some(vec![
+                        (1, Expression::Binary {
+                            op: Operator::Plus,
+                            inner: itk!(39, 40, "+"),
+                            left: Box::new(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(32, 38, "global"), 1))),
+                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(41, 42, "A"), "A".to_string())))
+                        })
+                    ]),
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_error_section_entry_local_dyn_eval() {
+        assert_eq!(linker_error("SECTION ROM0\nglobal:\nDB global + A"), "In file \"main.gb.s\" on line 3, column 13: Reference to undeclared constant \"A\".\n\nDB global + A\n            ^--- Here");
     }
 
     // Labels Entries ---------------------------------------------------------

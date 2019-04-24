@@ -1151,6 +1151,28 @@ mod test {
         ]);
     }
 
+    #[test]
+    fn test_right_associativity_pow() {
+        assert_eq!(tfe("4 * 2 ** 8"), vec![
+            ExpressionToken::ConstExpression(
+                itk!(0, 1, "4"),
+                Expression::Binary {
+                    inner: itk!(6, 8, "*"),
+                    op: Operator::Pow,
+                    left: Box::new(
+                        Expression::Binary {
+                            inner: itk!(2, 3, "*"),
+                            op: Operator::Mul,
+                            right: Box::new(Expression::Value(ExpressionValue::Integer(2))),
+                            left: Box::new(Expression::Value(ExpressionValue::Integer(4)))
+                        }
+                    ),
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(8)))
+                }
+            )
+        ]);
+    }
+
     // If Statements ----------------------------------------------------------
     #[test]
     fn test_if_statment_forwarding() {

@@ -176,9 +176,15 @@ impl EvaluatorContext {
             },
             Expression::Value(value) => {
                 match value {
-                    ExpressionValue::ConstantValue(_, name) => {
+                    ExpressionValue::ConstantValue(inner, name) => {
                         let index = constant_index_raw(&name, from_file_index);
-                        self.constants.get(&index).expect("Constants must all be evaluated before dynamic expressions are evaluated").clone()
+                        if let Some(value) = self.constants.get(&index) {
+                            value.clone()
+
+                        } else {
+                            return Err(inner.error(format!("Reference to undeclared constant \"{}\".", name)))
+                        }
+
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
