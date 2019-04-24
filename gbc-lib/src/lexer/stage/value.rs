@@ -827,9 +827,13 @@ mod test {
                 inner: itk!(0, 3, "123"),
                 value: 123
             },
+            ValueToken::Operator {
+                inner: itk!(4, 5, "-"),
+                typ: Operator::Minus
+            },
             ValueToken::Integer {
-                inner: itk!(4, 8, "-123"),
-                value: -123
+                inner: itk!(5, 8, "123"),
+                value: 123
             },
             ValueToken::Integer {
                 inner: itk!(9, 19, "%00001010"),
@@ -843,9 +847,13 @@ mod test {
                 inner: itk!(24, 28, "1.24"),
                 value: OrderedFloat::from(1.24)
             },
+            ValueToken::Operator {
+                inner: itk!(29, 30, "-"),
+                typ: Operator::Minus
+            },
             ValueToken::Float {
-                inner: itk!(29, 34, "-2.48"),
-                value: OrderedFloat::from(-2.48)
+                inner: itk!(30, 34, "2.48"),
+                value: OrderedFloat::from(2.48)
             }
         ]);
     }

@@ -767,6 +767,16 @@ mod test {
 
     #[test]
     fn test_unary_operator_minus() {
+        assert_eq!(tfe("-2"), vec![
+            ExpressionToken::ConstExpression(
+                itk!(0, 1, "-"),
+                Expression::Unary {
+                    inner: itk!(0, 1, "-"),
+                    op: Operator::Minus,
+                    right: Box::new(Expression::Value(ExpressionValue::Integer(2)))
+                }
+            )
+        ]);
         assert_eq!(tfe("- 2"), vec![
             ExpressionToken::ConstExpression(
                 itk!(0, 1, "-"),

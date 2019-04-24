@@ -306,12 +306,7 @@ impl IncludeStage {
                 },
                 // NumberLiteral
                 '0'...'9' => Some(Self::collect_number_literal(iter)?),
-                '-' => if let Some('0'...'9') = iter.peek() {
-                    Some(Self::collect_number_literal(iter)?)
-
-                } else {
-                    Some(IncludeToken::Operator(iter.collect_single()))
-                },
+                '-' => Some(IncludeToken::Operator(iter.collect_single())),
                 '$' => if let Some('0'...'9') | Some('a'...'f') | Some('A'...'F') = iter.peek() {
                     Some(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
                         if let '_' = c {
@@ -816,7 +811,8 @@ mod test {
             tk!(NumberLiteral, 0, 5, "2048")
         ]);
         assert_eq!(include_lexer("-512"), vec![
-            tk!(NumberLiteral, 0, 4, "-512")
+            tk!(Operator, 0, 1, "-"),
+            tk!(NumberLiteral, 1, 4, "512")
         ]);
         assert_eq!(include_lexer("$1234"), vec![
             tk!(NumberLiteral, 0, 5, "$1234")
