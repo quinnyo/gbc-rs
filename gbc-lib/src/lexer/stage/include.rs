@@ -246,7 +246,7 @@ impl IncludeStage {
                         // Split into Reserved Words
                         "DB" | "DW" | "BW" | "DS" | "IF" | "TO" | "IN" |
                         "DS8" | "EQU" | "FOR" |
-                        "DS16" | "EQUS" | "BANK" |
+                        "DS16" | "BANK" |
                         "THEN" | "ELSE" | "ENDIF" |
                         "MACRO" | "USING" | "BLOCK" |
                         "ENDFOR" | "REPEAT" | "BINARY" | "DEFAULT" | "SECTION" | "INCLUDE" | "SEGMENT" | "VOLATILE" |
@@ -771,7 +771,7 @@ mod test {
         token_types!(
             Reserved,
             "DB", "DW", "BW", "IF", "TO", "IN",
-            "FOR", "DS8", "DS16", "EQU", "EQUS", "BANK", "THEN", "ELSE",
+            "FOR", "DS8", "DS16", "EQU", "BANK", "THEN", "ELSE",
             "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING",
             "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "SEGMENT", "ENDBLOCK"
         );

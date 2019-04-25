@@ -20,7 +20,6 @@ type ConstantIndex = (String, FileIndex);
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct EvaluatorConstant {
     inner: InnerToken,
-    is_string: bool,
     is_default: bool,
     expression: DataExpression,
 }
@@ -45,7 +44,7 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn declare_constant(&mut self, inner: InnerToken, is_string: bool, is_default: bool, value: DataExpression) {
+    pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, value: DataExpression) {
         let index = constant_index(&inner);
         let existing_default = self.raw_constants.get(&index).map(|c| c.is_default);
         let set = match (is_default, existing_default) {
@@ -64,7 +63,6 @@ impl EvaluatorContext {
         if set {
             self.raw_constants.insert(index, EvaluatorConstant {
                 inner,
-                is_string,
                 is_default,
                 expression: value
             });
@@ -89,18 +87,6 @@ impl EvaluatorContext {
                 &constant.expression,
                 constant.inner.file_index
             )?;
-
-            // Check result matches desired type
-            match (constant.is_string, &c) {
-                (true, &ExpressionResult::String(_)) => (),
-                (true, _) => return Err(constant.inner.error(
-                    format!("Constant declaration expected a String but got a {} instead.", c.as_str())
-                )),
-                (false, &ExpressionResult::String(_)) => return Err(constant.inner.error(
-                    format!("Constant declaration expected a Number but got a {} instead.", c.as_str())
-                )),
-                (false, _) => ()
-            }
             self.constants.insert(name, c);
         }
         Ok(())

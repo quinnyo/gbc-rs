@@ -952,7 +952,7 @@ mod test {
     // Constant Evaluation ----------------------------------------------------
     #[test]
     fn test_section_entry_constant_eval() {
-        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQUS 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
+        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQU 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {

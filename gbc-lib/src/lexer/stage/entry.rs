@@ -47,9 +47,8 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     VolatileStatement((Vec<EntryToken>))
 
 }, {
-    // Constant + EQU|EQUS + ConstExpression
+    // Constant + EQU + ConstExpression
     Constant {
-        is_string => bool,
         is_default => bool,
         value => DataExpression
     },
@@ -217,13 +216,10 @@ impl EntryStage {
                 // Constant Declarations
                 ExpressionToken::Constant(inner, is_default) => {
                     if tokens.peek_is(TokenType::Reserved, Some("EQU")) {
-                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, false, is_default)?
-
-                    } else if tokens.peek_is(TokenType::Reserved, Some("EQUS")) {
-                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, true, is_default)?
+                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default)?
 
                     } else {
-                        unreachable!("Expression lexer failed to return \"Constant\" token only if followed by EQU / EQUS");
+                        unreachable!("Expression lexer failed to return \"Constant\" token only if followed by EQU");
                     }
                 },
 
@@ -361,7 +357,6 @@ impl EntryStage {
         fixed_constants: &mut HashMap<String, InnerToken>,
         default_constants: &mut HashMap<String, InnerToken>,
         inner: InnerToken,
-        is_string: bool,
         is_default: bool
 
     ) -> Result<EntryToken, SourceError> {
@@ -378,7 +373,6 @@ impl EntryStage {
                     default_constants.insert(inner.value.clone(), inner.clone());
                     Ok(EntryToken::Constant {
                         inner,
-                        is_string,
                         is_default,
                         value: expr
                     })
@@ -394,7 +388,6 @@ impl EntryStage {
                 fixed_constants.insert(inner.value.clone(), inner.clone());
                 Ok(EntryToken::Constant {
                     inner,
-                    is_string,
                     is_default,
                     value: expr
                 })
@@ -1590,7 +1583,6 @@ mod test {
     fn test_error_unexpected() {
         assert_eq!(entry_lexer_error("2 + 2"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
         assert_eq!(entry_lexer_error("EQU"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"EQU\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nEQU\n^--- Here");
-        assert_eq!(entry_lexer_error("EQUS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"EQUS\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nEQUS\n^--- Here");
         assert_eq!(entry_lexer_error("SEGMENT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"SEGMENT\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nSEGMENT\n^--- Here");
         assert_eq!(entry_lexer_error("BANK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"BANK\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nBANK\n^--- Here");
         assert_eq!(entry_lexer_error(","), "In file \"main.gb.s\" on line 1, column 1: Unexpected Comma, expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
@@ -1610,13 +1602,11 @@ mod test {
     fn test_const_declaration_equ() {
         assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            is_string: false,
             is_default: false,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            is_string: false,
             is_default: false,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
@@ -1625,54 +1615,29 @@ mod test {
         }]);
         assert_eq!(tfe("foo DEFAULT EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            is_string: false,
             is_default: true,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(16, 19, "bar"),
                 "bar".to_string()
             ))
         }]);
-    }
-
-    #[test]
-    fn test_const_declaration_equs() {
-        assert_eq!(tfe("foo EQUS 'test'"), vec![EntryToken::Constant {
+        assert_eq!(tfe("foo EQU 'test'"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            is_string: true,
             is_default: false,
             value: Expression::Value(ExpressionValue::String("test".to_string()))
         }]);
-        assert_eq!(tfe("foo EQUS bar"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
-            is_string: true,
-            is_default: false,
-            value: Expression::Value(ExpressionValue::ConstantValue(
-                itk!(9, 12, "bar"),
-                "bar".to_string()
-            ))
-        }]);
-        assert_eq!(tfe("foo DEFAULT EQUS bar"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
-            is_string: true,
-            is_default: true,
-            value: Expression::Value(ExpressionValue::ConstantValue(
-                itk!(17, 20, "bar"),
-                "bar".to_string()
-            ))
-        }]);
+
     }
 
     #[test]
     fn test_const_default_declaration() {
         assert_eq!(tfe("foo DEFAULT EQU 1\nfoo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
-            is_string: false,
             is_default: true,
             value: Expression::Value(ExpressionValue::Integer(1))
 
         }, EntryToken::Constant {
             inner: itk!(18, 21, "foo"),
-            is_string: false,
             is_default: false,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
@@ -1696,7 +1661,6 @@ mod test {
     #[test]
     fn test_error_const_declaration_no_expr() {
         assert_eq!(entry_lexer_error("foo EQU"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU\n    ^--- Here");
-        assert_eq!(entry_lexer_error("foo EQUS"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQUS\n    ^--- Here");
         assert_eq!(entry_lexer_error("foo EQU DB"), "In file \"main.gb.s\" on line 1, column 9: Unexpected token \"Reserved\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU DB\n        ^--- Here");
         assert_eq!(entry_lexer_error("global_label:\nfoo EQU global_label"), "In file \"main.gb.s\" on line 2, column 9: Unexpected token \"Expression\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU global_label\n        ^--- Here");
     }

@@ -207,9 +207,9 @@ impl Linker {
     ) -> Result<(), SourceError> {
         for token in tokens {
             // Record constants
-            if let EntryToken::Constant { inner, is_string, is_default, value } = token {
+            if let EntryToken::Constant { inner, is_default, value } = token {
                 if allow_constant_declaration {
-                    context.declare_constant(inner, is_string, is_default, value);
+                    context.declare_constant(inner, is_default, value);
 
                 } else {
                     return Err(inner.error(
@@ -490,16 +490,6 @@ mod test {
     #[test]
     fn test_error_constant_eval_undeclared() {
         assert_eq!(linker_error("A EQU B\nB EQU C\nC EQU D"), "In file \"main.gb.s\" on line 3, column 7: Reference to undeclared constant \"D\".\n\nC EQU D\n      ^--- Here");
-    }
-
-    #[test]
-    fn test_error_constant_eval_equs_not_string() {
-        assert_eq!(linker_error("A EQUS 2"), "In file \"main.gb.s\" on line 1, column 1: Constant declaration expected a String but got a Integer instead.\n\nA EQUS 2\n^--- Here");
-    }
-
-    #[test]
-    fn test_error_constant_eval_equ_string() {
-        assert_eq!(linker_error("A EQU 'A'"), "In file \"main.gb.s\" on line 1, column 1: Constant declaration expected a Number but got a String instead.\n\nA EQU \'A\'\n^--- Here");
     }
 
     #[test]
