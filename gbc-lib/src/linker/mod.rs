@@ -11,7 +11,7 @@ mod util;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken};
+use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken, TokenValue};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::EvaluatorContext;
 use crate::traits::FileReader;
@@ -156,7 +156,7 @@ impl Linker {
         let mut segments = Vec::new();
         let mut current_segment = SegmentUsage::default();
         for section in &self.sections {
-            if (&current_segment.name, current_segment.bank) != (&section.segment, section.bank) {
+            if (current_segment.name.as_str(), current_segment.bank) != (section.segment.as_str(), section.bank) {
 
                 // Append existing segment
                 if !current_segment.name.is_empty() {
@@ -171,7 +171,7 @@ impl Linker {
                 }
 
                 // Setup next segment
-                current_segment.name = section.segment.clone();
+                current_segment.name = section.segment.to_string();
                 current_segment.bank = section.bank;
                 current_segment.start_address = section.start_address;
             }
@@ -318,7 +318,7 @@ impl Linker {
         });
 
         // Limit end_address of sections to next section start_address - 1
-        let section_starts: Vec<(usize, usize, String)> = sections.iter().skip(1).map(|s| {
+        let section_starts: Vec<(usize, usize, TokenValue)> = sections.iter().skip(1).map(|s| {
             (s.start_address, s.bank, s.segment.clone())
 
         }).collect();

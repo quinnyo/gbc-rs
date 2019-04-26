@@ -64,7 +64,7 @@ lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
     // SECTION EXPR[String]
     SectionDeclaration {
         name => OptionalDataExpression,
-        segment_name => String,
+        segment_name => TokenValue,
         segment_offset => OptionalDataExpression,
         segment_size => OptionalDataExpression,
         bank_index => OptionalDataExpression
@@ -263,7 +263,7 @@ impl EntryStage {
                             };
 
                             // Required Segment
-                            let segment_name = tokens.expect(TokenType::Segment, None, "when parsing section declaration")?.into_inner().value.to_string();
+                            let segment_name = tokens.expect(TokenType::Segment, None, "when parsing section declaration")?.into_inner().value;
 
                             // Check for optional offset
                             let segment_offset = if tokens.peek_is(TokenType::OpenBracket, None) {
@@ -1950,7 +1950,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: "ROM0".to_string(),
+            segment_name: TokenValue::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: None,
             bank_index: None
@@ -1962,7 +1962,7 @@ mod test {
         assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: Some(Expression::Value(ExpressionValue::String("Foo".to_string()))),
-            segment_name: "ROM0".to_string(),
+            segment_name: TokenValue::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: None,
             bank_index: None
@@ -1974,7 +1974,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0[$0000]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: "ROM0".to_string(),
+            segment_name: TokenValue::from("ROM0".to_string()),
             segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
             segment_size: None,
             bank_index: None
@@ -1986,7 +1986,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0[$0000][$800]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: "ROM0".to_string(),
+            segment_name: TokenValue::from("ROM0".to_string()),
             segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
             segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
             bank_index: None
@@ -1998,7 +1998,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0[][$800]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: "ROM0".to_string(),
+            segment_name: TokenValue::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
             bank_index: None
@@ -2010,7 +2010,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0,BANK[1]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: "ROM0".to_string(),
+            segment_name: TokenValue::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: None,
             bank_index: Some(Expression::Value(ExpressionValue::Integer(1))),

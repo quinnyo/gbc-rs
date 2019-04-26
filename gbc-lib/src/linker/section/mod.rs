@@ -16,7 +16,7 @@ pub mod entry;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{InnerToken, EntryToken};
+use crate::lexer::{InnerToken, EntryToken, TokenValue};
 use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
@@ -38,51 +38,51 @@ struct SectionDefault {
 lazy_static! {
     static ref INSTRUCTIONS: Vec<Instruction> = gbc_cpu::instruction_list();
 
-    static ref SECTION_DEFAULTS: HashMap<&'static str, SectionDefault> = {
+    static ref SECTION_DEFAULTS: HashMap<TokenValue, SectionDefault> = {
         let mut map = HashMap::new();
-        map.insert("ROM0", SectionDefault {
+        map.insert(TokenValue::ROM0, SectionDefault {
             base_address: 0x0000,
             size: 0x4000,
             is_rom: true,
             min_bank: None,
             max_bank: None
         });
-        map.insert("ROMX", SectionDefault {
+        map.insert(TokenValue::ROMX, SectionDefault {
             base_address: 0x4000,
             size: 0x4000,
             is_rom: true,
             min_bank: Some(1),
             max_bank: Some(127)
         });
-        map.insert("WRAM0", SectionDefault {
+        map.insert(TokenValue::WRAM0, SectionDefault {
             base_address: 0xC000,
             size: 0x1000,
             is_rom: false,
             min_bank: None,
             max_bank: None
         });
-        map.insert("WRAMX", SectionDefault {
+        map.insert(TokenValue::WRAMX, SectionDefault {
             base_address: 0xD000,
             size: 0x1000,
             is_rom: false,
             min_bank: Some(1),
             max_bank: Some(1)
         });
-        map.insert("HRAM", SectionDefault {
+        map.insert(TokenValue::HRAM, SectionDefault {
             base_address: 0xFF80,
             size: 0x80,
             is_rom: false,
             min_bank: None,
             max_bank: None
         });
-        map.insert("RAM", SectionDefault {
+        map.insert(TokenValue::RAM, SectionDefault {
             base_address: 0xA000,
             size: 0x2000,
             is_rom: false,
             min_bank: None,
             max_bank: None
         });
-        map.insert("RAMX", SectionDefault {
+        map.insert(TokenValue::RAMX, SectionDefault {
             base_address: 0xA000,
             size: 0x2000,
             is_rom: false,
@@ -98,7 +98,7 @@ lazy_static! {
 pub struct Section {
     pub id: usize,
     name: String,
-    pub segment: String,
+    pub segment: TokenValue,
     inner: InnerToken,
 
     pub start_address: usize,
@@ -113,20 +113,20 @@ pub struct Section {
 
 impl fmt::Display for Section {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{: >2}][{: >16}] {: >5}[{:0>4x}-{:0>4x} +{:0>4x}][{}]", self.id, self.name, self.segment, self.start_address, self.end_address, self.bank_offset, self.bank)
+        write!(f, "[{: >2}][{: >16}] {: >5}[{:0>4x}-{:0>4x} +{:0>4x}][{}]", self.id, self.name, self.segment.as_str(), self.start_address, self.end_address, self.bank_offset, self.bank)
     }
 }
 
 impl Section {
 
-    pub fn default_hash(name: &str, bank_index: Option<usize>) -> (&str, usize) {
+    pub fn default_hash(name: &TokenValue, bank_index: Option<usize>) -> (&TokenValue, usize) {
         let defaults = SECTION_DEFAULTS.get(name).expect("Invalid segment name");
         (name, bank_index.or(defaults.min_bank).unwrap_or(0))
     }
 
     pub fn new(
         id: usize,
-        segment: String,
+        segment: TokenValue,
         name: Option<String>,
         inner: InnerToken,
         segment_offset: Option<usize>,
@@ -135,7 +135,7 @@ impl Section {
 
     ) -> Result<Self, SourceError> {
 
-        let defaults = SECTION_DEFAULTS.get(segment.as_str()).expect("Invalid segment name");
+        let defaults = SECTION_DEFAULTS.get(&segment).expect("Invalid segment name");
 
         // Bank
         let bank = if segment_bank.is_none() && defaults.min_bank.is_some() {
@@ -223,7 +223,7 @@ impl Section {
 
     }
 
-    pub fn hash(&self) -> (&str, usize) {
+    pub fn hash(&self) -> (&TokenValue, usize) {
         (&self.segment, self.bank)
     }
 
