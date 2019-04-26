@@ -1,4 +1,4 @@
-# GameBoy Tooling (WIP)
+# GameBoy Tooling
 
 **gbt** is a [Rust](https://rust-lang.org) based collection of tooling for GameBoy.
 
@@ -10,8 +10,12 @@ Binaries:
 ## Commands
 
 - `tiles`: Converts image files into the GameBoy tile data format.
-- `lmms`: Converts [LMMS Projects](https://lmms.io/) that use the GameBoy Audio Plugin to a custom GameBoy format.
+- `lmms`: Converts [LMMS Projects](https://lmms.io/) that use the FreeBoy Audio Plugin into a custom GameBoy format.
 - `compress`: Compresses input files using a custo LZ4 variant for decompression on the GameBoy.
+
+## GameBoy Support 
+
+- [gb-lib](https://gitlab.com/BonsaiDen/gb-lib) assembly code libraries for use with `gbt`
 
 ## License
 
