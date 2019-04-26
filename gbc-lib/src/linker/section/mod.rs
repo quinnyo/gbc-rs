@@ -278,7 +278,7 @@ impl Section {
             EntryToken::GlobalLabelDef(inner, id) => {
                 let name = inner.value.clone();
                 self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
-                    name,
+                    name: name.to_string(),
                     is_local: false,
                     id
                 }));
@@ -286,7 +286,7 @@ impl Section {
             EntryToken::LocalLabelDef(inner, id) => {
                 let name = inner.value.clone();
                 self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
-                    name,
+                    name: name.to_string(),
                     is_local: true,
                     id
                 }));
@@ -902,7 +902,7 @@ mod test {
         linker_section_offsets
     };
     use super::EntryData;
-    use crate::lexer::InnerToken;
+    use crate::lexer::{InnerToken, TokenValue};
     use crate::expression::{Operator, Expression, ExpressionValue};
     use crate::expression::data::{DataAlignment, DataEndianess};
     use crate::mocks::MockFileReader;
@@ -1090,7 +1090,7 @@ mod test {
                             op: Operator::Plus,
                             inner: itk!(39, 40, "+"),
                             left: Box::new(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(32, 38, "global"), 1))),
-                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(41, 42, "A"), "A".to_string())))
+                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(41, 42, "A"), TokenValue::from("A".to_string()))))
                         })
                     ]),
                     bytes: Some(vec![1]),

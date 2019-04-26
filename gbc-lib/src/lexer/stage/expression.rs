@@ -8,7 +8,7 @@ use gbc_cpu::{Flag, Register};
 
 // Internal Dependencies ------------------------------------------------------
 use super::macros::MacroCall;
-use crate::lexer::ValueStage;
+use crate::lexer::{ValueStage, TokenValue};
 use crate::error::SourceError;
 use crate::expression::{Expression, ExpressionValue};
 use super::value::ValueToken;
@@ -132,9 +132,9 @@ impl ExpressionStage {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("DEFAULT")) {
-                let def = tokens.expect(TokenType::Reserved, Some("DEFAULT"), "while parsing DEFAULT declaration.")?;
-                if tokens.peek_is(TokenType::Reserved, Some("EQU")) {
+            if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some(TokenValue::DEFAULT)) {
+                let def = tokens.expect(TokenType::Reserved, Some(TokenValue::DEFAULT), "while parsing DEFAULT declaration.")?;
+                if tokens.peek_is(TokenType::Reserved, Some(TokenValue::EQU)) {
                     expression_tokens.push(ExpressionToken::Constant(token.into_inner(), true));
 
                 } else {
@@ -143,7 +143,7 @@ impl ExpressionStage {
                     );
                 }
 
-            } else if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some("EQU")) {
+            } else if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some(TokenValue::EQU)) {
                 expression_tokens.push(ExpressionToken::Constant(token.into_inner(), false));
 
             } else {
@@ -451,7 +451,7 @@ impl ExpressionParser {
 #[cfg(test)]
 mod test {
     use ordered_float::OrderedFloat;
-    use crate::lexer::Lexer;
+    use crate::lexer::{Lexer, TokenValue};
     use crate::mocks::value_lex;
     use crate::expression::{Expression, ExpressionValue, Operator};
     use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch, ForStatement, BlockStatement};
@@ -522,7 +522,7 @@ mod test {
         assert_eq!(tfe("foo"), vec![
             ExpressionToken::ConstExpression(
                 itk!(0, 3, "foo"),
-                Expression::Value(ExpressionValue::ConstantValue(itk!(0, 3, "foo"), "foo".to_string()))
+                Expression::Value(ExpressionValue::ConstantValue(itk!(0, 3, "foo"), TokenValue::from("foo".to_string())))
             )
         ]);
         assert_eq!(tfe("4"), vec![
@@ -572,7 +572,7 @@ mod test {
                     right: Box::new(Expression::Value(ExpressionValue::GlobalLabelAddress(
                         itk!(20, 32, "global_label"), 1
                     ))),
-                    left: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(14, 17, "foo"), "foo".to_string())))
+                    left: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(14, 17, "foo"), TokenValue::from("foo".to_string()))))
                 }
             )
         ]);
@@ -600,7 +600,7 @@ mod test {
                 itk!(0, 3, "DBG"),
                 Expression::BuiltinCall {
                     inner: itk!(0, 3, "DBG"),
-                    name: "DBG".to_string(),
+                    name: TokenValue::from("DBG".to_string()),
                     args: vec![]
                 }
             )
@@ -614,12 +614,12 @@ mod test {
                 itk!(0, 3, "MAX"),
                 Expression::BuiltinCall {
                     inner: itk!(0, 3, "MAX"),
-                    name: "MAX".to_string(),
+                    name: TokenValue::from("MAX".to_string()),
                     args: vec![
                         Expression::Value(ExpressionValue::Integer(4)),
                         Expression::BuiltinCall {
                             inner: itk!(7, 10, "MIN"),
-                            name: "MIN".to_string(),
+                            name: TokenValue::from("MIN".to_string()),
                             args: vec![
                                 Expression::Value(ExpressionValue::Integer(1)),
                                 Expression::Value(ExpressionValue::Integer(2))
@@ -642,7 +642,7 @@ mod test {
                 itk!(14, 18, "CEIL"),
                 Expression::BuiltinCall {
                     inner: itk!(14, 18, "CEIL"),
-                    name: "CEIL".to_string(),
+                    name: TokenValue::from("CEIL".to_string()),
                     args: vec![
                         Expression::Value(ExpressionValue::GlobalLabelAddress(
                             itk!(19, 31, "global_label"), 1
@@ -668,7 +668,7 @@ mod test {
                 itk!(28, 32, "CEIL"),
                 Expression::BuiltinCall {
                     inner: itk!(28, 32, "CEIL"),
-                    name: "CEIL".to_string(),
+                    name: TokenValue::from("CEIL".to_string()),
                     args: vec![
                         Expression::Value(ExpressionValue::LocalLabelAddress(
                             itk!(33, 45, "local_label"), 2
@@ -745,7 +745,7 @@ mod test {
                 Expression::Unary {
                     inner: itk!(0, 1, "+"),
                     op: Operator::Plus,
-                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), TokenValue::from("foo".to_string()))))
                 }
             )
         ]);
@@ -779,7 +779,7 @@ mod test {
                 Expression::Unary {
                     inner: itk!(0, 1, "-"),
                     op: Operator::Minus,
-                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), TokenValue::from("foo".to_string()))))
                 }
             )
         ]);
@@ -803,7 +803,7 @@ mod test {
                 Expression::Unary {
                     inner: itk!(0, 1, "!"),
                     op: Operator::LogicalNot,
-                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), TokenValue::from("foo".to_string()))))
                 }
             )
         ]);
@@ -827,7 +827,7 @@ mod test {
                 Expression::Unary {
                     inner: itk!(0, 1, "~"),
                     op: Operator::BitNegate,
-                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), "foo".to_string())))
+                    right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(1, 4, "foo"), TokenValue::from("foo".to_string()))))
                 }
             )
         ]);
@@ -858,7 +858,7 @@ mod test {
                     right: Box::new(
                         Expression::BuiltinCall {
                             inner: itk!(1, 4, "DBG"),
-                            name: "DBG".to_string(),
+                            name: TokenValue::from("DBG".to_string()),
                             args: vec![]
                         }
                     )
@@ -1389,7 +1389,7 @@ mod test {
                 body: vec![
                     ExpressionToken::ConstExpression(
                         itk!(24, 27, "bar"),
-                        Expression::Value(ExpressionValue::ConstantValue(itk!(24, 27, "bar"), "bar".to_string()))
+                        Expression::Value(ExpressionValue::ConstantValue(itk!(24, 27, "bar"), TokenValue::from("bar".to_string())))
                     )
                 ]
             })

@@ -8,7 +8,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::MacroStage;
+use crate::lexer::{MacroStage, TokenValue};
 use crate::error::SourceError;
 use crate::expression::Operator;
 use super::macros::{MacroCall, MacroToken, IfStatementBranch, ForStatement, BlockStatement};
@@ -76,8 +76,8 @@ impl LexerStage for ValueStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let mut global_labels: HashMap<(String, Option<usize>), (InnerToken, usize)> = HashMap::new();
-        let mut global_labels_names: Vec<String> = Vec::with_capacity(64);
+        let mut global_labels: HashMap<(TokenValue, Option<usize>), (InnerToken, usize)> = HashMap::new();
+        let mut global_labels_names: Vec<TokenValue> = Vec::with_capacity(64);
         let mut unique_label_id = 0;
         Self::convert_local_labels_refs(Self::parse_tokens(
             &mut global_labels,
@@ -93,15 +93,15 @@ impl LexerStage for ValueStage {
 impl ValueStage {
 
     fn parse_tokens(
-        global_labels: &mut HashMap<(String, Option<usize>), (InnerToken, usize)>,
-        global_labels_names: &mut Vec<String>,
+        global_labels: &mut HashMap<(TokenValue, Option<usize>), (InnerToken, usize)>,
+        global_labels_names: &mut Vec<TokenValue>,
         unique_label_id: &mut usize,
         is_argument: bool,
         tokens: Vec<MacroToken>
 
     ) -> Result<Vec<ValueToken>, SourceError> {
 
-        let mut local_labels: HashMap<String, InnerToken> = HashMap::new();
+        let mut local_labels: HashMap<TokenValue, InnerToken> = HashMap::new();
 
         let mut value_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
@@ -218,7 +218,7 @@ impl ValueStage {
                 },
                 MacroToken::NumberLiteral(inner) => Self::parse_number_literal(inner)?,
                 MacroToken::StringLiteral(inner) => ValueToken::String {
-                    value: inner.value.clone(),
+                    value: inner.value.to_string(),
                     inner
                 },
                 MacroToken::Colon(inner) => {
@@ -252,7 +252,7 @@ impl ValueStage {
     }
 
     fn convert_global_label_refs(
-        global_labels: &HashMap<(String, Option<usize>), (InnerToken, usize)>,
+        global_labels: &HashMap<(TokenValue, Option<usize>), (InnerToken, usize)>,
         tokens: Vec<ValueToken>
 
     ) -> Vec<ValueToken> {
@@ -281,7 +281,7 @@ impl ValueStage {
         }).collect()
     }
 
-    fn global_label_id(inner: &InnerToken, global_only: bool) -> (String, Option<usize>) {
+    fn global_label_id(inner: &InnerToken, global_only: bool) -> (TokenValue, Option<usize>) {
         let name = if global_only || inner.macro_call_id.is_none() {
             inner.value.to_string()
 
@@ -295,20 +295,20 @@ impl ValueStage {
 
         if name.starts_with('_') {
             // Handle file local global labels that are prefixed with _
-            (format!("{}_file_local_{}", name, inner.file_index), Some(inner.file_index))
+            (TokenValue::from(format!("{}_file_local_{}", name, inner.file_index)), Some(inner.file_index))
 
         } else {
-            (name, None)
+            (TokenValue::from(name), None)
         }
     }
 
     fn parse_local_label(
         tokens: &mut TokenIterator<MacroToken>,
-        global_labels: &mut HashMap<(String, Option<usize>), (InnerToken, usize)>,
-        global_labels_names: &mut Vec<String>,
+        global_labels: &mut HashMap<(TokenValue, Option<usize>), (InnerToken, usize)>,
+        global_labels_names: &mut Vec<TokenValue>,
         unique_label_id: &mut usize,
         is_argument: bool,
-        local_labels: &mut HashMap<String, InnerToken>,
+        local_labels: &mut HashMap<TokenValue, InnerToken>,
         mut inner: InnerToken
 
     ) -> Result<ValueToken, SourceError> {
@@ -325,10 +325,10 @@ impl ValueStage {
 
         // Postfix labels created by macros calls so they are unique
         let name = if let Some(call_id) = name_token.macro_call_id() {
-            format!("{}_from_macro_call_{}", name_token.value, call_id)
+            TokenValue::from(format!("{}_from_macro_call_{}", name_token.value, call_id))
 
         } else {
-            name_token.value.to_string()
+            TokenValue::from(name_token.value.to_string())
         };
 
         if tokens.peek_is(TokenType::Colon, None) {
@@ -373,7 +373,7 @@ impl ValueStage {
     }
 
     fn parse_number_literal(inner: InnerToken) -> Result<ValueToken, SourceError> {
-        Ok(match inner.value.chars().next().unwrap() {
+        Ok(match inner.value.as_str().chars().next().unwrap() {
             '$' => ValueToken::Integer {
                 value: Self::parse_integer(&inner, 1, 16)?,
                 inner
@@ -382,7 +382,7 @@ impl ValueStage {
                 value: Self::parse_integer(&inner, 1, 2)?,
                 inner
             },
-            _ => if inner.value.contains('.') {
+            _ => if inner.value.as_str().contains('.') {
                 ValueToken::Float {
                     value: OrderedFloat::from(Self::parse_float(&inner)?),
                     inner
@@ -398,19 +398,19 @@ impl ValueStage {
     }
 
     fn parse_integer(inner: &InnerToken, from: usize, radix: u32) -> Result<i32, SourceError> {
-        i32::from_str_radix(&inner.value[from..], radix).map_err(|_| {
+        i32::from_str_radix(&inner.value.as_str()[from..], radix).map_err(|_| {
             inner.error("Failed to parse integer value.".to_string())
         })
     }
 
     fn parse_float(inner: &InnerToken) -> Result<f32, SourceError> {
-        inner.value.parse::<f32>().map_err(|_| {
+        inner.value.as_str().parse::<f32>().map_err(|_| {
             inner.error("Failed to parse float value.".to_string())
         })
     }
 
     fn parse_operator_single(inner: &InnerToken) -> Result<Operator, SourceError> {
-        match inner.value.chars().next().unwrap() {
+        match inner.value.as_str().chars().next().unwrap() {
             '<' => Ok(Operator::LessThan),
             '>' => Ok(Operator::GreaterThan),
             '!' => Ok(Operator::LogicalNot),
@@ -429,8 +429,8 @@ impl ValueStage {
 
     fn parse_operator_double(first: &InnerToken, second: &InnerToken) -> Option<Operator> {
         match (
-            first.value.chars().next().unwrap(),
-            second.value.chars().next().unwrap()
+            first.value.as_str().chars().next().unwrap(),
+            second.value.as_str().chars().next().unwrap()
         ) {
             ('>', '>') => Some(Operator::ShiftRight),
             ('<', '<') => Some(Operator::ShiftLeft),
@@ -469,7 +469,7 @@ enum LocalLabelRef {
     }
 }
 
-type GlobalLabelEntry = Option<(usize, Vec<(String, usize)>, Vec<(String, usize, LocalCallIndex, Option<usize>)>)>;
+type GlobalLabelEntry = Option<(usize, Vec<(TokenValue, usize)>, Vec<(TokenValue, usize, LocalCallIndex, Option<usize>)>)>;
 type LocalCallIndex = Option<(usize, usize)>;
 type LocalLabelError = (usize, usize, LocalCallIndex);
 

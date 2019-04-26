@@ -7,7 +7,7 @@ use crate::traits::FileReader;
 use crate::error::SourceError;
 use super::super::LexerStage;
 use super::super::token::{TokenGenerator, TokenIterator, TokenChar};
-use super::super::{InnerToken, LexerFile, LexerToken, TokenType};
+use super::super::{InnerToken, LexerFile, LexerToken, TokenType, TokenValue};
 
 
 // Include Specific Tokens ----------------------------------------------------
@@ -131,7 +131,7 @@ impl IncludeStage {
         let mut expanded = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(TokenType::Reserved) && token.has_value("INCLUDE") {
+            if token.is(TokenType::Reserved) && token.has_value(TokenValue::INCLUDE) {
                 match tokens.next() {
                     Some(IncludeToken::StringLiteral(token)) => {
                         let mut include_stack = state.files[parent_file_index].include_stack.clone();
@@ -141,7 +141,7 @@ impl IncludeStage {
                             file_reader: state.file_reader,
                             files: state.files,
                             parent_path: state.parent_path,
-                            child_path: &PathBuf::from(token.value.clone()),
+                            child_path: &PathBuf::from(token.value.to_string()),
                         };
 
                         let using = Self::using_directive(&mut tokens)?;
@@ -153,14 +153,14 @@ impl IncludeStage {
                             using
                         )?);
                     },
-                    Some(IncludeToken::Reserved(ref name)) if name.value == "BINARY" => {
+                    Some(IncludeToken::Reserved(ref name)) if name.value == TokenValue::BINARY => {
                         match tokens.next() {
                             Some(IncludeToken::StringLiteral(token)) => {
                                 let child_state = IncludeLexerState {
                                     file_reader: state.file_reader,
                                     files: state.files,
                                     parent_path: state.parent_path,
-                                    child_path: &PathBuf::from(token.value.clone())
+                                    child_path: &PathBuf::from(token.value.to_string())
                                 };
                                 let using = Self::using_directive(&mut tokens)?;
                                 expanded.push(Self::include_binary_directive(
@@ -187,10 +187,10 @@ impl IncludeStage {
     }
 
     fn using_directive(tokens: &mut TokenIterator<IncludeToken>) -> Result<Option<String>, SourceError> {
-        if tokens.peek_is(TokenType::Reserved, Some("USING")) {
-            tokens.expect(TokenType::Reserved, Some("USING"), "when parsing USING directive")?;
+        if tokens.peek_is(TokenType::Reserved, Some(TokenValue::USING)) {
+            tokens.expect(TokenType::Reserved, Some(TokenValue::USING), "when parsing USING directive")?;
             let command = tokens.expect(TokenType::StringLiteral, None, "when parsing USING directive")?;
-            Ok(Some(command.into_inner().value))
+            Ok(Some(command.into_inner().value.to_string()))
 
         } else {
             Ok(None)
