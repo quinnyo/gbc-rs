@@ -1,6 +1,6 @@
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use super::{LexerToken, TokenValue};
+use super::{LexerToken, Symbol};
 
 
 // Token Iterator Implementation ----------------------------------------------
@@ -24,11 +24,11 @@ impl<T: LexerToken> TokenIterator<T> {
         self.tokens.peek().map(LexerToken::typ)
     }
 
-    pub fn peek_is(&mut self, typ: T::Typ, value: Option<TokenValue>) -> bool {
+    pub fn peek_is(&mut self, typ: T::Typ, symbol: Option<Symbol>) -> bool {
         match self.tokens.peek() {
             Some(token) => if token.is(typ) {
-                if let Some(value) = value {
-                    token.has_value(value)
+                if let Some(symbol) = symbol {
+                    token.is_symbol(symbol)
 
                 } else {
                     true
@@ -45,37 +45,37 @@ impl<T: LexerToken> TokenIterator<T> {
         self.tokens.peek()
     }
 
-    pub fn expect<S: Into<String>>(&mut self, typ: T::Typ, value: Option<TokenValue>, message: S) -> Result<T, SourceError> {
+    pub fn expect<S: Into<String>>(&mut self, typ: T::Typ, symbol: Option<Symbol>, message: S) -> Result<T, SourceError> {
         match self.next() {
             Some(token) => {
                 if token.is(typ)  {
-                    if let Some(value) = value {
-                        if token.has_value(value.clone()) {
+                    if let Some(symbol) = symbol {
+                        if token.is_symbol(symbol.clone()) {
                             Ok(token)
 
                         } else {
-                            Err(token.error(format!("Unexpected token value \"{:?}\" {}, expected a value of \"{:?}\" instead.", token.value(), message.into(), value)))
+                            Err(token.error(format!("Unexpected token value \"{:?}\" {}, expected a value of \"{:?}\" instead.", token.symbol(), message.into(), symbol)))
                         }
 
-                    } else if let Some(value) = value {
-                        Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), value)))
+                    } else if let Some(symbol) = symbol {
+                        Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), symbol)))
 
                     } else {
                         Ok(token)
                     }
 
-                } else if let Some(value) = value {
-                    Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), value)))
+                } else if let Some(symbol) = symbol {
+                    Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), symbol)))
 
                 } else {
                     Err(token.error(format!("Unexpected token \"{:?}\" {}, expected a \"{:?}\" token instead.", token.typ(), message.into(), typ)))
                 }
             },
-            None => if let Some(value) = value {
+            None => if let Some(symbol) = symbol {
                 Err(SourceError::new(
                     self.file_index,
                     self.index,
-                    format!("Unexpected end of input {}, expected \"{}\" instead.", message.into(), value)
+                    format!("Unexpected end of input {}, expected \"{}\" instead.", message.into(), symbol)
                 ))
 
             } else {

@@ -32,6 +32,7 @@ impl TokenGenerator {
             start: 0,
             current: '\0',
             input_exhausted: false,
+            // TODO avoid duplication?
             chars: text.chars().collect()
         }
     }

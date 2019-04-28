@@ -3,7 +3,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{InnerToken, TokenValue};
+use crate::lexer::{InnerToken, Symbol};
 
 
 // Modules --------------------------------------------------------------------
@@ -33,7 +33,7 @@ pub enum Expression {
     Value(ExpressionValue),
     BuiltinCall {
         inner: InnerToken,
-        name: TokenValue,
+        name: Symbol,
         args: Vec<Expression>
     }
 }
@@ -48,7 +48,7 @@ impl Expression {
         }
     }
 
-    pub fn replace_constant(&mut self, name: &TokenValue, value: &ExpressionValue) {
+    pub fn replace_constant(&mut self, name: &Symbol, value: &ExpressionValue) {
         match self {
             Expression::Binary { left, right, .. } => {
                 left.replace_constant(name, value);
@@ -75,7 +75,7 @@ impl Expression {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ExpressionValue {
-    ConstantValue(InnerToken, TokenValue),
+    ConstantValue(InnerToken, Symbol),
     Integer(i32),
     Float(OrderedFloat<f32>),
     String(String),

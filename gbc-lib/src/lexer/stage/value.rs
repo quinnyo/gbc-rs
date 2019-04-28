@@ -8,7 +8,7 @@ use ordered_float::OrderedFloat;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::{MacroStage, TokenValue};
+use crate::lexer::{MacroStage, Symbol};
 use crate::error::SourceError;
 use crate::expression::Operator;
 use super::macros::{MacroCall, MacroToken, MacroTokenType, IfStatementBranch, ForStatement, BlockStatement};
@@ -76,8 +76,8 @@ impl LexerStage for ValueStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let mut global_labels: HashMap<(TokenValue, Option<usize>), (InnerToken, usize)> = HashMap::new();
-        let mut global_labels_names: Vec<TokenValue> = Vec::with_capacity(64);
+        let mut global_labels: HashMap<(Symbol, Option<usize>), (InnerToken, usize)> = HashMap::new();
+        let mut global_labels_names: Vec<Symbol> = Vec::with_capacity(64);
         let mut unique_label_id = 0;
         Self::convert_local_labels_refs(Self::parse_tokens(
             &mut global_labels,
@@ -93,15 +93,15 @@ impl LexerStage for ValueStage {
 impl ValueStage {
 
     fn parse_tokens(
-        global_labels: &mut HashMap<(TokenValue, Option<usize>), (InnerToken, usize)>,
-        global_labels_names: &mut Vec<TokenValue>,
+        global_labels: &mut HashMap<(Symbol, Option<usize>), (InnerToken, usize)>,
+        global_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
         is_argument: bool,
         tokens: Vec<MacroToken>
 
     ) -> Result<Vec<ValueToken>, SourceError> {
 
-        let mut local_labels: HashMap<TokenValue, InnerToken> = HashMap::new();
+        let mut local_labels: HashMap<Symbol, InnerToken> = HashMap::new();
 
         let mut value_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
@@ -249,7 +249,7 @@ impl ValueStage {
     }
 
     fn convert_global_label_refs(
-        global_labels: &HashMap<(TokenValue, Option<usize>), (InnerToken, usize)>,
+        global_labels: &HashMap<(Symbol, Option<usize>), (InnerToken, usize)>,
         tokens: Vec<ValueToken>
 
     ) -> Vec<ValueToken> {
@@ -278,7 +278,7 @@ impl ValueStage {
         }).collect()
     }
 
-    fn global_label_id(inner: &InnerToken, global_only: bool) -> (TokenValue, Option<usize>) {
+    fn global_label_id(inner: &InnerToken, global_only: bool) -> (Symbol, Option<usize>) {
         let name = if global_only || inner.macro_call_id.is_none() {
             inner.value.to_string()
 
@@ -292,20 +292,20 @@ impl ValueStage {
 
         if name.starts_with('_') {
             // Handle file local global labels that are prefixed with _
-            (TokenValue::from(format!("{}_file_local_{}", name, inner.file_index)), Some(inner.file_index))
+            (Symbol::from(format!("{}_file_local_{}", name, inner.file_index)), Some(inner.file_index))
 
         } else {
-            (TokenValue::from(name), None)
+            (Symbol::from(name), None)
         }
     }
 
     fn parse_local_label(
         tokens: &mut TokenIterator<MacroToken>,
-        global_labels: &mut HashMap<(TokenValue, Option<usize>), (InnerToken, usize)>,
-        global_labels_names: &mut Vec<TokenValue>,
+        global_labels: &mut HashMap<(Symbol, Option<usize>), (InnerToken, usize)>,
+        global_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
         is_argument: bool,
-        local_labels: &mut HashMap<TokenValue, InnerToken>,
+        local_labels: &mut HashMap<Symbol, InnerToken>,
         mut inner: InnerToken
 
     ) -> Result<ValueToken, SourceError> {
@@ -322,10 +322,10 @@ impl ValueStage {
 
         // Postfix labels created by macros calls so they are unique
         let name = if let Some(call_id) = name_token.macro_call_id() {
-            TokenValue::from(format!("{}_from_macro_call_{}", name_token.value, call_id))
+            Symbol::from(format!("{}_from_macro_call_{}", name_token.value, call_id))
 
         } else {
-            TokenValue::from(name_token.value.to_string())
+            Symbol::from(name_token.value.to_string())
         };
 
         if tokens.peek_is(MacroTokenType::Colon, None) {
@@ -466,7 +466,7 @@ enum LocalLabelRef {
     }
 }
 
-type GlobalLabelEntry = Option<(usize, Vec<(TokenValue, usize)>, Vec<(TokenValue, usize, LocalCallIndex, Option<usize>)>)>;
+type GlobalLabelEntry = Option<(usize, Vec<(Symbol, usize)>, Vec<(Symbol, usize, LocalCallIndex, Option<usize>)>)>;
 type LocalCallIndex = Option<(usize, usize)>;
 type LocalLabelError = (usize, usize, LocalCallIndex);
 

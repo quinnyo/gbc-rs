@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 // Token Abstraction ----------------------------------------------------------
 mod token;
-pub use self::token::{LexerToken, InnerToken, TokenType, TokenIterator, TokenValue};
+pub use self::token::{LexerToken, InnerToken, TokenType, TokenIterator, Symbol};
 
 
 // Macros ---------------------------------------------------------------------

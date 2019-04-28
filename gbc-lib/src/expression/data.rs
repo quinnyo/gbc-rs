@@ -1,5 +1,5 @@
 // Internal Dependencies ------------------------------------------------------
-use crate::lexer::TokenValue;
+use crate::lexer::Symbol;
 use super::{DataExpression, ExpressionValue};
 
 
@@ -39,7 +39,7 @@ pub enum DataStorage {
 }
 
 impl DataStorage {
-    pub fn replace_constant(&mut self, constant: &TokenValue, new_value: &ExpressionValue) {
+    pub fn replace_constant(&mut self, constant: &Symbol, new_value: &ExpressionValue) {
         match self {
             DataStorage::Bytes(expressions) | DataStorage::Words(expressions) => {
                 for expr in expressions {

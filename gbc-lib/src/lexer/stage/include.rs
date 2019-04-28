@@ -7,7 +7,7 @@ use crate::traits::FileReader;
 use crate::error::SourceError;
 use super::super::LexerStage;
 use super::super::token::{TokenGenerator, TokenIterator, TokenChar};
-use super::super::{InnerToken, LexerFile, LexerToken, TokenValue};
+use super::super::{InnerToken, LexerFile, LexerToken, Symbol};
 
 
 // Include Specific Tokens ----------------------------------------------------
@@ -130,7 +130,7 @@ impl IncludeStage {
         let mut expanded = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(IncludeType::Reserved) && token.has_value(TokenValue::INCLUDE) {
+            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::INCLUDE) {
                 match tokens.next() {
                     Some(IncludeToken::StringLiteral(token)) => {
                         let mut include_stack = state.files[parent_file_index].include_stack.clone();
@@ -152,7 +152,7 @@ impl IncludeStage {
                             using
                         )?);
                     },
-                    Some(IncludeToken::Reserved(ref name)) if name.value == TokenValue::BINARY => {
+                    Some(IncludeToken::Reserved(ref name)) if name.value == Symbol::BINARY => {
                         match tokens.next() {
                             Some(IncludeToken::StringLiteral(token)) => {
                                 let child_state = IncludeLexerState {
@@ -186,8 +186,8 @@ impl IncludeStage {
     }
 
     fn using_directive(tokens: &mut TokenIterator<IncludeToken>) -> Result<Option<String>, SourceError> {
-        if tokens.peek_is(IncludeType::Reserved, Some(TokenValue::USING)) {
-            tokens.expect(IncludeType::Reserved, Some(TokenValue::USING), "when parsing USING directive")?;
+        if tokens.peek_is(IncludeType::Reserved, Some(Symbol::USING)) {
+            tokens.expect(IncludeType::Reserved, Some(Symbol::USING), "when parsing USING directive")?;
             let command = tokens.expect(IncludeType::StringLiteral, None, "when parsing USING directive")?;
             Ok(Some(command.into_inner().value.to_string()))
 
@@ -243,40 +243,40 @@ impl IncludeStage {
                     let name = Self::collect_inner_name(iter, true)?;
                     match name.value {
                         // Split into Reserved Words
-                        TokenValue::DB | TokenValue::DW | TokenValue::BW | TokenValue::DS | TokenValue::IF | TokenValue::TO | TokenValue::IN |
-                        TokenValue::DS8 | TokenValue::EQU | TokenValue::FOR |
-                        TokenValue::DS16 | TokenValue::BANK |
-                        TokenValue::THEN | TokenValue::ELSE | TokenValue::ENDIF |
-                        TokenValue::MACRO | TokenValue::USING | TokenValue::BLOCK |
-                        TokenValue::ENDFOR | TokenValue::REPEAT | TokenValue::BINARY | TokenValue::DEFAULT | TokenValue::SECTION |
-                        TokenValue::INCLUDE | TokenValue::VOLATILE |
-                        TokenValue::ENDMACRO | TokenValue::ENDBLOCK => {
+                        Symbol::DB | Symbol::DW | Symbol::BW | Symbol::DS | Symbol::IF | Symbol::TO | Symbol::IN |
+                        Symbol::DS8 | Symbol::EQU | Symbol::FOR |
+                        Symbol::DS16 | Symbol::BANK |
+                        Symbol::THEN | Symbol::ELSE | Symbol::ENDIF |
+                        Symbol::MACRO | Symbol::USING | Symbol::BLOCK |
+                        Symbol::ENDFOR | Symbol::REPEAT | Symbol::BINARY | Symbol::DEFAULT | Symbol::SECTION |
+                        Symbol::INCLUDE | Symbol::VOLATILE |
+                        Symbol::ENDMACRO | Symbol::ENDBLOCK => {
                             Some(IncludeToken::Reserved(name))
                         },
                         // ROM Segments
-                        TokenValue::ROM0 | TokenValue::ROMX | TokenValue::WRAM0 | TokenValue::WRAMX | TokenValue::HRAM | TokenValue::RAM | TokenValue::RAMX => {
+                        Symbol::ROM0 | Symbol::ROMX | Symbol::WRAM0 | Symbol::WRAMX | Symbol::HRAM | Symbol::RAM | Symbol::RAMX => {
                             Some(IncludeToken::Segment(name))
                         },
                         // Registers (c is later also treated as a flag)
-                        TokenValue::AF | TokenValue::BC | TokenValue::DE | TokenValue::HL |
-                        TokenValue::A | TokenValue::B | TokenValue::C | TokenValue::D | TokenValue::E | TokenValue::H | TokenValue::L |
-                        TokenValue::HLD | TokenValue::HLI | TokenValue::SP => {
+                        Symbol::AF | Symbol::BC | Symbol::DE | Symbol::HL |
+                        Symbol::A | Symbol::B | Symbol::C | Symbol::D | Symbol::E | Symbol::H | Symbol::L |
+                        Symbol::HLD | Symbol::HLI | Symbol::SP => {
                             Some(IncludeToken::Register(name))
                         },
                         // Flags
-                        TokenValue::Z | TokenValue::NZ | TokenValue::NC => {
+                        Symbol::Z | Symbol::NZ | Symbol::NC => {
                             Some(IncludeToken::Flag(name))
                         },
                         // LR35902 Instructions
-                        TokenValue::Cp | TokenValue::Di | TokenValue::Ei | TokenValue::Jp | TokenValue::Jr | TokenValue::Or | TokenValue::Rl | TokenValue::Rr | TokenValue::Ld |
-                        TokenValue::Adc | TokenValue::Add | TokenValue::And | TokenValue::Bit | TokenValue::Ccf | TokenValue::Cpl | TokenValue::Daa | TokenValue::Dec | TokenValue::Inc |
-                        TokenValue::Ldh | TokenValue::Nop | TokenValue::Pop | TokenValue::Res | TokenValue::Ret | TokenValue::Rla | TokenValue::Rlc | TokenValue::Rra | TokenValue::Rrc |
-                        TokenValue::Rst | TokenValue::Sbc | TokenValue::Scf | TokenValue::Set | TokenValue::Sla | TokenValue::Sra | TokenValue::Srl | TokenValue::Sub | TokenValue::Xor |
-                        TokenValue::Halt | TokenValue::Push | TokenValue::Call | TokenValue::Reti | TokenValue::Rlca | TokenValue::Rrca | TokenValue::Stop | TokenValue::Swap | TokenValue::Ldsp => {
+                        Symbol::Cp | Symbol::Di | Symbol::Ei | Symbol::Jp | Symbol::Jr | Symbol::Or | Symbol::Rl | Symbol::Rr | Symbol::Ld |
+                        Symbol::Adc | Symbol::Add | Symbol::And | Symbol::Bit | Symbol::Ccf | Symbol::Cpl | Symbol::Daa | Symbol::Dec | Symbol::Inc |
+                        Symbol::Ldh | Symbol::Nop | Symbol::Pop | Symbol::Res | Symbol::Ret | Symbol::Rla | Symbol::Rlc | Symbol::Rra | Symbol::Rrc |
+                        Symbol::Rst | Symbol::Sbc | Symbol::Scf | Symbol::Set | Symbol::Sla | Symbol::Sra | Symbol::Srl | Symbol::Sub | Symbol::Xor |
+                        Symbol::Halt | Symbol::Push | Symbol::Call | Symbol::Reti | Symbol::Rlca | Symbol::Rrca | Symbol::Stop | Symbol::Swap | Symbol::Ldsp => {
                             Some(IncludeToken::Instruction(name))
                         },
                         // gbasm "meta" Instructions
-                        TokenValue::Msg | TokenValue::Brk | TokenValue::Mul | TokenValue::Div | TokenValue::Incx | TokenValue::Decx | TokenValue::Addw | TokenValue::Subw | TokenValue::Ldxa | TokenValue::Retx | TokenValue::Vsync => {
+                        Symbol::Msg | Symbol::Brk | Symbol::Mul | Symbol::Div | Symbol::Incx | Symbol::Decx | Symbol::Addw | Symbol::Subw | Symbol::Ldxa | Symbol::Retx | Symbol::Vsync => {
                             Some(IncludeToken::MetaInstruction(name))
                         },
                         // All other names

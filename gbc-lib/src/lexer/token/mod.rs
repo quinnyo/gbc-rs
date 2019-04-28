@@ -2,17 +2,17 @@
 use std::fmt;
 
 
-// Internal Dependencies ------------------------------------------------------
-use crate::error::SourceError;
-
-
 // Modules --------------------------------------------------------------------
 mod generator;
 mod iterator;
-mod value;
+mod symbol;
+
+
+// Internal Dependencies ------------------------------------------------------
+use crate::error::SourceError;
 pub use generator::{TokenGenerator, TokenChar};
 pub use iterator::TokenIterator;
-pub use value::TokenValue;
+pub use symbol::Symbol;
 
 
 // Traits ---------------------------------------------------------------------
@@ -43,11 +43,11 @@ pub trait LexerToken {
         self.typ() == typ
     }
 
-    fn has_value(&self, value: TokenValue) -> bool {
-        self.inner().value == value
+    fn is_symbol(&self, symbol: Symbol) -> bool {
+        self.inner().value == symbol
     }
 
-    fn value(&self) -> &TokenValue {
+    fn symbol(&self) -> &Symbol {
         &self.inner().value
     }
 
@@ -59,18 +59,17 @@ pub struct InnerToken {
     pub file_index: usize,
     pub start_index: usize,
     pub end_index: usize,
-    pub value: TokenValue,
+    pub value: Symbol,
     pub macro_call_id: Option<usize>
 }
 
 impl InnerToken {
     pub fn new(file_index: usize, start_index: usize, end_index: usize, value: String) -> Self {
-        let value = TokenValue::from(value);
         Self {
             file_index,
             start_index,
             end_index,
-            value,
+            value: Symbol::from(value),
             macro_call_id: None
         }
     }

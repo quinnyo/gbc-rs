@@ -9,7 +9,7 @@ use gbc_cpu::{Register, Flag, LexerArgument, self};
 // Internal Dependencies ------------------------------------------------------
 use super::macros::{MacroCall, BlockStatement};
 use crate::error::SourceError;
-use crate::lexer::{ExpressionStage, TokenValue};
+use crate::lexer::{ExpressionStage, Symbol};
 use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use super::expression::{ExpressionToken, ExpressionTokenType};
@@ -17,7 +17,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Types ----------------------------------------------------------------------
-pub type InstructionLayouts = HashMap<(&'static str, Vec<LexerArgument>), usize>;
+pub type InstructionLayouts = HashMap<(Symbol, Vec<LexerArgument>), usize>;
 
 
 // Entry Specific Structs -----------------------------------------------------
@@ -29,7 +29,7 @@ pub struct IfStatementBranch {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ForStatement {
-    pub binding: TokenValue,
+    pub binding: Symbol,
     pub from: DataExpression,
     pub to: DataExpression,
     pub body: Vec<EntryToken>
@@ -68,7 +68,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     // SECTION EXPR[String]
     SectionDeclaration {
         name => OptionalDataExpression,
-        segment_name => TokenValue,
+        segment_name => Symbol,
         segment_offset => OptionalDataExpression,
         segment_size => OptionalDataExpression,
         bank_index => OptionalDataExpression
@@ -76,7 +76,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
 });
 
 impl EntryToken {
-    pub fn replace_constant(&mut self, constant: &TokenValue, new_value: &ExpressionValue) {
+    pub fn replace_constant(&mut self, constant: &Symbol, new_value: &ExpressionValue) {
         match self {
             EntryToken::InstructionWithArg(_, _, expr) | EntryToken::DebugInstructionWithArg(_, _, expr) => {
                 expr.replace_constant(constant, new_value);
@@ -140,9 +140,7 @@ impl LexerStage for EntryStage {
         let mut layouts: InstructionLayouts = HashMap::new();
         for (index, instr) in gbc_cpu::instruction_list().into_iter().enumerate() {
             let layout = instr.layout.into_iter().map(Into::into).collect();
-            // TODO create enum for instruction names
-            // TODO remove the need for the string conversions
-            let key: (&'static str, Vec<LexerArgument>) = (instr.name, layout);
+            let key: (Symbol, Vec<LexerArgument>) = (Symbol::from(instr.name.to_string()), layout);
             layouts.entry(key).or_insert(index);
         }
         Self::parse_entry_tokens(tokens, &layouts)
@@ -226,7 +224,7 @@ impl EntryStage {
 
                 // Constant Declarations
                 ExpressionToken::Constant(inner, is_default) => {
-                    if tokens.peek_is(ExpressionTokenType::Reserved, Some(TokenValue::EQU)) {
+                    if tokens.peek_is(ExpressionTokenType::Reserved, Some(Symbol::EQU)) {
                         Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default)?
 
                     } else {
@@ -256,7 +254,7 @@ impl EntryStage {
                 // Other Directives
                 ExpressionToken::Reserved(inner) => {
                     match inner.value {
-                        TokenValue::SECTION => {
+                        Symbol::SECTION => {
 
                             // Check for optional section name
                             let name = if tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
@@ -295,7 +293,7 @@ impl EntryStage {
                             // Check for optional bank
                             let bank_index = if tokens.peek_is(ExpressionTokenType::Comma, None) {
                                 tokens.expect(ExpressionTokenType::Comma, None, "when parsing section bank")?;
-                                tokens.expect(ExpressionTokenType::Reserved, Some(TokenValue::BANK), "when parsing section bank")?;
+                                tokens.expect(ExpressionTokenType::Reserved, Some(Symbol::BANK), "when parsing section bank")?;
                                 Self::parse_bracket_expr(&mut tokens, "when parsing section bank", false)?
 
                             } else {
@@ -311,22 +309,22 @@ impl EntryStage {
                                 bank_index
                             }
                         },
-                        TokenValue::DB => {
+                        Symbol::DB => {
                             Self::parse_data_directive_db(&mut tokens, inner)?
                         },
-                        TokenValue::DW => {
+                        Symbol::DW => {
                             Self::parse_data_directive_dw(&mut tokens, inner)?
                         },
-                        TokenValue::BW => {
+                        Symbol::BW => {
                             Self::parse_data_directive_bw(&mut tokens, inner)?
                         },
-                        TokenValue::DS => {
+                        Symbol::DS => {
                             Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::Byte)?
                         },
-                        TokenValue::DS8 => {
+                        Symbol::DS8 => {
                             Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::WithinWord)?
                         },
-                        TokenValue::DS16 => {
+                        Symbol::DS16 => {
                             Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::Word)?
                         },
                         _ => return Err(inner.error(format!(
@@ -365,8 +363,8 @@ impl EntryStage {
 
     fn parse_constant_declaration(
         tokens: &mut TokenIterator<ExpressionToken>,
-        fixed_constants: &mut HashMap<TokenValue, InnerToken>,
-        default_constants: &mut HashMap<TokenValue, InnerToken>,
+        fixed_constants: &mut HashMap<Symbol, InnerToken>,
+        default_constants: &mut HashMap<Symbol, InnerToken>,
         inner: InnerToken,
         is_default: bool
 
@@ -520,7 +518,7 @@ impl EntryStage {
                 format!("Unexpected trailing comma in \"{}\" instruction.", inner.value)
             ))
 
-        } else if let Some(op_code) = layouts.get(&(inner.value.as_str(), layout)).map(|op_code| *op_code) {
+        } else if let Some(op_code) = layouts.get(&(inner.value.clone(), layout)).map(|op_code| *op_code) {
             if let Some(expression) = expression {
                 Ok(EntryToken::InstructionWithArg(inner, op_code, expression))
 
@@ -544,7 +542,7 @@ impl EntryStage {
         Ok(match inner.value {
 
             // BGB debugging support
-            TokenValue::Msg => {
+            Symbol::Msg => {
                 let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
                 if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::String(s))) = &expr {
                     let bytes = s.clone().into_bytes();
@@ -589,23 +587,23 @@ impl EntryStage {
 
                 } else {
                     return Err(expr.error(
-                        format!("Unexpected \"{}\", expected a string literal argument.", expr.value())
+                        format!("Unexpected \"{}\", expected a string literal argument.", expr.symbol())
                     ));
                 }
             },
-            TokenValue::Brk => {
+            Symbol::Brk => {
                 // ld b,b
                 vec![EntryToken::DebugInstruction(inner, 0x40)]
             },
 
             // Mulitply / Divide Shorthands
-            TokenValue::Mul => Self::parse_meta_div_mul(tokens, inner, true)?,
-            TokenValue::Div => Self::parse_meta_div_mul(tokens, inner, false)?,
+            Symbol::Mul => Self::parse_meta_div_mul(tokens, inner, true)?,
+            Symbol::Div => Self::parse_meta_div_mul(tokens, inner, false)?,
 
             // Increment Memory Address Shorthands
-            TokenValue::Incx => {
+            Symbol::Incx => {
                 // decx [expr]
-                tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
                 vec![
                     // ld a,[someLabel]
@@ -616,9 +614,9 @@ impl EntryStage {
                     EntryToken::InstructionWithArg(inner.clone(), 0xEA, expr),
                 ]
             },
-            TokenValue::Decx => {
+            Symbol::Decx => {
                 // decx [expr]
-                tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
                 vec![
                     // ld a,[someLabel]
@@ -631,23 +629,23 @@ impl EntryStage {
             },
 
             // 16 Bit Addition / Subtraction Shorthands
-            TokenValue::Addw => Self::parse_meta_addw_subw(tokens, inner, true)?,
-            TokenValue::Subw => Self::parse_meta_addw_subw(tokens, inner, false)?,
+            Symbol::Addw => Self::parse_meta_addw_subw(tokens, inner, true)?,
+            Symbol::Subw => Self::parse_meta_addw_subw(tokens, inner, false)?,
 
             // Extended Memory Loads using the Accumulator as an intermediate
-            TokenValue::Ldxa => Self::parse_meta_ldxa(tokens, inner)?,
+            Symbol::Ldxa => Self::parse_meta_ldxa(tokens, inner)?,
 
             // Return Shorthands
-            TokenValue::Retx => {
+            Symbol::Retx => {
                 if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
-                    tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+                    tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
 
                     // retx [hl]
                     // retx [bc]
                     // retx [de]
                     if tokens.peek_is(ExpressionTokenType::Register, None) {
                         let double = Self::parse_meta_word_register(tokens)?;
-                        tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction label argument")?;
+                        tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction label argument")?;
                         vec![
                             // ld a,[bc|de|hl]
                             EntryToken::Instruction(inner.clone(), match double {
@@ -706,7 +704,7 @@ impl EntryStage {
             },
 
             // VBlank Wait Shorthand
-            TokenValue::Vsync => {
+            Symbol::Vsync => {
                 vec![
                     // ldh     a,[$FF41]
                     EntryToken::InstructionWithArg(inner.clone(), 0xF0, Expression::Value(ExpressionValue::Integer(0x41))),
@@ -896,7 +894,7 @@ impl EntryStage {
 
             } else {
                 Err(expr.error(
-                    format!("Unexpected \"{}\", expected a integer argument that is a power 2 and <= 128.", expr.value())
+                    format!("Unexpected \"{}\", expected a integer argument that is a power 2 and <= 128.", expr.symbol())
                 ))
             }
 
@@ -959,23 +957,23 @@ impl EntryStage {
     fn parse_meta_bracket_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, SourceError> {
         let expr = tokens.get("Unexpected end of input while parsing instruction label argument.")?;
         if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
-            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction label argument")?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction label argument")?;
             Ok(expr)
 
         } else {
-            Err(expr.error(format!("Unexpected \"{}\", expected a expression as the label argument instead.", expr.value())))
+            Err(expr.error(format!("Unexpected \"{}\", expected a expression as the label argument instead.", expr.symbol())))
         }
     }
 
     fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, SourceError> {
-        tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), msg)?;
+        tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), msg)?;
         if optional_value && tokens.peek_is(ExpressionTokenType::CloseBracket, None) {
-            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), msg)?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), msg)?;
             Ok(None)
 
         } else {
             let value = tokens.expect(ExpressionTokenType::ConstExpression, None, msg)?;
-            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), msg)?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), msg)?;
             if let ExpressionToken::ConstExpression(_, expr) = value {
                 Ok(Some(expr))
 
@@ -1379,7 +1377,7 @@ impl EntryStage {
             },
             // [bc|de|hl] - XX
             MetaLDXATarget::RegisterDouble(reg) => {
-                tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
                 let source = Self::parse_meta_bracket_label(tokens)?;
                 let (high, low) = reg.to_pair();
                 vec![
@@ -1406,15 +1404,15 @@ impl EntryStage {
 
     ) -> Result<MetaLDXASourceMemoryLookup, SourceError> {
         if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
-            tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
-            if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLI)) {
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
+            if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HLI)) {
                 tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXASourceMemoryLookup::HL(Register::HLIncrement))
 
-            } else if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLD)) {
+            } else if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HLD)) {
                 tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXASourceMemoryLookup::HL(Register::HLDecrement))
 
             } else {
@@ -1434,7 +1432,7 @@ impl EntryStage {
 
     ) -> Result<MetaLDXASourceHL, SourceError> {
         if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
-            tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
             Ok(MetaLDXASourceHL::MemoryLookup(Self::parse_meta_bracket_label(tokens)?))
 
         } else if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
@@ -1449,15 +1447,15 @@ impl EntryStage {
         tokens: &mut TokenIterator<ExpressionToken>
 
     ) -> Result<MetaLDXASourceRegister, SourceError> {
-        tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
-        if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLI)) {
+        tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
+        if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HLI)) {
             tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
-            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
             Ok(MetaLDXASourceRegister::HL(Register::HLIncrement))
 
-        } else if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLD)) {
+        } else if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HLD)) {
             tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
-            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
             Ok(MetaLDXASourceRegister::HL(Register::HLDecrement))
 
         } else {
@@ -1470,15 +1468,15 @@ impl EntryStage {
 
     ) -> Result<MetaLDXATarget, SourceError> {
         if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
-            tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
-            if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLI)) {
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
+            if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HLI)) {
                 tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXATarget::HL(Register::HLIncrement))
 
-            } else if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLD)) {
+            } else if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HLD)) {
                 tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXATarget::HL(Register::HLDecrement))
 
             } else {
@@ -1536,7 +1534,7 @@ impl EntryStage {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
-    use crate::lexer::{Lexer, TokenValue};
+    use crate::lexer::{Lexer, Symbol};
     use crate::mocks::{expr_lex, expr_lex_binary};
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement};
     use crate::expression::{Expression, ExpressionValue, Operator};
@@ -1620,7 +1618,7 @@ mod test {
             is_default: false,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
-                TokenValue::from("bar".to_string())
+                Symbol::from("bar".to_string())
             ))
         }]);
         assert_eq!(tfe("foo DEFAULT EQU bar"), vec![EntryToken::Constant {
@@ -1628,7 +1626,7 @@ mod test {
             is_default: true,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(16, 19, "bar"),
-                TokenValue::from("bar".to_string())
+                Symbol::from("bar".to_string())
             ))
         }]);
         assert_eq!(tfe("foo EQU 'test'"), vec![EntryToken::Constant {
@@ -1960,7 +1958,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: TokenValue::from("ROM0".to_string()),
+            segment_name: Symbol::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: None,
             bank_index: None
@@ -1972,7 +1970,7 @@ mod test {
         assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: Some(Expression::Value(ExpressionValue::String("Foo".to_string()))),
-            segment_name: TokenValue::from("ROM0".to_string()),
+            segment_name: Symbol::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: None,
             bank_index: None
@@ -1984,7 +1982,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0[$0000]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: TokenValue::from("ROM0".to_string()),
+            segment_name: Symbol::from("ROM0".to_string()),
             segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
             segment_size: None,
             bank_index: None
@@ -1996,7 +1994,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0[$0000][$800]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: TokenValue::from("ROM0".to_string()),
+            segment_name: Symbol::from("ROM0".to_string()),
             segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
             segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
             bank_index: None
@@ -2008,7 +2006,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0[][$800]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: TokenValue::from("ROM0".to_string()),
+            segment_name: Symbol::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
             bank_index: None
@@ -2020,7 +2018,7 @@ mod test {
         assert_eq!(tfe("SECTION ROM0,BANK[1]"), vec![EntryToken::SectionDeclaration {
             inner: itk!(0, 7, "SECTION"),
             name: None,
-            segment_name: TokenValue::from("ROM0".to_string()),
+            segment_name: Symbol::from("ROM0".to_string()),
             segment_offset: None,
             segment_size: None,
             bank_index: Some(Expression::Value(ExpressionValue::Integer(1))),
@@ -3281,7 +3279,7 @@ mod test {
         let lexer = entry_lexer("FOR x IN 0 TO 10 REPEAT nop ENDFOR");
         assert_eq!(lexer.tokens, vec![
             EntryToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
-                binding: TokenValue::from("x".to_string()),
+                binding: Symbol::from("x".to_string()),
                 from: Expression::Value(ExpressionValue::Integer(0)),
                 to: Expression::Value(ExpressionValue::Integer(10)),
                 body: vec![

@@ -16,7 +16,7 @@ pub mod entry;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{InnerToken, EntryToken, TokenValue};
+use crate::lexer::{InnerToken, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::EvaluatorContext;
@@ -38,51 +38,51 @@ struct SectionDefault {
 lazy_static! {
     static ref INSTRUCTIONS: Vec<Instruction> = gbc_cpu::instruction_list();
 
-    static ref SECTION_DEFAULTS: HashMap<TokenValue, SectionDefault> = {
+    static ref SECTION_DEFAULTS: HashMap<Symbol, SectionDefault> = {
         let mut map = HashMap::new();
-        map.insert(TokenValue::ROM0, SectionDefault {
+        map.insert(Symbol::ROM0, SectionDefault {
             base_address: 0x0000,
             size: 0x4000,
             is_rom: true,
             min_bank: None,
             max_bank: None
         });
-        map.insert(TokenValue::ROMX, SectionDefault {
+        map.insert(Symbol::ROMX, SectionDefault {
             base_address: 0x4000,
             size: 0x4000,
             is_rom: true,
             min_bank: Some(1),
             max_bank: Some(127)
         });
-        map.insert(TokenValue::WRAM0, SectionDefault {
+        map.insert(Symbol::WRAM0, SectionDefault {
             base_address: 0xC000,
             size: 0x1000,
             is_rom: false,
             min_bank: None,
             max_bank: None
         });
-        map.insert(TokenValue::WRAMX, SectionDefault {
+        map.insert(Symbol::WRAMX, SectionDefault {
             base_address: 0xD000,
             size: 0x1000,
             is_rom: false,
             min_bank: Some(1),
             max_bank: Some(1)
         });
-        map.insert(TokenValue::HRAM, SectionDefault {
+        map.insert(Symbol::HRAM, SectionDefault {
             base_address: 0xFF80,
             size: 0x80,
             is_rom: false,
             min_bank: None,
             max_bank: None
         });
-        map.insert(TokenValue::RAM, SectionDefault {
+        map.insert(Symbol::RAM, SectionDefault {
             base_address: 0xA000,
             size: 0x2000,
             is_rom: false,
             min_bank: None,
             max_bank: None
         });
-        map.insert(TokenValue::RAMX, SectionDefault {
+        map.insert(Symbol::RAMX, SectionDefault {
             base_address: 0xA000,
             size: 0x2000,
             is_rom: false,
@@ -98,7 +98,7 @@ lazy_static! {
 pub struct Section {
     pub id: usize,
     name: String,
-    pub segment: TokenValue,
+    pub segment: Symbol,
     inner: InnerToken,
 
     pub start_address: usize,
@@ -119,14 +119,14 @@ impl fmt::Display for Section {
 
 impl Section {
 
-    pub fn default_hash(name: &TokenValue, bank_index: Option<usize>) -> (&TokenValue, usize) {
+    pub fn default_hash(name: &Symbol, bank_index: Option<usize>) -> (&Symbol, usize) {
         let defaults = SECTION_DEFAULTS.get(name).expect("Invalid segment name");
         (name, bank_index.or(defaults.min_bank).unwrap_or(0))
     }
 
     pub fn new(
         id: usize,
-        segment: TokenValue,
+        segment: Symbol,
         name: Option<String>,
         inner: InnerToken,
         segment_offset: Option<usize>,
@@ -223,7 +223,7 @@ impl Section {
 
     }
 
-    pub fn hash(&self) -> (&TokenValue, usize) {
+    pub fn hash(&self) -> (&Symbol, usize) {
         (&self.segment, self.bank)
     }
 
@@ -902,7 +902,7 @@ mod test {
         linker_section_offsets
     };
     use super::EntryData;
-    use crate::lexer::{InnerToken, TokenValue};
+    use crate::lexer::{InnerToken, Symbol};
     use crate::expression::{Operator, Expression, ExpressionValue};
     use crate::expression::data::{DataAlignment, DataEndianess};
     use crate::mocks::MockFileReader;
@@ -1090,7 +1090,7 @@ mod test {
                             op: Operator::Plus,
                             inner: itk!(39, 40, "+"),
                             left: Box::new(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(32, 38, "global"), 1))),
-                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(41, 42, "A"), TokenValue::from("A".to_string()))))
+                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(41, 42, "A"), Symbol::from("A".to_string()))))
                         })
                     ]),
                     bytes: Some(vec![1]),

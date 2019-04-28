@@ -11,7 +11,7 @@ mod util;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken, TokenValue};
+use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::EvaluatorContext;
 use crate::traits::FileReader;
@@ -318,7 +318,7 @@ impl Linker {
         });
 
         // Limit end_address of sections to next section start_address - 1
-        let section_starts: Vec<(usize, usize, TokenValue)> = sections.iter().skip(1).map(|s| {
+        let section_starts: Vec<(usize, usize, Symbol)> = sections.iter().skip(1).map(|s| {
             (s.start_address, s.bank, s.segment.clone())
 
         }).collect();

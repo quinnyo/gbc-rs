@@ -9,13 +9,13 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{InnerToken, TokenValue, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
+use crate::lexer::{InnerToken, Symbol, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
 use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionResult, OptionalDataExpression, Operator};
 
 
 // Expression Evaluator -------------------------------------------------------
 type FileIndex = Option<usize>;
-type ConstantIndex = (TokenValue, FileIndex);
+type ConstantIndex = (Symbol, FileIndex);
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct EvaluatorConstant {
@@ -203,7 +203,7 @@ impl EvaluatorContext {
 
     fn inner_const_resolve(
         &mut self,
-        constant_stack: &[&TokenValue],
+        constant_stack: &[&Symbol],
         expression: &Expression,
         from_file_index: usize
 
@@ -262,8 +262,8 @@ impl EvaluatorContext {
     fn resolve_const_name(
         &mut self,
         parent: &InnerToken,
-        constant_stack: &[&TokenValue],
-        name: &TokenValue,
+        constant_stack: &[&Symbol],
+        name: &Symbol,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
@@ -295,7 +295,7 @@ impl EvaluatorContext {
 
     fn execute_builtin_call(
         inner: &InnerToken,
-        name: &TokenValue,
+        name: &Symbol,
         args: Vec<ExpressionResult>
 
     ) -> Result<ExpressionResult, SourceError> {
@@ -317,8 +317,8 @@ impl EvaluatorContext {
 
         // Evaluate
         Ok(match name {
-            TokenValue::DBG => ExpressionResult::Integer(0),
-            TokenValue::MAX => match (&args[0], &args[1]) {
+            Symbol::DBG => ExpressionResult::Integer(0),
+            Symbol::MAX => match (&args[0], &args[1]) {
                 (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
                     ExpressionResult::Integer(cmp::max(*a, *b))
                 },
@@ -333,7 +333,7 @@ impl EvaluatorContext {
                 },
                 _ => unreachable!("Invalid MAX arguments")
             },
-            TokenValue::MIN => match (&args[0], &args[1]) {
+            Symbol::MIN => match (&args[0], &args[1]) {
                 (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
                     ExpressionResult::Integer(cmp::min(*a, *b))
                 },
@@ -348,75 +348,75 @@ impl EvaluatorContext {
                 },
                 _ => unreachable!("Invalid MIN arguments")
             },
-            TokenValue::FLOOR => match args[0] {
+            Symbol::FLOOR => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().floor() as i32),
                 _ => unreachable!("Invalid FLOOR arguments")
             },
-            TokenValue::CEIL => match args[0] {
+            Symbol::CEIL => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().ceil() as i32),
                 _ => unreachable!("Invalid CEIL arguments")
             },
-            TokenValue::ROUND => match args[0] {
+            Symbol::ROUND => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().round() as i32),
                 _ => unreachable!("Invalid ROUND arguments")
             },
 
-            TokenValue::LOG => match args[0] {
+            Symbol::LOG => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).log(::std::f32::consts::LOG2_E))),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.log(::std::f32::consts::LOG2_E))),
                 _ => unreachable!("Invalid LOG arguments")
             },
-            TokenValue::EXP => match args[0] {
+            Symbol::EXP => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).exp())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.exp())),
                 _ => unreachable!("Invalid EXP arguments")
             },
-            TokenValue::SQRT => match args[0] {
+            Symbol::SQRT => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).sqrt())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.sqrt())),
                 _ => unreachable!("Invalid EXP arguments")
             },
-            TokenValue::ABS => match args[0] {
+            Symbol::ABS => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i.abs()),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.abs())),
                 _ => unreachable!("Invalid EXP arguments")
             },
 
             // Math
-            TokenValue::SIN => match args[0] {
+            Symbol::SIN => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).sin())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.sin())),
                 _ => unreachable!("Invalid SIN arguments")
             },
-            TokenValue::COS => match args[0] {
+            Symbol::COS => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).cos())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.cos())),
                 _ => unreachable!("Invalid COS arguments")
             },
-            TokenValue::TAN => match args[0] {
+            Symbol::TAN => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).tan())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.tan())),
                 _ => unreachable!("Invalid TAN arguments")
             },
-            TokenValue::ASIN => match args[0] {
+            Symbol::ASIN => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).asin())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.asin())),
                 _ => unreachable!("Invalid ASIN arguments")
             },
-            TokenValue::ACOS => match args[0] {
+            Symbol::ACOS => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).acos())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.acos())),
                 _ => unreachable!("Invalid ACOS arguments")
             },
-            TokenValue::ATAN => match args[0] {
+            Symbol::ATAN => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).atan())),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.atan())),
                 _ => unreachable!("Invalid ATAN arguments")
             },
-            TokenValue::ATAN2 => match (&args[0], &args[1]) {
+            Symbol::ATAN2 => match (&args[0], &args[1]) {
                 (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
                     ExpressionResult::Float(OrderedFloat((*a as f32).atan2(*b as f32)))
                 },
@@ -433,19 +433,19 @@ impl EvaluatorContext {
             },
 
             // String
-            TokenValue::STRUPR => match &args[0] {
+            Symbol::STRUPR => match &args[0] {
                 ExpressionResult::String(s) => ExpressionResult::String(s.to_ascii_uppercase()),
                 _ => unreachable!("Invalid STRUPR arguments")
             },
-            TokenValue::STRLWR => match &args[0] {
+            Symbol::STRLWR => match &args[0] {
                 ExpressionResult::String(s) => ExpressionResult::String(s.to_ascii_lowercase()),
                 _ => unreachable!("Invalid STRLWR arguments")
             },
-            TokenValue::STRLEN => match &args[0] {
+            Symbol::STRLEN => match &args[0] {
                 ExpressionResult::String(s) => ExpressionResult::Integer(s.len() as i32),
                 _ => unreachable!("Invalid STRLEN arguments")
             },
-            TokenValue::STRSUB => match (&args[0], &args[1], &args[2]) {
+            Symbol::STRSUB => match (&args[0], &args[1], &args[2]) {
                 (ExpressionResult::String(s), ExpressionResult::Integer(index), ExpressionResult::Integer(len)) => {
                     if *index < 0  {
                         return Err(inner.error("Parameter #1 (\"index\") of builtin macro \"STRSUB\" must be positive.".to_string()));
@@ -461,13 +461,13 @@ impl EvaluatorContext {
                 },
                 _ => unreachable!("Invalid STRSUB arguments")
             },
-            TokenValue::STRIN => match (&args[0], &args[1]) {
+            Symbol::STRIN => match (&args[0], &args[1]) {
                 (ExpressionResult::String(s), ExpressionResult::String(i)) => {
                     ExpressionResult::Integer(b2i(s.contains(i)))
                 },
                 _ => unreachable!("Invalid STRIN arguments")
             },
-            TokenValue::STRPADR => match (&args[0], &args[1], &args[2]) {
+            Symbol::STRPADR => match (&args[0], &args[1], &args[2]) {
                 (ExpressionResult::String(s), ExpressionResult::String(padding), ExpressionResult::Integer(len)) => {
                     if padding.len() != 1  {
                         return Err(inner.error("Parameter #1 (\"padding\") of builtin macro \"STRPADR\" must of length 1.".to_string()));
@@ -482,7 +482,7 @@ impl EvaluatorContext {
                 },
                 _ => unreachable!("Invalid STRPADR arguments")
             },
-            TokenValue::STRPADL => match (&args[0], &args[1], &args[2]) {
+            Symbol::STRPADL => match (&args[0], &args[1], &args[2]) {
                 (ExpressionResult::String(s), ExpressionResult::String(padding), ExpressionResult::Integer(len)) => {
                     if padding.len() != 1  {
                         return Err(inner.error("Parameter #1 (\"padding\") of builtin macro \"STRPADL\" must of length 1.".to_string()));
@@ -784,7 +784,7 @@ fn constant_index(inner: &InnerToken) -> ConstantIndex {
     }
 }
 
-fn constant_index_raw(name: &TokenValue, file_index: usize) -> ConstantIndex {
+fn constant_index_raw(name: &Symbol, file_index: usize) -> ConstantIndex {
     if name.as_str().starts_with('_') {
         (name.clone(), Some(file_index))
 
