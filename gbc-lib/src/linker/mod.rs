@@ -207,9 +207,9 @@ impl Linker {
     ) -> Result<(), SourceError> {
         for token in tokens {
             // Record constants
-            if let EntryToken::Constant { inner, is_default, value } = token {
+            if let EntryToken::Constant { inner, is_default, is_private, value } = token {
                 if allow_constant_declaration {
-                    context.declare_constant(inner, is_default, value);
+                    context.declare_constant(inner, is_default, is_private, value);
 
                 } else {
                     return Err(inner.error(

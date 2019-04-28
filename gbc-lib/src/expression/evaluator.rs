@@ -44,8 +44,17 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, value: DataExpression) {
-        let index = constant_index(&inner);
+    pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, is_private: bool, value: DataExpression) {
+
+        // TODO detect private by not having a export keyword
+        // TODO private or public default?
+        let index = if is_private {
+            (inner.value.clone(), Some(inner.file_index))
+
+        } else {
+            (inner.value.clone(), None)
+        };
+
         let existing_default = self.raw_constants.get(&index).map(|c| c.is_default);
         let set = match (is_default, existing_default) {
             // Constant does not yet exist at all, set eith default or actual value
@@ -163,14 +172,17 @@ impl EvaluatorContext {
             Expression::Value(value) => {
                 match value {
                     ExpressionValue::ConstantValue(inner, name) => {
-                        let index = constant_index_raw(&name, from_file_index);
-                        if let Some(value) = self.constants.get(&index) {
+                        // Global Lookup
+                        if let Some(value) = self.constants.get(&(name.clone(), None)) {
+                            value.clone()
+
+                        // Local Lookup
+                        } else if let Some(value) = self.constants.get(&(name.clone(), Some(from_file_index))) {
                             value.clone()
 
                         } else {
                             return Err(inner.error(format!("Reference to undeclared constant \"{}\".", name)))
                         }
-
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
@@ -220,16 +232,46 @@ impl EvaluatorContext {
             },
             Expression::Value(value) => {
                 match value {
-                    ExpressionValue::ConstantValue(inner, name) => {
-                        let c = self.resolve_const_name(
-                            &inner,
-                            constant_stack,
-                            &name,
-                            inner.file_index
-                        )?;
-                        let index = constant_index(&inner);
-                        self.constants.insert(index, c.clone());
-                        c
+                    ExpressionValue::ConstantValue(parent, name) => {
+
+                        // Global lookup
+                        let global_index = (name.clone(), None);
+                        let local_index = (name.clone(), Some(from_file_index));
+                        let value = if let Some(result) = self.constants.get(&global_index) {
+                            result.clone()
+
+                        // File lookup
+                        } else if let Some(result) = self.constants.get(&local_index) {
+                            result.clone()
+
+                        // Global declaration
+                        } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&global_index).cloned() {
+                            self.declare_constant_inline(
+                                constant_stack,
+                                parent,
+                                inner,
+                                name,
+                                expression,
+                                from_file_index,
+                                global_index
+                            )?
+
+                        // Local declaration
+                        } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&local_index).cloned() {
+                            self.declare_constant_inline(
+                                constant_stack,
+                                parent,
+                                inner,
+                                name,
+                                expression,
+                                from_file_index,
+                                local_index
+                            )?
+
+                        } else {
+                            return Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
+                        };
+                        value
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
@@ -259,37 +301,34 @@ impl EvaluatorContext {
         })
     }
 
-    fn resolve_const_name(
+    fn declare_constant_inline(
         &mut self,
-        parent: &InnerToken,
         constant_stack: &[&Symbol],
+        parent: &InnerToken,
+        inner: &InnerToken,
         name: &Symbol,
-        from_file_index: usize
+        expression: &Expression,
+        from_file_index: usize,
+        declare_index: (Symbol, Option<usize>)
 
     ) -> Result<ExpressionResult, SourceError> {
-        let index = constant_index_raw(name, from_file_index);
-        if let Some(result) = self.constants.get(&index) {
-            Ok(result.clone())
+        if constant_stack.contains(&name) {
+            Err(parent.error(
+                format!("Recursive declaration of constant \"{}\".", name)
 
-        } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&index).cloned() {
-            if constant_stack.contains(&name) {
-                Err(parent.error(
-                    format!("Recursive declaration of constant \"{}\".", name)
-
-                ).with_reference(inner, "Initial declaration was"))
-
-            } else {
-                let mut child_stack = constant_stack.to_vec();
-                child_stack.push(name);
-                self.inner_const_resolve(
-                    &child_stack,
-                    expression,
-                    from_file_index
-                )
-            }
+            ).with_reference(inner, "Initial declaration was"))
 
         } else {
-            Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
+            // Resolve constants that are not yet evaluated
+            let mut child_stack = constant_stack.to_vec();
+            child_stack.push(name);
+            let value = self.inner_const_resolve(
+                &child_stack,
+                expression,
+                from_file_index
+            )?;
+            self.constants.insert(declare_index, value.clone());
+            Ok(value)
         }
     }
 
@@ -735,24 +774,6 @@ impl EvaluatorContext {
         }
     }
 
-}
-
-fn constant_index(inner: &InnerToken) -> ConstantIndex {
-    if inner.value.as_str().starts_with('_') {
-        (inner.value.clone(), Some(inner.file_index))
-
-    } else {
-        (inner.value.clone(), None)
-    }
-}
-
-fn constant_index_raw(name: &Symbol, file_index: usize) -> ConstantIndex {
-    if name.as_str().starts_with('_') {
-        (name.clone(), Some(file_index))
-
-    } else {
-        (name.clone(), None)
-    }
 }
 
 fn b2i(m: bool) -> i32 {

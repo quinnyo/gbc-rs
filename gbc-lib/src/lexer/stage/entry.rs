@@ -54,6 +54,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     // Constant + EQU + ConstExpression
     Constant {
         is_default => bool,
+        is_private => bool,
         value => DataExpression
     },
     // DS|DS8|DS16 + Size: ConstExpression [, fill value? (only in ROM segements)]
@@ -371,6 +372,7 @@ impl EntryStage {
     ) -> Result<EntryToken, SourceError> {
         tokens.expect(ExpressionTokenType::Reserved, None, "when parsing constant declaration")?;
         if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing constant declaration")? {
+            let is_private = inner.value.as_str().starts_with('_');
             if is_default {
                 if let Some(constant_def) = default_constants.get(&inner.value) {
                     Err(inner.error(
@@ -383,6 +385,7 @@ impl EntryStage {
                     Ok(EntryToken::Constant {
                         inner,
                         is_default,
+                        is_private,
                         value: expr
                     })
                 }
@@ -398,6 +401,7 @@ impl EntryStage {
                 Ok(EntryToken::Constant {
                     inner,
                     is_default,
+                    is_private,
                     value: expr
                 })
             }
@@ -1611,11 +1615,19 @@ mod test {
         assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: false,
+            is_private: false,
+            value: Expression::Value(ExpressionValue::Integer(2))
+        }]);
+        assert_eq!(tfe("_foo EQU 2"), vec![EntryToken::Constant {
+            inner: itk!(0, 4, "_foo"),
+            is_default: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: false,
+            is_private: false,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
                 Symbol::from("bar".to_string())
@@ -1624,6 +1636,7 @@ mod test {
         assert_eq!(tfe("foo DEFAULT EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: true,
+            is_private: false,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(16, 19, "bar"),
                 Symbol::from("bar".to_string())
@@ -1632,9 +1645,9 @@ mod test {
         assert_eq!(tfe("foo EQU 'test'"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: false,
+            is_private: false,
             value: Expression::Value(ExpressionValue::String("test".to_string()))
         }]);
-
     }
 
     #[test]
@@ -1642,11 +1655,13 @@ mod test {
         assert_eq!(tfe("foo DEFAULT EQU 1\nfoo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: true,
+            is_private: false,
             value: Expression::Value(ExpressionValue::Integer(1))
 
         }, EntryToken::Constant {
             inner: itk!(18, 21, "foo"),
             is_default: false,
+            is_private: false,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
     }

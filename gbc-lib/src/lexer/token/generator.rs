@@ -1,7 +1,7 @@
 // Internal Dependencies ------------------------------------------------------
 use super::InnerToken;
 use crate::error::SourceError;
-use super::super:: LexerFile;
+use super::super::LexerFile;
 
 
 // Types ----------------------------------------------------------------------

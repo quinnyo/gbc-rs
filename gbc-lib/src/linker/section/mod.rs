@@ -1011,6 +1011,36 @@ mod test {
     }
 
     #[test]
+    fn test_section_entry_constant_eval_referenced_local() {
+        let l = linker("_A EQU _B\n_B EQU _C\n_C EQU 2\nSECTION ROM0\nDB _A\nDB _B\nDB _C");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+            ]
+        ]);
+    }
+
+    #[test]
     fn test_section_entry_constant_eval_default() {
         let l = linker("A DEFAULT EQU 0\nA EQU 1\nB DEFAULT EQU 2\nC EQU 4\nC DEFAULT EQU 3\nSECTION ROM0\nDB A\nDB B\n DB C");
         assert_eq!(linker_section_entries(l), vec![
