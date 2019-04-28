@@ -315,107 +315,69 @@ impl EvaluatorContext {
             }
         }
 
+        fn double_mixed_number<C: Fn(i32, i32) -> i32, D: Fn(f32, f32) -> f32>(a: &ExpressionResult, b: &ExpressionResult, int: C, flt: D) -> ExpressionResult {
+            match (a, b) {
+                (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
+                    ExpressionResult::Integer(int(*a, *b))
+                },
+                (ExpressionResult::Float(a), ExpressionResult::Float(b)) => {
+                    ExpressionResult::Float(OrderedFloat(flt(a.into_inner(), b.into_inner())))
+                },
+                (ExpressionResult::Float(a), ExpressionResult::Integer(b)) => {
+                    ExpressionResult::Float(OrderedFloat(flt(a.into_inner(), *b as f32)))
+                },
+                (ExpressionResult::Integer(a), ExpressionResult::Float(b)) => {
+                    ExpressionResult::Float(OrderedFloat(flt(*a as f32, b.into_inner())))
+                },
+                _ => unreachable!()
+            }
+        }
+
+        fn single_float<C: Fn(f32) -> f32>(a: &ExpressionResult, flt: C) -> ExpressionResult {
+            match a {
+                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat(flt(*i as f32))),
+                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(flt(f.into_inner()))),
+                _ => unreachable!("")
+            }
+        }
+
         // Evaluate
         Ok(match name {
             Symbol::DBG => ExpressionResult::Integer(0),
-            Symbol::MAX => match (&args[0], &args[1]) {
-                (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
-                    ExpressionResult::Integer(cmp::max(*a, *b))
-                },
-                (ExpressionResult::Float(a), ExpressionResult::Float(b)) => {
-                    ExpressionResult::Float(OrderedFloat(a.into_inner().max(b.into_inner())))
-                },
-                (ExpressionResult::Float(a), ExpressionResult::Integer(b)) => {
-                    ExpressionResult::Float(OrderedFloat(a.into_inner().max(*b as f32)))
-                },
-                (ExpressionResult::Integer(a), ExpressionResult::Float(b)) => {
-                    ExpressionResult::Float(OrderedFloat((*a as f32).max(b.into_inner())))
-                },
-                _ => unreachable!("Invalid MAX arguments")
-            },
-            Symbol::MIN => match (&args[0], &args[1]) {
-                (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
-                    ExpressionResult::Integer(cmp::min(*a, *b))
-                },
-                (ExpressionResult::Float(a), ExpressionResult::Float(b)) => {
-                    ExpressionResult::Float(OrderedFloat(a.into_inner().min(b.into_inner())))
-                },
-                (ExpressionResult::Float(a), ExpressionResult::Integer(b)) => {
-                    ExpressionResult::Float(OrderedFloat(a.into_inner().min(*b as f32)))
-                },
-                (ExpressionResult::Integer(a), ExpressionResult::Float(b)) => {
-                    ExpressionResult::Float(OrderedFloat((*a as f32).min(b.into_inner())))
-                },
-                _ => unreachable!("Invalid MIN arguments")
-            },
+            Symbol::MAX => double_mixed_number(&args[0], &args[1], cmp::max, |a, b| a.max(b)),
+            Symbol::MIN => double_mixed_number(&args[0], &args[1], cmp::min, |a, b| a.min(b)),
             Symbol::FLOOR => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().floor() as i32),
-                _ => unreachable!("Invalid FLOOR arguments")
+                _ => unreachable!()
             },
             Symbol::CEIL => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().ceil() as i32),
-                _ => unreachable!("Invalid CEIL arguments")
+                _ => unreachable!()
             },
             Symbol::ROUND => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i),
                 ExpressionResult::Float(f) => ExpressionResult::Integer(f.into_inner().round() as i32),
-                _ => unreachable!("Invalid ROUND arguments")
+                _ => unreachable!()
             },
 
-            Symbol::LOG => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).log(::std::f32::consts::LOG2_E))),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.log(::std::f32::consts::LOG2_E))),
-                _ => unreachable!("Invalid LOG arguments")
-            },
-            Symbol::EXP => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).exp())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.exp())),
-                _ => unreachable!("Invalid EXP arguments")
-            },
-            Symbol::SQRT => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).sqrt())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.sqrt())),
-                _ => unreachable!("Invalid EXP arguments")
-            },
+            Symbol::LOG => single_float(&args[0], |a| a.log(::std::f32::consts::LOG2_E)),
+            Symbol::EXP => single_float(&args[0], |a| a.exp()),
+            Symbol::SQRT => single_float(&args[0], |a| a.sqrt()),
             Symbol::ABS => match args[0] {
                 ExpressionResult::Integer(i) => ExpressionResult::Integer(i.abs()),
                 ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.abs())),
-                _ => unreachable!("Invalid EXP arguments")
+                _ => unreachable!()
             },
 
             // Math
-            Symbol::SIN => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).sin())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.sin())),
-                _ => unreachable!("Invalid SIN arguments")
-            },
-            Symbol::COS => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).cos())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.cos())),
-                _ => unreachable!("Invalid COS arguments")
-            },
-            Symbol::TAN => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).tan())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.tan())),
-                _ => unreachable!("Invalid TAN arguments")
-            },
-            Symbol::ASIN => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).asin())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.asin())),
-                _ => unreachable!("Invalid ASIN arguments")
-            },
-            Symbol::ACOS => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).acos())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.acos())),
-                _ => unreachable!("Invalid ACOS arguments")
-            },
-            Symbol::ATAN => match args[0] {
-                ExpressionResult::Integer(i) => ExpressionResult::Float(OrderedFloat((i as f32).atan())),
-                ExpressionResult::Float(f) => ExpressionResult::Float(OrderedFloat(f.atan())),
-                _ => unreachable!("Invalid ATAN arguments")
-            },
+            Symbol::SIN => single_float(&args[0], |a| a.sin()),
+            Symbol::COS => single_float(&args[0], |a| a.cos()),
+            Symbol::TAN => single_float(&args[0], |a| a.tan()),
+            Symbol::ASIN => single_float(&args[0], |a| a.asin()),
+            Symbol::ACOS => single_float(&args[0], |a| a.acos()),
+            Symbol::ATAN => single_float(&args[0], |a| a.atan()),
             Symbol::ATAN2 => match (&args[0], &args[1]) {
                 (ExpressionResult::Integer(a), ExpressionResult::Integer(b)) => {
                     ExpressionResult::Float(OrderedFloat((*a as f32).atan2(*b as f32)))
@@ -429,21 +391,21 @@ impl EvaluatorContext {
                 (ExpressionResult::Integer(a), ExpressionResult::Float(b)) => {
                     ExpressionResult::Float(OrderedFloat((*a as f32).atan2(b.into_inner())))
                 },
-                _ => unreachable!("Invalid ATAN2 arguments")
+                _ => unreachable!()
             },
 
             // String
             Symbol::STRUPR => match &args[0] {
                 ExpressionResult::String(s) => ExpressionResult::String(s.to_ascii_uppercase()),
-                _ => unreachable!("Invalid STRUPR arguments")
+                _ => unreachable!()
             },
             Symbol::STRLWR => match &args[0] {
                 ExpressionResult::String(s) => ExpressionResult::String(s.to_ascii_lowercase()),
-                _ => unreachable!("Invalid STRLWR arguments")
+                _ => unreachable!()
             },
             Symbol::STRLEN => match &args[0] {
                 ExpressionResult::String(s) => ExpressionResult::Integer(s.len() as i32),
-                _ => unreachable!("Invalid STRLEN arguments")
+                _ => unreachable!()
             },
             Symbol::STRSUB => match (&args[0], &args[1], &args[2]) {
                 (ExpressionResult::String(s), ExpressionResult::Integer(index), ExpressionResult::Integer(len)) => {
@@ -459,13 +421,13 @@ impl EvaluatorContext {
                         ExpressionResult::String(s[from..to].to_string())
                     }
                 },
-                _ => unreachable!("Invalid STRSUB arguments")
+                _ => unreachable!()
             },
             Symbol::STRIN => match (&args[0], &args[1]) {
                 (ExpressionResult::String(s), ExpressionResult::String(i)) => {
                     ExpressionResult::Integer(b2i(s.contains(i)))
                 },
-                _ => unreachable!("Invalid STRIN arguments")
+                _ => unreachable!()
             },
             Symbol::STRPADR => match (&args[0], &args[1], &args[2]) {
                 (ExpressionResult::String(s), ExpressionResult::String(padding), ExpressionResult::Integer(len)) => {
@@ -480,7 +442,7 @@ impl EvaluatorContext {
                         ExpressionResult::String(format!("{}{}", s, padding.repeat(extension)))
                     }
                 },
-                _ => unreachable!("Invalid STRPADR arguments")
+                _ => unreachable!()
             },
             Symbol::STRPADL => match (&args[0], &args[1], &args[2]) {
                 (ExpressionResult::String(s), ExpressionResult::String(padding), ExpressionResult::Integer(len)) => {
@@ -495,7 +457,7 @@ impl EvaluatorContext {
                         ExpressionResult::String(format!("{}{}", padding.repeat(extension), s))
                     }
                 },
-                _ => unreachable!("Invalid STRPADL arguments")
+                _ => unreachable!()
             },
             _ => unimplemented!("Unimplemented macro call: {}", name)
 

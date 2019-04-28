@@ -110,7 +110,7 @@ impl Linker {
                 return Err(token.error("Unexpected ROM entry before any section declaration".to_string()))
 
             } else if let Some(section) = sections.get_mut(section_index) {
-                section.add_entry(&mut context, token, volatile)?;
+                section.add_entry(&context, token, volatile)?;
             }
         }
 

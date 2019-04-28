@@ -518,7 +518,7 @@ impl EntryStage {
                 format!("Unexpected trailing comma in \"{}\" instruction.", inner.value)
             ))
 
-        } else if let Some(op_code) = layouts.get(&(inner.value.clone(), layout)).map(|op_code| *op_code) {
+        } else if let Some(op_code) = layouts.get(&(inner.value.clone(), layout)).cloned() {
             if let Some(expression) = expression {
                 Ok(EntryToken::InstructionWithArg(inner, op_code, expression))
 
