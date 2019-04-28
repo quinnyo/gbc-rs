@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gbc_cpu::{Register, Flag, LexerArgument, InstructionLayouts, self};
+use gbc_cpu::{Register, Flag, LexerArgument, self};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -14,6 +14,10 @@ use crate::expression::{DataExpression, OptionalDataExpression, Expression, Expr
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use super::expression::ExpressionToken;
 use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
+
+
+// Types ----------------------------------------------------------------------
+pub type InstructionLayouts = HashMap<(&'static str, Vec<LexerArgument>), usize>;
 
 
 // Entry Specific Structs -----------------------------------------------------
@@ -133,7 +137,14 @@ impl LexerStage for EntryStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let layouts = gbc_cpu::instruction_layouts();
+        let mut layouts: InstructionLayouts = HashMap::new();
+        for (index, instr) in gbc_cpu::instruction_list().into_iter().enumerate() {
+            let layout = instr.layout.into_iter().map(Into::into).collect();
+            // TODO create enum for instruction names
+            // TODO remove the need for the string conversions
+            let key: (&'static str, Vec<LexerArgument>) = (instr.name, layout);
+            layouts.entry(key).or_insert(index);
+        }
         Self::parse_entry_tokens(tokens, &layouts)
     }
 
@@ -509,12 +520,12 @@ impl EntryStage {
                 format!("Unexpected trailing comma in \"{}\" instruction.", inner.value)
             ))
 
-        } else if let Some(op_code) = layouts.get(&(inner.value.to_string(), layout)) {
+        } else if let Some(op_code) = layouts.get(&(inner.value.as_str(), layout)).map(|op_code| *op_code) {
             if let Some(expression) = expression {
-                Ok(EntryToken::InstructionWithArg(inner, *op_code, expression))
+                Ok(EntryToken::InstructionWithArg(inner, op_code, expression))
 
             } else {
-                Ok(EntryToken::Instruction(inner, *op_code))
+                Ok(EntryToken::Instruction(inner, op_code))
             }
 
         } else {

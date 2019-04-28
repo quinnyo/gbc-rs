@@ -98,15 +98,23 @@ impl TokenGenerator {
 
     pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, SourceError> {
         self.start = self.index - 1;
+        let mut chars = String::with_capacity(8);
         if inclusive {
-            self.collect_with(vec![self.current], cb)
+            chars.push(self.current);
+        }
+        self.collect_with(chars, cb)
+    }
 
-        } else {
-            self.collect_with(vec![], cb)
+    pub fn skip_with<C: Fn(char) -> bool>(&mut self, cb: C) {
+        while self.peek().is_some() {
+            self.next();
+            if cb(self.current) {
+                break;
+            }
         }
     }
 
-    fn collect_with<C: FnMut(char, char) -> TokenChar>(&mut self, mut parsed: Vec<char>, mut cb: C) -> Result<InnerToken, SourceError> {
+    fn collect_with<C: FnMut(char, char) -> TokenChar>(&mut self, mut parsed: String, mut cb: C) -> Result<InnerToken, SourceError> {
 
         let mut last = '\0';
         let mut end_index = self.index;
@@ -142,7 +150,7 @@ impl TokenGenerator {
             self.file_index,
             self.start,
             end_index,
-            parsed.into_iter().collect()
+            parsed
         ))
     }
 

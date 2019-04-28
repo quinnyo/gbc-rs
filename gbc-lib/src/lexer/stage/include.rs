@@ -30,7 +30,6 @@ lexer_token!(IncludeToken, (Debug, Eq, PartialEq, Clone), {
     Point(()),
     Colon(()),
     Operator(()),
-    Comment(()),
     OpenParen(()),
     CloseParen(()),
     OpenBracket(()),
@@ -233,7 +232,7 @@ impl IncludeStage {
     }
 
     fn collect_tokens(iter: &mut TokenGenerator, inside_token_group: bool) -> Result<Vec<IncludeToken>, SourceError> {
-        let mut tokens = Vec::new();
+        let mut tokens = Vec::with_capacity(8);
         while iter.peek().is_some() {
             let token = match iter.next() {
                 // Whitespace
@@ -241,6 +240,7 @@ impl IncludeStage {
                 '\n' | '\r' => continue, // Ignore newlines
                 // Names
                 'a'...'z' | 'A'...'Z' | '_' => {
+                    // TODO early convert into ValueToken here
                     let name = Self::collect_inner_name(iter, true)?;
                     match name.value.as_str() {
                         // Split into Reserved Words
@@ -362,14 +362,12 @@ impl IncludeStage {
                     Some(IncludeToken::Operator(iter.collect_single()))
                 },
                 // Punctation
-                ';' => Some(IncludeToken::Comment(iter.collect(true, |c, _| {
-                    if let '\n' | '\r' = c {
-                        TokenChar::Invalid
-
-                    } else {
-                        TokenChar::Valid(c)
-                    }
-                })?)),
+                ';' => {
+                    iter.skip_with(|c| {
+                        c == '\n' || c == '\r'
+                    });
+                    continue;
+                },
                 ':' => Some(IncludeToken::Colon(iter.collect_single())),
                 '.' => Some(IncludeToken::Point(iter.collect_single())),
                 ',' => Some(IncludeToken::Comma(iter.collect_single())),
@@ -935,10 +933,9 @@ mod test {
     }
 
     #[test]
-    fn test_comments() {
+    fn test_drop_comments() {
         assert_eq!(include_lexer("2 ; A Comment"), vec![
-            tk!(NumberLiteral, 0, 1, "2"),
-            tk!(Comment, 2, 13, "; A Comment")
+            tk!(NumberLiteral, 0, 1, "2")
         ]);
     }
 
@@ -950,7 +947,6 @@ mod test {
             tk!(NumberLiteral, 9, 10, "4")
         ]);
         assert_eq!(include_lexer("; A Comment\n2"), vec![
-            tk!(Comment, 0, 11, "; A Comment"),
             tk!(NumberLiteral, 12, 13, "2"),
         ]);
     }

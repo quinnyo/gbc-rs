@@ -65,7 +65,6 @@ pub enum TokenType {
     Point,
     Colon,
     Operator,
-    Comment,
     OpenParen,
     CloseParen,
     OpenBracket,
@@ -116,11 +115,12 @@ pub struct InnerToken {
 
 impl InnerToken {
     pub fn new(file_index: usize, start_index: usize, end_index: usize, value: String) -> Self {
+        let value = TokenValue::from(value);
         Self {
             file_index,
             start_index,
             end_index,
-            value: TokenValue::from(value),
+            value,
             macro_call_id: None
         }
     }

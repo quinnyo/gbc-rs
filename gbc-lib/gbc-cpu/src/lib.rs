@@ -1,7 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
 use std::convert::Into;
-use std::collections::HashMap;
 
 
 // Modules --------------------------------------------------------------------
@@ -10,17 +9,6 @@ pub use self::instructions::instruction_max_arg_count;
 
 
 // Functions ------------------------------------------------------------------
-pub type InstructionLayouts = HashMap<(String, Vec<LexerArgument>), usize>;
-pub fn instruction_layouts() -> InstructionLayouts {
-    let mut layouts = HashMap::new();
-    for (index, instr) in instructions::instructions().into_iter().enumerate() {
-        let layout = instr.layout.into_iter().map(Into::into).collect();
-        let key: (String, Vec<LexerArgument>) = (instr.name, layout);
-        layouts.entry(key).or_insert(index);
-    }
-    layouts
-}
-
 pub fn instruction_list() -> Vec<Instruction> {
     instructions::instructions()
 }
@@ -251,7 +239,7 @@ impl fmt::Debug for Register {
 pub struct Instruction {
     pub code: usize,
     pub prefix: Option<usize>,
-    pub name: String,
+    pub name: &'static str,
     pub size: usize,
     pub cycles: usize,
     pub cycles_min: Option<usize>,

@@ -158,9 +158,6 @@ impl ValueStage {
                     inner
                 },
 
-                // Drop Comments
-                MacroToken::Comment(_) => continue,
-
                 // Values
                 MacroToken::BuiltinCall(inner, args) => {
                     let mut value_args = Vec::with_capacity(args.len());
