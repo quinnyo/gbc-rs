@@ -50,7 +50,6 @@ pub trait LexerToken {
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum TokenType {
     // Include
-    Newline,
     Name,
     Reserved,
     Segment,

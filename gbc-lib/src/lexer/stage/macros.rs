@@ -560,7 +560,7 @@ impl MacroStage {
             // Recursively expand and parse all arguments
             // so that MAX(MIN(FLOOR())) results in 3 BuiltinCalls
             arguments.push(Self::expand_macro_calls(
-                expanded.into_iter().filter(|t| !t.is(TokenType::Newline)).collect(),
+                expanded,
                 macro_call_id,
                 expansion_depth,
                 macro_calls,
