@@ -17,13 +17,24 @@ macro_rules! underscore {
 #[macro_export]
 macro_rules! lexer_token {
     // Tuple only
-    ($name:ident, ($($de:ident),*), {
+    ($name:ident, $typ:ident, ($($de:ident),*), {
         $(
             $variant:ident(
                 ($($bind:ty),*)
             )
         ),*
     }) => {
+
+        use crate::lexer::token::TokenType;
+
+        #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+        pub enum $typ {
+            $(
+                $variant
+            ),*
+        }
+        impl TokenType for $typ {}
+
         #[derive($($de),*)]
         pub enum $name {
             $(
@@ -32,10 +43,13 @@ macro_rules! lexer_token {
         }
 
         impl LexerToken for $name {
-            fn typ(&self) -> TokenType {
+
+            type Typ = $typ;
+
+            fn typ(&self) -> $typ {
                 match self {
                     $(
-                        $name::$variant(_, $(underscore!($bind)),*) => TokenType::$variant
+                        $name::$variant(_, $(underscore!($bind)),*) => $typ::$variant
                     ),*
                 }
             }
@@ -72,7 +86,7 @@ macro_rules! lexer_token {
         }
     };
     // Tuple and Struct
-    ($name:ident, ($($de:ident),*), {
+    ($name:ident, $typ:ident, ($($de:ident),*), {
         $(
             $variant:ident(
                 ($($bind:ty),*)
@@ -86,6 +100,20 @@ macro_rules! lexer_token {
         ),*
 
     }) => {
+
+        use crate::lexer::token::TokenType;
+
+        #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+        pub enum $typ {
+            $(
+                $variant
+            ),*,
+            $(
+                $struct_variant
+            ),*
+        }
+        impl TokenType for $typ {}
+
         #[derive($($de),*)]
         pub enum $name {
             $(
@@ -100,13 +128,16 @@ macro_rules! lexer_token {
         }
 
         impl LexerToken for $name {
-            fn typ(&self) -> TokenType {
+
+            type Typ = $typ;
+
+            fn typ(&self) -> $typ {
                 match self {
                     $(
-                        $name::$variant(_, $(underscore!($bind)),*) => TokenType::$variant
+                        $name::$variant(_, $(underscore!($bind)),*) => $typ::$variant
                     ),*,
                     $(
-                        $name::$struct_variant { .. } => TokenType::$struct_variant
+                        $name::$struct_variant { .. } => $typ::$struct_variant
                     ),*
                 }
             }

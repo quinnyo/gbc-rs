@@ -11,13 +11,13 @@ use super::macros::MacroCall;
 use crate::lexer::{ValueStage, TokenValue};
 use crate::error::SourceError;
 use crate::expression::{Expression, ExpressionValue};
-use super::value::ValueToken;
+use super::value::{ValueToken, ValueTokenType};
 use super::macros::{IfStatementBranch, ForStatement, BlockStatement};
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Expression Specific Tokens -------------------------------------------------
-lexer_token!(ExpressionToken, (Debug, Eq, PartialEq), {
+lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
     Constant((bool)),
     Reserved(()),
     Segment(()),
@@ -132,9 +132,9 @@ impl ExpressionStage {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some(TokenValue::DEFAULT)) {
-                let def = tokens.expect(TokenType::Reserved, Some(TokenValue::DEFAULT), "while parsing DEFAULT declaration.")?;
-                if tokens.peek_is(TokenType::Reserved, Some(TokenValue::EQU)) {
+            if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(TokenValue::DEFAULT)) {
+                let def = tokens.expect(ValueTokenType::Reserved, Some(TokenValue::DEFAULT), "while parsing DEFAULT declaration.")?;
+                if tokens.peek_is(ValueTokenType::Reserved, Some(TokenValue::EQU)) {
                     expression_tokens.push(ExpressionToken::Constant(token.into_inner(), true));
 
                 } else {
@@ -143,7 +143,7 @@ impl ExpressionStage {
                     );
                 }
 
-            } else if token.is(TokenType::Name) && tokens.peek_is(TokenType::Reserved, Some(TokenValue::EQU)) {
+            } else if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(TokenValue::EQU)) {
                 expression_tokens.push(ExpressionToken::Constant(token.into_inner(), false));
 
             } else {
@@ -171,14 +171,14 @@ impl ExpressionStage {
             while let Some(next_typ) = tokens.peek_typ() {
 
                 // Check Parenthesis Depth
-                if current_typ == TokenType::OpenParen {
+                if current_typ == ValueTokenType::OpenParen {
                     paren_depth += 1;
 
-                } else if current_typ == TokenType::CloseParen {
+                } else if current_typ == ValueTokenType::CloseParen {
                     paren_depth -= 1;
                 }
 
-                if paren_depth == 0 && next_typ == TokenType::CloseParen {
+                if paren_depth == 0 && next_typ == ValueTokenType::CloseParen {
                     break;
                 }
 
@@ -262,7 +262,7 @@ impl ExpressionParser {
         // Now we collect additional binary operators on the right as long as their
         // precedence is higher then the initial one
         while self.is_binary() && self.precedence() > prec {
-            let op = self.assert_typ(TokenType::Operator, "Unexpected end of expression after binary operator, expected a right-hand side value.")?;
+            let op = self.assert_typ(ValueTokenType::Operator, "Unexpected end of expression after binary operator, expected a right-hand side value.")?;
             if let ValueToken::Operator { inner, typ } = op {
 
                 let right = self.parse_binary(typ.precedence() + typ.associativity())?;
@@ -294,7 +294,7 @@ impl ExpressionParser {
         Ok(self.update(Some(next)).expect("ExpressionParser::expect failed"))
     }
 
-    fn assert_typ<S: Into<String>>(&mut self, typ: TokenType, msg: S) -> Result<ValueToken, SourceError> {
+    fn assert_typ<S: Into<String>>(&mut self, typ: ValueTokenType, msg: S) -> Result<ValueToken, SourceError> {
         let next = self.tokens.next();
         match self.update(next) {
             Some(token) => if token.is(typ) {
@@ -336,7 +336,7 @@ impl ExpressionParser {
         } else if self.is_paren() {
             let _paren = self.expect("Unexpected end of expression after opening parenthesis, expected an inner expression.")?;
             let left = self.parse_binary(0)?;
-            let _paren = self.assert_typ(TokenType::CloseParen, "Expected a closing parenthesis after end of inner expression.")?;
+            let _paren = self.assert_typ(ValueTokenType::CloseParen, "Expected a closing parenthesis after end of inner expression.")?;
             Ok(left)
 
         // Parse Values and Calls
@@ -412,32 +412,32 @@ impl ExpressionParser {
         }
     }
 
-    fn is_start_token(current: TokenType) -> bool {
-        Self::is_value_token_type(current) || current == TokenType::OpenParen || current == TokenType::Operator
+    fn is_start_token(current: ValueTokenType) -> bool {
+        Self::is_value_token_type(current) || current == ValueTokenType::OpenParen || current == ValueTokenType::Operator
     }
 
-    fn is_follow_up_token(prev: TokenType, next: TokenType) -> bool {
-        if prev == TokenType::OpenParen {
-            next == TokenType::OpenParen || next == TokenType::Operator || ExpressionParser::is_value_token_type(next)
+    fn is_follow_up_token(prev: ValueTokenType, next: ValueTokenType) -> bool {
+        if prev == ValueTokenType::OpenParen {
+            next == ValueTokenType::OpenParen || next == ValueTokenType::Operator || ExpressionParser::is_value_token_type(next)
 
-        } else if prev == TokenType::CloseParen {
-            next == TokenType::CloseParen || next == TokenType::Operator
+        } else if prev == ValueTokenType::CloseParen {
+            next == ValueTokenType::CloseParen || next == ValueTokenType::Operator
 
-        } else if prev == TokenType::Operator {
-            next == TokenType::OpenParen || ExpressionParser::is_value_token_type(next) || next == TokenType::Operator
+        } else if prev == ValueTokenType::Operator {
+            next == ValueTokenType::OpenParen || ExpressionParser::is_value_token_type(next) || next == ValueTokenType::Operator
 
         } else if ExpressionParser::is_value_token_type(prev) {
-            next == TokenType::CloseParen || next == TokenType::Operator
+            next == ValueTokenType::CloseParen || next == ValueTokenType::Operator
 
         } else {
             false
         }
     }
 
-    fn is_value_token_type(typ: TokenType) -> bool {
+    fn is_value_token_type(typ: ValueTokenType) -> bool {
         match typ {
-            TokenType::Integer | TokenType::Float | TokenType::String | TokenType::Name |
-            TokenType::Offset | TokenType::GlobalLabelRef | TokenType::LocalLabelRef | TokenType::BuiltinCall => {
+            ValueTokenType::Integer | ValueTokenType::Float | ValueTokenType::String | ValueTokenType::Name |
+            ValueTokenType::Offset | ValueTokenType::GlobalLabelRef | ValueTokenType::LocalLabelRef | ValueTokenType::BuiltinCall => {
                 true
             },
             _=> false

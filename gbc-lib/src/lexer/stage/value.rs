@@ -11,12 +11,12 @@ use ordered_float::OrderedFloat;
 use crate::lexer::{MacroStage, TokenValue};
 use crate::error::SourceError;
 use crate::expression::Operator;
-use super::macros::{MacroCall, MacroToken, IfStatementBranch, ForStatement, BlockStatement};
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
+use super::macros::{MacroCall, MacroToken, MacroTokenType, IfStatementBranch, ForStatement, BlockStatement};
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Value Specific Tokens ------------------------------------------------------
-lexer_token!(ValueToken, (Debug, Eq, PartialEq), {
+lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
     Name(()),
     Reserved(()),
     Segment(()),
@@ -173,8 +173,8 @@ impl ValueStage {
                     ValueToken::BuiltinCall(inner, value_args)
                 },
                 MacroToken::Name(mut inner) => {
-                    if tokens.peek_is(TokenType::Colon, None) {
-                        let colon = tokens.expect(TokenType::Colon, None, "when parsing global label definition")?.into_inner();
+                    if tokens.peek_is(MacroTokenType::Colon, None) {
+                        let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing global label definition")?.into_inner();
                         let label_id = Self::global_label_id(&inner, false);
                         if let Some((previous, _)) = global_labels.get(&label_id) {
                             return Err(inner.error(format!(
@@ -222,10 +222,10 @@ impl ValueStage {
                     return Err(inner.error(format!("Unexpected standalone \"{}\", expected a \"Name\" token to preceed it.", inner.value)))
                 },
                 MacroToken::Operator(mut inner) => {
-                    let typ = if tokens.peek_is(TokenType::Operator, None) {
+                    let typ = if tokens.peek_is(MacroTokenType::Operator, None) {
                         match Self::parse_operator_double(&inner, tokens.peek().unwrap().inner()) {
                             Some(typ) => {
-                                tokens.expect(TokenType::Operator, None, "when parsing operator")?;
+                                tokens.expect(MacroTokenType::Operator, None, "when parsing operator")?;
                                 typ
                             },
                             None => Self::parse_operator_single(&inner)?
@@ -310,14 +310,14 @@ impl ValueStage {
 
     ) -> Result<ValueToken, SourceError> {
         // For local labels all kinds of names are allowed
-        let name_token = if tokens.peek_is(TokenType::Instruction, None) {
-            tokens.expect(TokenType::Instruction, None, "when parsing local label")?.into_inner()
+        let name_token = if tokens.peek_is(MacroTokenType::Instruction, None) {
+            tokens.expect(MacroTokenType::Instruction, None, "when parsing local label")?.into_inner()
 
-        } else if tokens.peek_is(TokenType::Reserved, None) {
-            tokens.expect(TokenType::Reserved, None, "when parsing local label")?.into_inner()
+        } else if tokens.peek_is(MacroTokenType::Reserved, None) {
+            tokens.expect(MacroTokenType::Reserved, None, "when parsing local label")?.into_inner()
 
         } else {
-            tokens.expect(TokenType::Name, None, "when parsing local label")?.into_inner()
+            tokens.expect(MacroTokenType::Name, None, "when parsing local label")?.into_inner()
         };
 
         // Postfix labels created by macros calls so they are unique
@@ -328,8 +328,8 @@ impl ValueStage {
             TokenValue::from(name_token.value.to_string())
         };
 
-        if tokens.peek_is(TokenType::Colon, None) {
-            let colon = tokens.expect(TokenType::Colon, None, "when parsing local label definition")?.into_inner();
+        if tokens.peek_is(MacroTokenType::Colon, None) {
+            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing local label definition")?.into_inner();
             if global_labels.is_empty() {
                 Err(inner.error(format!(
                     "Unexpected definition of local label \"{}\" before any global label was defined.",

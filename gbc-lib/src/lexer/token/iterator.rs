@@ -1,6 +1,6 @@
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use super::{LexerToken, TokenType, TokenValue};
+use super::{LexerToken, TokenValue};
 
 
 // Token Iterator Implementation ----------------------------------------------
@@ -20,11 +20,11 @@ impl<T: LexerToken> TokenIterator<T> {
         }
     }
 
-    pub fn peek_typ(&mut self) -> Option<TokenType> {
+    pub fn peek_typ(&mut self) -> Option<T::Typ> {
         self.tokens.peek().map(LexerToken::typ)
     }
 
-    pub fn peek_is(&mut self, typ: TokenType, value: Option<TokenValue>) -> bool {
+    pub fn peek_is(&mut self, typ: T::Typ, value: Option<TokenValue>) -> bool {
         match self.tokens.peek() {
             Some(token) => if token.is(typ) {
                 if let Some(value) = value {
@@ -45,7 +45,7 @@ impl<T: LexerToken> TokenIterator<T> {
         self.tokens.peek()
     }
 
-    pub fn expect<S: Into<String>>(&mut self, typ: TokenType, value: Option<TokenValue>, message: S) -> Result<T, SourceError> {
+    pub fn expect<S: Into<String>>(&mut self, typ: T::Typ, value: Option<TokenValue>, message: S) -> Result<T, SourceError> {
         match self.next() {
             Some(token) => {
                 if token.is(typ)  {

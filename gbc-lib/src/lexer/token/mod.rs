@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::fmt;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 
@@ -12,9 +16,13 @@ pub use value::TokenValue;
 
 
 // Traits ---------------------------------------------------------------------
+pub trait TokenType: PartialEq + fmt::Debug + Copy {}
+
 pub trait LexerToken {
 
-    fn typ(&self) -> TokenType;
+    type Typ: TokenType;
+
+    fn typ(&self) -> Self::Typ;
 
     fn inner(&self) -> &InnerToken;
 
@@ -31,7 +39,7 @@ pub trait LexerToken {
         (inner.file_index, inner.start_index)
     }
 
-    fn is(&self, typ: TokenType) -> bool {
+    fn is(&self, typ: Self::Typ) -> bool {
         self.typ() == typ
     }
 
@@ -45,64 +53,7 @@ pub trait LexerToken {
 
 }
 
-
 // Inner Token Abstraction ----------------------------------------------------
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum TokenType {
-    // Include
-    Name,
-    Reserved,
-    Segment,
-    Instruction,
-    MetaInstruction,
-    Parameter,
-    NumberLiteral,
-    StringLiteral,
-    TokenGroup,
-    BinaryFile,
-    Comma,
-    Point,
-    Colon,
-    Operator,
-    OpenParen,
-    CloseParen,
-    OpenBracket,
-    CloseBracket,
-
-    // Macro
-    BuiltinCall,
-    IfStatement,
-    ForStatement,
-    BlockStatement,
-    CompressedBlock,
-
-    // Value Tokens
-    Offset,
-    Integer,
-    Float,
-    String,
-    Constant,
-    Register,
-    Flag,
-    GlobalLabelDef,
-    GlobalLabelRef,
-    LocalLabelDef,
-    LocalLabelRef,
-
-    // Expression Tokens
-    Expression,
-    ConstExpression,
-
-    // Entry Tokens
-    Data,
-    InstructionWithArg,
-    DebugInstruction,
-    DebugInstructionWithArg,
-    SectionDeclaration,
-    UsingStatement,
-    VolatileStatement
-}
-
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct InnerToken {
     pub file_index: usize,

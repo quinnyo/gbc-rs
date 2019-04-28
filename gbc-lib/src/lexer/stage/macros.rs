@@ -11,8 +11,8 @@ use lazy_static::lazy_static;
 use crate::lexer::IncludeStage;
 use crate::error::SourceError;
 use crate::expression::ExpressionArgumenType;
-use super::include::IncludeToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, TokenType, TokenValue};
+use super::include::{IncludeToken, IncludeType};
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken, TokenValue};
 
 
 // Statics --------------------------------------------------------------------
@@ -108,7 +108,7 @@ pub enum BlockStatement<T: LexerToken> {
 
 
 // Macro Specific Tokens ------------------------------------------------------
-lexer_token!(MacroToken, (Debug, Eq, PartialEq), {
+lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
     Name(()),
     Reserved(()),
     Segment(()),
@@ -245,13 +245,13 @@ impl MacroStage {
 
         // Extract Macro Definitions
         while let Some(token) = tokens.next() {
-            if token.is(TokenType::Reserved) && token.has_value(TokenValue::ENDMACRO) {
+            if token.is(IncludeType::Reserved) && token.has_value(TokenValue::ENDMACRO) {
                 return Err(token.error(format!("Unexpected \"{}\" token outside of macro definition.", token.value())));
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::MACRO) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::MACRO) {
 
                 // Verify Macro Name
-                let name_token = tokens.expect(TokenType::Name, None, "when parsing macro definition")?;
+                let name_token = tokens.expect(IncludeType::Name, None, "when parsing macro definition")?;
                 if Self::get_macro_by_name(&BUILTIN_MACRO_DEFS, name_token.value()).is_some() {
                     return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.value())));
 
@@ -279,16 +279,16 @@ impl MacroStage {
 
                 // Collect Body Tokens
                 let mut body_tokens = Vec::new();
-                while !tokens.peek_is(TokenType::Reserved, Some(TokenValue::ENDMACRO)) {
+                while !tokens.peek_is(IncludeType::Reserved, Some(TokenValue::ENDMACRO)) {
                     let token = tokens.get("Unexpected end of input while parsing macro body.")?;
-                    if token.is(TokenType::Reserved) && token.has_value(TokenValue::MACRO) {
+                    if token.is(IncludeType::Reserved) && token.has_value(TokenValue::MACRO) {
                         return Err(token.error("Invalid nested macro definition.".to_string()));
 
                     } else {
                         body_tokens.push(token);
                     }
                 }
-                tokens.expect(TokenType::Reserved, Some(TokenValue::ENDMACRO), "when parsing macro definition")?;
+                tokens.expect(IncludeType::Reserved, Some(TokenValue::ENDMACRO), "when parsing macro definition")?;
 
                 // Add Macro Definition
                 user_macro_defs.push(MacroDefinition {
@@ -316,13 +316,13 @@ impl MacroStage {
 
         // Check for any left over parameter or token groups
         for token in &tokens_without_macro_calls {
-            if token.is(TokenType::Parameter) {
+            if token.is(IncludeType::Parameter) {
                 return Err(token.error(format!(
                     "Unexpected parameter \"{}\" outside of macro expansion.",
                     token.value()
                 )));
 
-            } else if token.is(TokenType::TokenGroup) {
+            } else if token.is(IncludeType::TokenGroup) {
                 return Err(token.error(
                     "Unexpected token group outside of macro expansion.".to_string()
                 ));
@@ -346,10 +346,10 @@ impl MacroStage {
         while let Some(token) = tokens.next() {
 
             // Parse IF Statements
-            if token.is(TokenType::Reserved) && (token.has_value(TokenValue::THEN) || token.has_value(TokenValue::ELSE) || token.has_value(TokenValue::ENDIF)) {
+            if token.is(IncludeType::Reserved) && (token.has_value(TokenValue::THEN) || token.has_value(TokenValue::ELSE) || token.has_value(TokenValue::ENDIF)) {
                 return Err(token.error(format!("Unexpected \"{}\" token outside of IF statement.", token.value())));
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::IF) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::IF) {
                 let inner = token.inner().clone();
                 let mut branches: Vec<IfStatementBranch<MacroToken>> = Vec::new();
                 let mut condition_tokens = Some(Self::parse_if_condition(&mut tokens, token)?);
@@ -363,7 +363,7 @@ impl MacroStage {
                         IfBranch::None => break,
                         IfBranch::Else => continue,
                         IfBranch::If => {
-                            let token = tokens.expect(TokenType::Reserved, Some(TokenValue::IF), "when parsing IF statement")?;
+                            let token = tokens.expect(IncludeType::Reserved, Some(TokenValue::IF), "when parsing IF statement")?;
                             condition_tokens = Some(Self::parse_if_condition(&mut tokens, token)?);
                         }
                     }
@@ -371,20 +371,20 @@ impl MacroStage {
                 tokens_with_statements.push(MacroToken::IfStatement(inner, branches));
 
             // Parse REPEAT Statements
-            } else if token.is(TokenType::Reserved) && (token.has_value(TokenValue::IN) || token.has_value(TokenValue::TO) || token.has_value(TokenValue::REPEAT) || token.has_value(TokenValue::ENDFOR)) {
+            } else if token.is(IncludeType::Reserved) && (token.has_value(TokenValue::IN) || token.has_value(TokenValue::TO) || token.has_value(TokenValue::REPEAT) || token.has_value(TokenValue::ENDFOR)) {
                 return Err(token.error(format!("Unexpected \"{}\" token outside of FOR statement.", token.value())));
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::FOR) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::FOR) {
                 let inner = token.into_inner();
-                let binding = MacroToken::from(tokens.expect(TokenType::Name, None, "when parsing FOR statement")?);
+                let binding = MacroToken::from(tokens.expect(IncludeType::Name, None, "when parsing FOR statement")?);
 
-                let token = tokens.expect(TokenType::Reserved, Some(TokenValue::IN), "when parsing FOR statement")?;
+                let token = tokens.expect(IncludeType::Reserved, Some(TokenValue::IN), "when parsing FOR statement")?;
                 let from = Self::parse_for_range(&mut tokens, token, TokenValue::TO)?;
 
-                let token = tokens.expect(TokenType::Reserved, Some(TokenValue::TO), "when parsing FOR statement range")?;
+                let token = tokens.expect(IncludeType::Reserved, Some(TokenValue::TO), "when parsing FOR statement range")?;
                 let to = Self::parse_for_range(&mut tokens, token, TokenValue::REPEAT)?;
 
-                tokens.expect(TokenType::Reserved, Some(TokenValue::REPEAT), "when parsing FOR statement range")?;
+                tokens.expect(IncludeType::Reserved, Some(TokenValue::REPEAT), "when parsing FOR statement range")?;
                 let body = Self::parse_for_body(&mut tokens)?;
                 tokens_with_statements.push(MacroToken::ForStatement(inner, ForStatement {
                     binding: Box::new(binding),
@@ -394,21 +394,21 @@ impl MacroStage {
                 }));
 
             // Parse BLOCKS
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::ENDBLOCK) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::ENDBLOCK) {
                 return Err(token.error(format!("Unexpected \"{}\" token outside of BLOCK statement.", token.value())));
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::BLOCK) {
-                if tokens.peek_is(TokenType::Reserved, Some(TokenValue::USING)) {
-                    tokens.expect(TokenType::Reserved, Some(TokenValue::USING), "when parsing USING BLOCK")?;
-                    let command = tokens.expect(TokenType::StringLiteral, None, "when parsing USING BLOCK")?;
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::BLOCK) {
+                if tokens.peek_is(IncludeType::Reserved, Some(TokenValue::USING)) {
+                    tokens.expect(IncludeType::Reserved, Some(TokenValue::USING), "when parsing USING BLOCK")?;
+                    let command = tokens.expect(IncludeType::StringLiteral, None, "when parsing USING BLOCK")?;
                     let body = Self::parse_block_body(&mut tokens)?;
                     tokens_with_statements.push(MacroToken::BlockStatement(
                         token.into_inner(),
                         BlockStatement::Using(command.into_inner().value.to_string(), body)
                     ));
 
-                } else if tokens.peek_is(TokenType::Reserved, Some(TokenValue::VOLATILE)) {
-                    tokens.expect(TokenType::Reserved, Some(TokenValue::VOLATILE), "when parsing VOLATILE BLOCK")?;
+                } else if tokens.peek_is(IncludeType::Reserved, Some(TokenValue::VOLATILE)) {
+                    tokens.expect(IncludeType::Reserved, Some(TokenValue::VOLATILE), "when parsing VOLATILE BLOCK")?;
                     let body = Self::parse_block_body(&mut tokens)?;
                     tokens_with_statements.push(MacroToken::BlockStatement(
                         token.into_inner(),
@@ -440,7 +440,7 @@ impl MacroStage {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
 
-            if token.is(TokenType::Name) && tokens.peek_is(TokenType::OpenParen, None) {
+            if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::OpenParen, None) {
                 let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.value()) {
                     def
 
@@ -584,7 +584,7 @@ impl MacroStage {
     ) -> Result<Vec<IncludeToken>, SourceError> {
         let mut expanded = Vec::new();
         token.inner_mut().set_macro_call_id(*macro_call_id);
-        if token.is(TokenType::Parameter) {
+        if token.is(IncludeType::Parameter) {
             if let Some((index, _)) = Self::get_macro_def_param_by_name(&macro_def, token.value()) {
 
                 // Insert and expand the argument's tokens
@@ -659,16 +659,16 @@ impl MacroStage {
     fn parse_macro_def_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<IncludeToken>, SourceError> {
 
         let mut arguments = Vec::new();
-        tokens.expect(TokenType::OpenParen, None, "when parsing arguments list")?;
+        tokens.expect(IncludeType::OpenParen, None, "when parsing arguments list")?;
 
-        while !tokens.peek_is(TokenType::CloseParen, None) {
-            let next = tokens.expect(TokenType::Parameter, None, "while parsing macro arguments list")?;
-            if tokens.peek_is(TokenType::Comma, None) {
-                tokens.expect(TokenType::Comma, None, "")?;
+        while !tokens.peek_is(IncludeType::CloseParen, None) {
+            let next = tokens.expect(IncludeType::Parameter, None, "while parsing macro arguments list")?;
+            if tokens.peek_is(IncludeType::Comma, None) {
+                tokens.expect(IncludeType::Comma, None, "")?;
             }
             arguments.push(next);
         }
-        tokens.expect(TokenType::CloseParen, None, "when parsing arguments list")?;
+        tokens.expect(IncludeType::CloseParen, None, "when parsing arguments list")?;
 
         Ok(arguments)
 
@@ -677,23 +677,23 @@ impl MacroStage {
     fn parse_macro_call_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<Vec<IncludeToken>>, SourceError> {
 
         let mut arguments = Vec::new();
-        tokens.expect(TokenType::OpenParen, None, "when parsing argument list")?;
+        tokens.expect(IncludeType::OpenParen, None, "when parsing argument list")?;
 
         let mut paren_depth = 1;
         let mut arg_tokens = Vec::new();
-        while !tokens.peek_is(TokenType::CloseParen, None) || paren_depth > 1 {
+        while !tokens.peek_is(IncludeType::CloseParen, None) || paren_depth > 1 {
 
             let next = tokens.get("Unexpected end of input while parsing macro arguments list.")?;
-            if next.is(TokenType::OpenParen) {
+            if next.is(IncludeType::OpenParen) {
                 paren_depth += 1 ;
 
-            } else if next.is(TokenType::CloseParen) {
+            } else if next.is(IncludeType::CloseParen) {
                 paren_depth -= 1;
             }
 
-            if tokens.peek_is(TokenType::Comma, None) && paren_depth == 1 {
+            if tokens.peek_is(IncludeType::Comma, None) && paren_depth == 1 {
                 arg_tokens.push(next);
-                tokens.expect(TokenType::Comma, None, "")?;
+                tokens.expect(IncludeType::Comma, None, "")?;
                 arguments.push(mem::replace(&mut arg_tokens, Vec::new()));
 
             } else {
@@ -705,7 +705,7 @@ impl MacroStage {
             arguments.push(arg_tokens);
         }
 
-        tokens.expect(TokenType::CloseParen, None, "when parsing argument list")?;
+        tokens.expect(IncludeType::CloseParen, None, "when parsing argument list")?;
         Ok(arguments)
 
     }
@@ -717,16 +717,16 @@ impl MacroStage {
     ) -> Result<Vec<MacroToken>, SourceError> {
 
         let mut condition_tokens = Vec::new();
-        while !tokens.peek_is(TokenType::Reserved, Some(TokenValue::THEN)) {
+        while !tokens.peek_is(IncludeType::Reserved, Some(TokenValue::THEN)) {
             let token = tokens.get("Unexpected end of input while parsing IF statement condition.")?;
-            if token.is(TokenType::Reserved) {
+            if token.is(IncludeType::Reserved) {
                 return Err(token.error(format!("Unexpected \"{}\" token inside of IF statement condition.", token.value())));
 
             } else {
                 condition_tokens.push(MacroToken::from(token));
             }
         }
-        tokens.expect(TokenType::Reserved, Some(TokenValue::THEN), "when parsing IF statement condition")?;
+        tokens.expect(IncludeType::Reserved, Some(TokenValue::THEN), "when parsing IF statement condition")?;
 
         if condition_tokens.is_empty() {
             return Err(token.error("Empty IF statement condition.".to_string()));
@@ -742,15 +742,15 @@ impl MacroStage {
 
         let mut body_tokens = Vec::new();
         let mut if_depth = 0;
-        while if_depth > 0 || !(tokens.peek_is(TokenType::Reserved, Some(TokenValue::ELSE)) || tokens.peek_is(TokenType::Reserved, Some(TokenValue::ENDIF))) {
+        while if_depth > 0 || !(tokens.peek_is(IncludeType::Reserved, Some(TokenValue::ELSE)) || tokens.peek_is(IncludeType::Reserved, Some(TokenValue::ENDIF))) {
 
             let token = tokens.get("Unexpected end of input while parsing IF statement body.")?;
 
             // Check for nested statements
-            if token.is(TokenType::Reserved) && token.has_value(TokenValue::IF) {
+            if token.is(IncludeType::Reserved) && token.has_value(TokenValue::IF) {
                 if_depth += 1;
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::ENDIF) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::ENDIF) {
                 if_depth -= 1;
             }
 
@@ -762,9 +762,9 @@ impl MacroStage {
         let body_tokens = Self::parse_statements(body_tokens)?;
 
         // Check for branches
-        if tokens.peek_is(TokenType::Reserved, Some(TokenValue::ELSE)) {
-            tokens.expect(TokenType::Reserved, Some(TokenValue::ELSE), "when parsing IF statement body")?;
-            if tokens.peek_is(TokenType::Reserved, Some(TokenValue::IF)) {
+        if tokens.peek_is(IncludeType::Reserved, Some(TokenValue::ELSE)) {
+            tokens.expect(IncludeType::Reserved, Some(TokenValue::ELSE), "when parsing IF statement body")?;
+            if tokens.peek_is(IncludeType::Reserved, Some(TokenValue::IF)) {
                 Ok((body_tokens, IfBranch::If))
 
             } else {
@@ -772,7 +772,7 @@ impl MacroStage {
             }
 
         } else {
-            tokens.expect(TokenType::Reserved, Some(TokenValue::ENDIF), "when parsing IF statement body")?;
+            tokens.expect(IncludeType::Reserved, Some(TokenValue::ENDIF), "when parsing IF statement body")?;
             Ok((body_tokens, IfBranch::None))
         }
 
@@ -785,9 +785,9 @@ impl MacroStage {
 
     ) -> Result<Vec<MacroToken>, SourceError> {
         let mut range_tokens = Vec::new();
-        while !tokens.peek_is(TokenType::Reserved, Some(delimiter.clone())) {
+        while !tokens.peek_is(IncludeType::Reserved, Some(delimiter.clone())) {
             let token = tokens.get("Unexpected end of input while parsing FOR statement range argument.")?;
-            if token.is(TokenType::Reserved) {
+            if token.is(IncludeType::Reserved) {
                 return Err(token.error(format!("Unexpected \"{}\" token inside of FOR statement range argument.", token.value())));
 
             } else {
@@ -808,22 +808,22 @@ impl MacroStage {
     ) -> Result<Vec<MacroToken>, SourceError> {
         let mut body_tokens = Vec::new();
         let mut for_depth = 0;
-        while for_depth > 0 || !tokens.peek_is(TokenType::Reserved, Some(TokenValue::ENDFOR)) {
+        while for_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(TokenValue::ENDFOR)) {
 
             let token = tokens.get("Unexpected end of input while parsing FOR statement body.")?;
 
             // Check for nested statements
-            if token.is(TokenType::Reserved) && token.has_value(TokenValue::FOR) {
+            if token.is(IncludeType::Reserved) && token.has_value(TokenValue::FOR) {
                 for_depth += 1;
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::ENDFOR) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::ENDFOR) {
                 for_depth -= 1;
             }
 
             body_tokens.push(token);
 
         }
-        tokens.expect(TokenType::Reserved, Some(TokenValue::ENDFOR), "when parsing FOR statement body")?;
+        tokens.expect(IncludeType::Reserved, Some(TokenValue::ENDFOR), "when parsing FOR statement body")?;
 
         // Parse nested statements
         Self::parse_statements(body_tokens)
@@ -835,22 +835,22 @@ impl MacroStage {
     ) -> Result<Vec<MacroToken>, SourceError> {
         let mut body_tokens = Vec::new();
         let mut block_depth = 0;
-        while block_depth > 0 || !tokens.peek_is(TokenType::Reserved, Some(TokenValue::ENDBLOCK)) {
+        while block_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(TokenValue::ENDBLOCK)) {
 
             let token = tokens.get("Unexpected end of input while parsing BLOCK statement body.")?;
 
             // Check for nested statements
-            if token.is(TokenType::Reserved) && token.has_value(TokenValue::BLOCK) {
+            if token.is(IncludeType::Reserved) && token.has_value(TokenValue::BLOCK) {
                 block_depth += 1;
 
-            } else if token.is(TokenType::Reserved) && token.has_value(TokenValue::ENDBLOCK) {
+            } else if token.is(IncludeType::Reserved) && token.has_value(TokenValue::ENDBLOCK) {
                 block_depth -= 1;
             }
 
             body_tokens.push(token);
 
         }
-        tokens.expect(TokenType::Reserved, Some(TokenValue::ENDBLOCK), "when parsing BLOCK statement body")?;
+        tokens.expect(IncludeType::Reserved, Some(TokenValue::ENDBLOCK), "when parsing BLOCK statement body")?;
 
         // Parse nested statements
         Self::parse_statements(body_tokens)

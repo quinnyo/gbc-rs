@@ -12,8 +12,8 @@ use crate::error::SourceError;
 use crate::lexer::{ExpressionStage, TokenValue};
 use crate::expression::{DataExpression, OptionalDataExpression, Expression, ExpressionValue, Operator};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
-use super::expression::ExpressionToken;
-use super::super::{LexerStage, InnerToken, TokenIterator, TokenType, LexerToken};
+use super::expression::{ExpressionToken, ExpressionTokenType};
+use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Types ----------------------------------------------------------------------
@@ -36,7 +36,7 @@ pub struct ForStatement {
 }
 
 // Entry Specific Tokens ------------------------------------------------------
-lexer_token!(EntryToken, (Debug, Clone, Eq, PartialEq), {
+lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     Instruction((usize)),
     InstructionWithArg((usize, DataExpression)),
     DebugInstruction((usize)),
@@ -226,7 +226,7 @@ impl EntryStage {
 
                 // Constant Declarations
                 ExpressionToken::Constant(inner, is_default) => {
-                    if tokens.peek_is(TokenType::Reserved, Some(TokenValue::EQU)) {
+                    if tokens.peek_is(ExpressionTokenType::Reserved, Some(TokenValue::EQU)) {
                         Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default)?
 
                     } else {
@@ -259,9 +259,9 @@ impl EntryStage {
                         TokenValue::SECTION => {
 
                             // Check for optional section name
-                            let name = if tokens.peek_is(TokenType::ConstExpression, None) {
-                                let name = tokens.expect(TokenType::ConstExpression, None, "when parsing section declaration")?;
-                                tokens.expect(TokenType::Comma, None, "after section name")?;
+                            let name = if tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
+                                let name = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing section declaration")?;
+                                tokens.expect(ExpressionTokenType::Comma, None, "after section name")?;
                                 if let ExpressionToken::ConstExpression(_, expr) = name {
                                     Some(expr)
 
@@ -274,10 +274,10 @@ impl EntryStage {
                             };
 
                             // Required Segment
-                            let segment_name = tokens.expect(TokenType::Segment, None, "when parsing section declaration")?.into_inner().value;
+                            let segment_name = tokens.expect(ExpressionTokenType::Segment, None, "when parsing section declaration")?.into_inner().value;
 
                             // Check for optional offset
-                            let segment_offset = if tokens.peek_is(TokenType::OpenBracket, None) {
+                            let segment_offset = if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
                                 Self::parse_bracket_expr(&mut tokens, "when parsing section offset", true)?
 
                             } else {
@@ -285,7 +285,7 @@ impl EntryStage {
                             };
 
                             // Check for optional size
-                            let segment_size = if tokens.peek_is(TokenType::OpenBracket, None) {
+                            let segment_size = if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
                                 Self::parse_bracket_expr(&mut tokens, "when parsing section size", false)?
 
                             } else {
@@ -293,9 +293,9 @@ impl EntryStage {
                             };
 
                             // Check for optional bank
-                            let bank_index = if tokens.peek_is(TokenType::Comma, None) {
-                                tokens.expect(TokenType::Comma, None, "when parsing section bank")?;
-                                tokens.expect(TokenType::Reserved, Some(TokenValue::BANK), "when parsing section bank")?;
+                            let bank_index = if tokens.peek_is(ExpressionTokenType::Comma, None) {
+                                tokens.expect(ExpressionTokenType::Comma, None, "when parsing section bank")?;
+                                tokens.expect(ExpressionTokenType::Reserved, Some(TokenValue::BANK), "when parsing section bank")?;
                                 Self::parse_bracket_expr(&mut tokens, "when parsing section bank", false)?
 
                             } else {
@@ -371,8 +371,8 @@ impl EntryStage {
         is_default: bool
 
     ) -> Result<EntryToken, SourceError> {
-        tokens.expect(TokenType::Reserved, None, "when parsing constant declaration")?;
-        if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(TokenType::ConstExpression, None, "when parsing constant declaration")? {
+        tokens.expect(ExpressionTokenType::Reserved, None, "when parsing constant declaration")?;
+        if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing constant declaration")? {
             if is_default {
                 if let Some(constant_def) = default_constants.get(&inner.value) {
                     Err(inner.error(
@@ -428,7 +428,7 @@ impl EntryStage {
         while arg_count < max_arg_count && arg_count < 2 {
 
             // Register arguments
-            if tokens.peek_is(TokenType::Register, None) {
+            if tokens.peek_is(ExpressionTokenType::Register, None) {
                 trailing_comma = None;
                 let reg = tokens.get("while parsing instruction register argument")?;
                 if let ExpressionToken::Register { name, .. } = reg {
@@ -447,7 +447,7 @@ impl EntryStage {
                 }
 
             // Flag must always be infront of a comma
-            } else if tokens.peek_is(TokenType::Flag, None) && !past_comma {
+            } else if tokens.peek_is(ExpressionTokenType::Flag, None) && !past_comma {
                 trailing_comma = None;
                 let flag = tokens.get("while parsing instruction flag argument")?;
                 if let ExpressionToken::Flag { typ, .. } = flag {
@@ -458,11 +458,11 @@ impl EntryStage {
                 }
 
             // Memory Locations must contain an expression or register
-            } else if tokens.peek_is(TokenType::OpenBracket, None) {
+            } else if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
                 trailing_comma = None;
-                tokens.expect(TokenType::OpenBracket, None, "while parsing instruction memory argument")?;
-                if tokens.peek_is(TokenType::Register, None) {
-                    let reg = tokens.expect(TokenType::Register, None, "while parsing instruction memory argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, None, "while parsing instruction memory argument")?;
+                if tokens.peek_is(ExpressionTokenType::Register, None) {
+                    let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction memory argument")?;
                     if let ExpressionToken::Register { name, .. } = reg {
                         layout.push(LexerArgument::MemoryLookupRegister(name));
 
@@ -470,8 +470,8 @@ impl EntryStage {
                         unreachable!();
                     }
 
-                } else if tokens.peek_is(TokenType::ConstExpression, None) {
-                    let expr = tokens.expect(TokenType::ConstExpression, None, "while parsing instruction memory argument")?;
+                } else if tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
+                    let expr = tokens.expect(ExpressionTokenType::ConstExpression, None, "while parsing instruction memory argument")?;
                     if let ExpressionToken::ConstExpression(_, expr) = expr {
                         layout.push(LexerArgument::MemoryLookupValue);
                         expression = Some(expr);
@@ -481,7 +481,7 @@ impl EntryStage {
                     }
 
                 } else {
-                    let expr = tokens.expect(TokenType::Expression, None, "while parsing instruction memory argument")?;
+                    let expr = tokens.expect(ExpressionTokenType::Expression, None, "while parsing instruction memory argument")?;
                     if let ExpressionToken::Expression(_, expr) = expr {
                         layout.push(LexerArgument::MemoryLookupValue);
                         expression = Some(expr);
@@ -490,10 +490,10 @@ impl EntryStage {
                         unreachable!();
                     }
                 }
-                tokens.expect(TokenType::CloseBracket, None, "while parsing instruction memory argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, None, "while parsing instruction memory argument")?;
 
             // Expression arguments
-            } else if tokens.peek_is(TokenType::Expression, None) | tokens.peek_is(TokenType::ConstExpression, None) {
+            } else if tokens.peek_is(ExpressionTokenType::Expression, None) | tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
                 trailing_comma = None;
                 let expr = tokens.get("while parsing instruction register argument")?;
                 if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
@@ -508,8 +508,8 @@ impl EntryStage {
             arg_count += 1;
 
             // Check for a single following comma between arguments
-            if tokens.peek_is(TokenType::Comma, None) && !past_comma {
-                let inner = tokens.expect(TokenType::Comma, None, "while parsing instruction register argument")?.into_inner();
+            if tokens.peek_is(ExpressionTokenType::Comma, None) && !past_comma {
+                let inner = tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction register argument")?.into_inner();
                 past_comma = true;
                 trailing_comma = Some(inner);
             }
@@ -605,7 +605,7 @@ impl EntryStage {
             // Increment Memory Address Shorthands
             TokenValue::Incx => {
                 // decx [expr]
-                tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
                 vec![
                     // ld a,[someLabel]
@@ -618,7 +618,7 @@ impl EntryStage {
             },
             TokenValue::Decx => {
                 // decx [expr]
-                tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
                 vec![
                     // ld a,[someLabel]
@@ -639,15 +639,15 @@ impl EntryStage {
 
             // Return Shorthands
             TokenValue::Retx => {
-                if tokens.peek_is(TokenType::OpenBracket, None) {
-                    tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+                if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
+                    tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
 
                     // retx [hl]
                     // retx [bc]
                     // retx [de]
-                    if tokens.peek_is(TokenType::Register, None) {
+                    if tokens.peek_is(ExpressionTokenType::Register, None) {
                         let double = Self::parse_meta_word_register(tokens)?;
-                        tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction label argument")?;
+                        tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction label argument")?;
                         vec![
                             // ld a,[bc|de|hl]
                             EntryToken::Instruction(inner.clone(), match double {
@@ -727,7 +727,7 @@ impl EntryStage {
 
     ) -> Result<Vec<EntryToken>, SourceError> {
         let double = Self::parse_meta_word_register(tokens)?;
-        tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
+        tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction arguments")?;
 
         let (high, low) = double.to_pair();
         let mut instructions = Vec::with_capacity(8);
@@ -793,7 +793,7 @@ impl EntryStage {
 
     fn parse_meta_div_mul(tokens: &mut TokenIterator<ExpressionToken>, inner: InnerToken, multiply: bool) -> Result<Vec<EntryToken>, SourceError> {
         let reg = Self::parse_meta_byte_register(tokens)?;
-        tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
+        tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction arguments")?;
         let expr = tokens.get("Unexpected end of input while parsing instruction arguments.")?;
         if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::Integer(i))) = expr {
             if i > 0 && (i as u32).is_power_of_two() && i <= 128 {
@@ -908,7 +908,7 @@ impl EntryStage {
     }
 
     fn parse_meta_byte_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, SourceError> {
-        let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
+        let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
             if name.width() == 1 {
                 Ok(name)
@@ -925,7 +925,7 @@ impl EntryStage {
     }
 
     fn parse_meta_word_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, SourceError> {
-        let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
+        let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
             if name == Register::BC || name == Register::DE || name == Register::HL {
                 Ok(name)
@@ -942,7 +942,7 @@ impl EntryStage {
     }
 
     fn parse_meta_optional_expression(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<DataExpression>, SourceError> {
-        if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
+        if tokens.peek_is(ExpressionTokenType::Expression, None) || tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
             let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
             if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
                 Ok(Some(expr))
@@ -959,7 +959,7 @@ impl EntryStage {
     fn parse_meta_bracket_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, SourceError> {
         let expr = tokens.get("Unexpected end of input while parsing instruction label argument.")?;
         if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
-            tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction label argument")?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction label argument")?;
             Ok(expr)
 
         } else {
@@ -968,14 +968,14 @@ impl EntryStage {
     }
 
     fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, SourceError> {
-        tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), msg)?;
-        if optional_value && tokens.peek_is(TokenType::CloseBracket, None) {
-            tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), msg)?;
+        tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), msg)?;
+        if optional_value && tokens.peek_is(ExpressionTokenType::CloseBracket, None) {
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), msg)?;
             Ok(None)
 
         } else {
-            let value = tokens.expect(TokenType::ConstExpression, None, msg)?;
-            tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), msg)?;
+            let value = tokens.expect(ExpressionTokenType::ConstExpression, None, msg)?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), msg)?;
             if let ExpressionToken::ConstExpression(_, expr) = value {
                 Ok(Some(expr))
 
@@ -1066,10 +1066,10 @@ impl EntryStage {
         alignment: DataAlignment
 
     ) -> Result<EntryToken, SourceError> {
-        let token = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
+        let token = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing data storage directive")?;
         if let ExpressionToken::ConstExpression(_, expr) = token {
-            if tokens.peek_is(TokenType::ConstExpression, None) {
-                let data = tokens.expect(TokenType::ConstExpression, None, "when parsing data storage directive")?;
+            if tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
+                let data = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing data storage directive")?;
                 if let ExpressionToken::ConstExpression(_, data_expr) = data {
                     Ok(EntryToken::Data {
                         inner,
@@ -1100,10 +1100,10 @@ impl EntryStage {
     }
 
     fn parse_expression_list(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Option<(bool, Vec<DataExpression>)>, SourceError> {
-        if tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
+        if tokens.peek_is(ExpressionTokenType::Expression, None) || tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
             let mut expressions = Vec::with_capacity(8);
             let mut is_constant = true;
-            while tokens.peek_is(TokenType::Expression, None) || tokens.peek_is(TokenType::ConstExpression, None) {
+            while tokens.peek_is(ExpressionTokenType::Expression, None) || tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
                 let expr = tokens.get("when parsing expression list")?;
                 match expr {
                     ExpressionToken::ConstExpression(_, expr) => expressions.push(expr),
@@ -1113,8 +1113,8 @@ impl EntryStage {
                     },
                     _ => unreachable!()
                 }
-                if tokens.peek_is(TokenType::Comma, None) {
-                    tokens.expect(TokenType::Comma, None, "when parsing expression list")?;
+                if tokens.peek_is(ExpressionTokenType::Comma, None) {
+                    tokens.expect(ExpressionTokenType::Comma, None, "when parsing expression list")?;
 
                 } else {
                     break;
@@ -1166,7 +1166,7 @@ impl EntryStage {
     ) -> Result<Vec<EntryToken>, SourceError> {
 
         let target = Self::parse_meta_ldxa_target(tokens)?;
-        tokens.expect(TokenType::Comma, None, "while parsing instruction arguments")?;
+        tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction arguments")?;
 
         Ok(match target {
             // Label - XX
@@ -1379,7 +1379,7 @@ impl EntryStage {
             },
             // [bc|de|hl] - XX
             MetaLDXATarget::RegisterDouble(reg) => {
-                tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
                 let source = Self::parse_meta_bracket_label(tokens)?;
                 let (high, low) = reg.to_pair();
                 vec![
@@ -1405,16 +1405,16 @@ impl EntryStage {
         tokens: &mut TokenIterator<ExpressionToken>
 
     ) -> Result<MetaLDXASourceMemoryLookup, SourceError> {
-        if tokens.peek_is(TokenType::OpenBracket, None) {
-            tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
-            if tokens.peek_is(TokenType::Register, Some(TokenValue::HLI)) {
-                tokens.expect(TokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+        if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+            if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLI)) {
+                tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXASourceMemoryLookup::HL(Register::HLIncrement))
 
-            } else if tokens.peek_is(TokenType::Register, Some(TokenValue::HLD)) {
-                tokens.expect(TokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+            } else if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLD)) {
+                tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXASourceMemoryLookup::HL(Register::HLDecrement))
 
             } else {
@@ -1433,8 +1433,8 @@ impl EntryStage {
         tokens: &mut TokenIterator<ExpressionToken>
 
     ) -> Result<MetaLDXASourceHL, SourceError> {
-        if tokens.peek_is(TokenType::OpenBracket, None) {
-            tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+        if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
             Ok(MetaLDXASourceHL::MemoryLookup(Self::parse_meta_bracket_label(tokens)?))
 
         } else if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
@@ -1449,15 +1449,15 @@ impl EntryStage {
         tokens: &mut TokenIterator<ExpressionToken>
 
     ) -> Result<MetaLDXASourceRegister, SourceError> {
-        tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
-        if tokens.peek_is(TokenType::Register, Some(TokenValue::HLI)) {
-            tokens.expect(TokenType::Register, None, "while parsing instruction argument")?;
-            tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+        tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+        if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLI)) {
+            tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
             Ok(MetaLDXASourceRegister::HL(Register::HLIncrement))
 
-        } else if tokens.peek_is(TokenType::Register, Some(TokenValue::HLD)) {
-            tokens.expect(TokenType::Register, None, "while parsing instruction argument")?;
-            tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+        } else if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLD)) {
+            tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+            tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
             Ok(MetaLDXASourceRegister::HL(Register::HLDecrement))
 
         } else {
@@ -1469,16 +1469,16 @@ impl EntryStage {
         tokens: &mut TokenIterator<ExpressionToken>
 
     ) -> Result<MetaLDXATarget, SourceError> {
-        if tokens.peek_is(TokenType::OpenBracket, None) {
-            tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
-            if tokens.peek_is(TokenType::Register, Some(TokenValue::HLI)) {
-                tokens.expect(TokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+        if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
+            if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLI)) {
+                tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXATarget::HL(Register::HLIncrement))
 
-            } else if tokens.peek_is(TokenType::Register, Some(TokenValue::HLD)) {
-                tokens.expect(TokenType::Register, None, "while parsing instruction argument")?;
-                tokens.expect(TokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
+            } else if tokens.peek_is(ExpressionTokenType::Register, Some(TokenValue::HLD)) {
+                tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(TokenValue::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXATarget::HL(Register::HLDecrement))
 
             } else {
@@ -1491,7 +1491,7 @@ impl EntryStage {
     }
 
     fn parse_meta_ldxa_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<MetaLDXASourceMemoryLookup, SourceError> {
-        let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
+        let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
             if name.width() == 1 {
                 Ok(MetaLDXASourceMemoryLookup::Register(name))
@@ -1511,7 +1511,7 @@ impl EntryStage {
     }
 
     fn parse_meta_ldxa_target_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<MetaLDXATarget, SourceError> {
-        let reg = tokens.expect(TokenType::Register, None, "while parsing instruction arguments")?;
+        let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
             if name.width() == 1 {
                 Ok(MetaLDXATarget::Register(name))
