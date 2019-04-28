@@ -349,7 +349,7 @@ mod test {
     #[test]
     fn test_empty_input() {
         let c = Compiler::new();
-        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.");
+        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.");
     }
 
     #[test]
@@ -360,6 +360,7 @@ mod test {
         assert_eq!(
             output,
             r#"   Compiling "main.gb.s" ...
+     File IO completed in XXms.
      Parsing completed in XXms.
      Linking completed in XXms.
 
@@ -405,7 +406,7 @@ mod test {
         let (output, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
         assert_eq!(file, "00:0150 global\n00:0151 global.local");
-        assert_eq!(output, "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM in XXms.\n     Written ROM to \"rom.gb\".");
+        assert_eq!(output, "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
     // Debug Stripping --------------------------------------------------------
@@ -453,7 +454,7 @@ mod test {
     fn test_rom_info_defaults() {
         let mut c = Compiler::new();
         c.set_print_rom_info();
-        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
+        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
     }
 
     #[test]
@@ -477,6 +478,7 @@ mod test {
         "#;
 
         let output = r#"   Compiling "main.gb.s" ...
+     File IO completed in XXms.
      Parsing completed in XXms.
      Linking completed in XXms.
    Validated ROM in XXms.
@@ -507,7 +509,7 @@ mod test {
     fn test_error_linking() {
         let c = Compiler::new();
         assert_eq!(compiler_error(c, "ld a,a"), (
-            "   Compiling \"main.gb.s\" ...\n     Parsing completed in XXms.".to_string(),
+            "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.".to_string(),
             "       Error Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
         ));
     }
