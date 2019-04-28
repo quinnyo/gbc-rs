@@ -12,3 +12,7 @@ colored = "1.7"
 base64 = "0.10.0"
 serde-xml-rs = "0.3.0"
 serde = { version = "1.0.0", features=["derive"] }
+
+[profile.release]
+lto = true
+
