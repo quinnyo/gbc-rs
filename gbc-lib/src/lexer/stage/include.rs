@@ -240,41 +240,43 @@ impl IncludeStage {
                 '\n' | '\r' => continue, // Ignore newlines
                 // Names
                 'a'...'z' | 'A'...'Z' | '_' => {
-                    // TODO early convert into ValueToken here
                     let name = Self::collect_inner_name(iter, true)?;
-                    match name.value.as_str() {
+                    match name.value {
                         // Split into Reserved Words
-                        "DB" | "DW" | "BW" | "DS" | "IF" | "TO" | "IN" |
-                        "DS8" | "EQU" | "FOR" |
-                        "DS16" | "BANK" |
-                        "THEN" | "ELSE" | "ENDIF" |
-                        "MACRO" | "USING" | "BLOCK" |
-                        "ENDFOR" | "REPEAT" | "BINARY" | "DEFAULT" | "SECTION" | "INCLUDE" | "SEGMENT" | "VOLATILE" |
-                        "ENDMACRO" | "ENDBLOCK" => {
+                        TokenValue::DB | TokenValue::DW | TokenValue::BW | TokenValue::DS | TokenValue::IF | TokenValue::TO | TokenValue::IN |
+                        TokenValue::DS8 | TokenValue::EQU | TokenValue::FOR |
+                        TokenValue::DS16 | TokenValue::BANK |
+                        TokenValue::THEN | TokenValue::ELSE | TokenValue::ENDIF |
+                        TokenValue::MACRO | TokenValue::USING | TokenValue::BLOCK |
+                        TokenValue::ENDFOR | TokenValue::REPEAT | TokenValue::BINARY | TokenValue::DEFAULT | TokenValue::SECTION |
+                        TokenValue::INCLUDE | TokenValue::VOLATILE |
+                        TokenValue::ENDMACRO | TokenValue::ENDBLOCK => {
                             Some(IncludeToken::Reserved(name))
                         },
                         // ROM Segments
-                        "ROM0" | "ROMX" | "WRAM0" | "WRAMX" | "HRAM" | "RAM" | "RAMX" => {
+                        TokenValue::ROM0 | TokenValue::ROMX | TokenValue::WRAM0 | TokenValue::WRAMX | TokenValue::HRAM | TokenValue::RAM | TokenValue::RAMX => {
                             Some(IncludeToken::Segment(name))
                         },
                         // Registers (c is later also treated as a flag)
-                        "af" | "bc" | "de" | "hl" | "a" | "b" | "c" | "d" | "e" | "h" | "l" | "hld" | "hli" | "sp" => {
+                        TokenValue::AF | TokenValue::BC | TokenValue::DE | TokenValue::HL |
+                        TokenValue::A | TokenValue::B | TokenValue::C | TokenValue::D | TokenValue::E | TokenValue::H | TokenValue::L |
+                        TokenValue::HLD | TokenValue::HLI | TokenValue::SP => {
                             Some(IncludeToken::Register(name))
                         },
                         // Flags
-                        "z" | "nz" | "nc" => {
+                        TokenValue::Z | TokenValue::NZ | TokenValue::NC => {
                             Some(IncludeToken::Flag(name))
                         },
                         // LR35902 Instructions
-                        "cp" | "di" | "ei" | "jp" | "jr" | "or" | "rl" | "rr" | "ld" |
-                        "adc" | "add" | "and" | "bit" | "ccf" | "cpl" | "daa" | "dec" | "inc" |
-                        "ldh" | "nop" | "pop" | "res" | "ret" | "rla" | "rlc" | "rra" | "rrc" |
-                        "rst" | "sbc" | "scf" | "set" | "sla" | "sra" | "srl" | "sub" | "xor" |
-                        "halt" | "push" | "call" | "reti" | "ldhl" | "rlca" | "rrca" | "stop" | "swap" | "ldsp" => {
+                        TokenValue::Cp | TokenValue::Di | TokenValue::Ei | TokenValue::Jp | TokenValue::Jr | TokenValue::Or | TokenValue::Rl | TokenValue::Rr | TokenValue::Ld |
+                        TokenValue::Adc | TokenValue::Add | TokenValue::And | TokenValue::Bit | TokenValue::Ccf | TokenValue::Cpl | TokenValue::Daa | TokenValue::Dec | TokenValue::Inc |
+                        TokenValue::Ldh | TokenValue::Nop | TokenValue::Pop | TokenValue::Res | TokenValue::Ret | TokenValue::Rla | TokenValue::Rlc | TokenValue::Rra | TokenValue::Rrc |
+                        TokenValue::Rst | TokenValue::Sbc | TokenValue::Scf | TokenValue::Set | TokenValue::Sla | TokenValue::Sra | TokenValue::Srl | TokenValue::Sub | TokenValue::Xor |
+                        TokenValue::Halt | TokenValue::Push | TokenValue::Call | TokenValue::Reti | TokenValue::Rlca | TokenValue::Rrca | TokenValue::Stop | TokenValue::Swap | TokenValue::Ldsp => {
                             Some(IncludeToken::Instruction(name))
                         },
                         // gbasm "meta" Instructions
-                        "msg" | "brk" | "mul" | "div" | "incx" | "decx" | "addw" | "subw" | "ldxa" | "retx" | "vsync" => {
+                        TokenValue::Msg | TokenValue::Brk | TokenValue::Mul | TokenValue::Div | TokenValue::Incx | TokenValue::Decx | TokenValue::Addw | TokenValue::Subw | TokenValue::Ldxa | TokenValue::Retx | TokenValue::Vsync => {
                             Some(IncludeToken::MetaInstruction(name))
                         },
                         // All other names
@@ -771,7 +773,7 @@ mod test {
             "DB", "DW", "BW", "IF", "TO", "IN",
             "FOR", "DS8", "DS16", "EQU", "BANK", "THEN", "ELSE",
             "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING",
-            "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "SEGMENT", "ENDBLOCK"
+            "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "ENDBLOCK"
         );
     }
 
@@ -794,7 +796,7 @@ mod test {
     fn test_instructions() {
         token_types!(Instruction, "cp", "di", "ei", "jp", "jr", "or", "rl", "rr", "ld");
         token_types!(Instruction, "adc", "add", "and", "bit", "ccf", "cpl", "daa", "dec", "inc", "ldh", "nop", "pop", "res", "ret", "rla", "rlc", "rra", "rrc", "rst", "sbc", "scf", "set", "sla", "sra", "srl", "sub", "xor");
-        token_types!(Instruction, "halt", "push", "call", "reti", "ldhl", "rlca", "rrca", "stop", "swap", "ldsp");
+        token_types!(Instruction, "halt", "push", "call", "reti", "rlca", "rrca", "stop", "swap", "ldsp");
     }
 
     #[test]

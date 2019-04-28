@@ -92,6 +92,8 @@ impl Compiler {
     fn parse<T: FileReader>(&mut self, io: &T, entry: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilerError)> {
         let start = Instant::now();
         let include_lexer = Lexer::<IncludeStage>::from_file(io, &entry).map_err(|e| self.error("file inclusion", e))?;
+        self.log(format!("  {} completed in {}ms.", "   File IO".bright_green(), start.elapsed().as_millis()));
+        let start = Instant::now();
         let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| self.error("macro expansion", e))?;
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| self.error("value construction", e))?;
         let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| self.error("expression construction", e))?;

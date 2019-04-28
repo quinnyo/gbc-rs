@@ -150,6 +150,8 @@ pub enum TokenValue {
     Xor,
 
     // Meta Instructions
+    Msg,
+    Brk,
     Subw,
     Addw,
     Ldxa,
@@ -311,6 +313,8 @@ impl TokenValue {
             TokenValue::Xor      => "xor",
 
             // Meta Instructions
+            TokenValue::Brk      => "brk",
+            TokenValue::Msg      => "msg",
             TokenValue::Subw     => "subw",
             TokenValue::Addw     => "addw",
             TokenValue::Ldxa     => "ldxa",
@@ -485,6 +489,8 @@ impl From<String> for TokenValue {
             "xor"       => TokenValue::Xor,
 
             // Meta Instructions
+            "brk"       => TokenValue::Brk,
+            "msg"       => TokenValue::Msg,
             "subw"      =>  TokenValue::Subw,
             "addw"      =>  TokenValue::Addw,
             "ldxa"      =>  TokenValue::Ldxa,

@@ -541,10 +541,10 @@ impl EntryStage {
         inner: InnerToken
 
     ) -> Result<Vec<EntryToken>, SourceError> {
-        Ok(match inner.value.as_str() {
+        Ok(match inner.value {
 
             // BGB debugging support
-            "msg" => {
+            TokenValue::Msg => {
                 let expr = tokens.get("Unexpected end of input while parsing instruction argument.")?;
                 if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::String(s))) = &expr {
                     let bytes = s.clone().into_bytes();
@@ -593,17 +593,17 @@ impl EntryStage {
                     ));
                 }
             },
-            "brk" => {
+            TokenValue::Brk => {
                 // ld b,b
                 vec![EntryToken::DebugInstruction(inner, 0x40)]
             },
 
             // Mulitply / Divide Shorthands
-            "mul" => Self::parse_meta_div_mul(tokens, inner, true)?,
-            "div" => Self::parse_meta_div_mul(tokens, inner, false)?,
+            TokenValue::Mul => Self::parse_meta_div_mul(tokens, inner, true)?,
+            TokenValue::Div => Self::parse_meta_div_mul(tokens, inner, false)?,
 
             // Increment Memory Address Shorthands
-            "incx" => {
+            TokenValue::Incx => {
                 // decx [expr]
                 tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
@@ -616,7 +616,7 @@ impl EntryStage {
                     EntryToken::InstructionWithArg(inner.clone(), 0xEA, expr),
                 ]
             },
-            "decx" => {
+            TokenValue::Decx => {
                 // decx [expr]
                 tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction label argument")?;
                 let expr = Self::parse_meta_bracket_label(tokens)?;
@@ -631,14 +631,14 @@ impl EntryStage {
             },
 
             // 16 Bit Addition / Subtraction Shorthands
-            "addw" => Self::parse_meta_addw_subw(tokens, inner, true)?,
-            "subw" => Self::parse_meta_addw_subw(tokens, inner, false)?,
+            TokenValue::Addw => Self::parse_meta_addw_subw(tokens, inner, true)?,
+            TokenValue::Subw => Self::parse_meta_addw_subw(tokens, inner, false)?,
 
             // Extended Memory Loads using the Accumulator as an intermediate
-            "ldxa" => Self::parse_meta_ldxa(tokens, inner)?,
+            TokenValue::Ldxa => Self::parse_meta_ldxa(tokens, inner)?,
 
             // Return Shorthands
-            "retx" => {
+            TokenValue::Retx => {
                 if tokens.peek_is(TokenType::OpenBracket, None) {
                     tokens.expect(TokenType::OpenBracket, Some(TokenValue::OpenBracket), "while parsing instruction argument")?;
 
@@ -706,7 +706,7 @@ impl EntryStage {
             },
 
             // VBlank Wait Shorthand
-            "vsync" => {
+            TokenValue::Vsync => {
                 vec![
                     // ldh     a,[$FF41]
                     EntryToken::InstructionWithArg(inner.clone(), 0xF0, Expression::Value(ExpressionValue::Integer(0x41))),
@@ -1594,7 +1594,6 @@ mod test {
     fn test_error_unexpected() {
         assert_eq!(entry_lexer_error("2 + 2"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
         assert_eq!(entry_lexer_error("EQU"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"EQU\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nEQU\n^--- Here");
-        assert_eq!(entry_lexer_error("SEGMENT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"SEGMENT\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nSEGMENT\n^--- Here");
         assert_eq!(entry_lexer_error("BANK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"BANK\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nBANK\n^--- Here");
         assert_eq!(entry_lexer_error(","), "In file \"main.gb.s\" on line 1, column 1: Unexpected Comma, expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
         assert_eq!(entry_lexer_error("["), "In file \"main.gb.s\" on line 1, column 1: Unexpected OpenBracket, expected either a constant declaration, directive or instruction instead.\n\n[\n^--- Here");
