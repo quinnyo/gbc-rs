@@ -181,6 +181,7 @@ impl EvaluatorContext {
                             value.clone()
 
                         } else {
+                            // TODO check if a similar named private constant is defined in another file
                             return Err(inner.error(format!("Reference to undeclared constant \"{}\".", name)))
                         }
                     },
@@ -269,6 +270,7 @@ impl EvaluatorContext {
                             )?
 
                         } else {
+                            // TODO check if a similar named private constant is defined in another file
                             return Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
                         };
                         value

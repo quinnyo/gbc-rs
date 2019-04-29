@@ -172,34 +172,16 @@ impl ValueStage {
                     }
                     ValueToken::BuiltinCall(inner, value_args)
                 },
-                MacroToken::Name(mut inner) => {
-                    if tokens.peek_is(MacroTokenType::Colon, None) {
-                        let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing global label definition")?.into_inner();
-                        let label_id = Self::global_label_id(&inner, false);
-                        if let Some((previous, _)) = global_labels.get(&label_id) {
-                            return Err(inner.error(format!(
-                                "Global label \"{}\" was already defined.",
-                                inner.value
-
-                            )).with_reference(previous, "Original definition of global label was"));
-
-                        } else if is_argument {
-                            return Err(inner.error("Global label cannot be defined inside an argument list".to_string()));
-
-                        } else {
-                            *unique_label_id += 1;
-                            inner.end_index = colon.end_index;
-                            global_labels.insert(label_id.clone(), (inner.clone(), *unique_label_id));
-                            global_labels_names.push(label_id.0.clone());
-                            local_labels.clear();
-
-                            ValueToken::GlobalLabelDef(inner, *unique_label_id)
-                        }
-
-                    } else {
-                        ValueToken::Name(inner)
-                    }
-                },
+                // Labels
+                MacroToken::Name(inner) => Self::parse_global_label(
+                    &mut tokens,
+                    global_labels,
+                    global_labels_names,
+                    unique_label_id,
+                    is_argument,
+                    &mut local_labels,
+                    inner
+                )?,
                 MacroToken::Point(inner) => Self::parse_local_label(
                     &mut tokens,
                     global_labels,
@@ -209,10 +191,12 @@ impl ValueStage {
                     &mut local_labels,
                     inner
                 )?,
+                // Offsets
                 MacroToken::Offset(inner) => ValueToken::Offset {
                     value: Self::parse_integer(&inner, 0, 10)?,
                     inner
                 },
+                // Literals
                 MacroToken::NumberLiteral(inner) => Self::parse_number_literal(inner)?,
                 MacroToken::StringLiteral(inner) => ValueToken::String {
                     value: inner.value.to_string(),
@@ -221,6 +205,7 @@ impl ValueStage {
                 MacroToken::Colon(inner) => {
                     return Err(inner.error(format!("Unexpected standalone \"{}\", expected a \"Name\" token to preceed it.", inner.value)))
                 },
+                // Operators
                 MacroToken::Operator(mut inner) => {
                     let typ = if tokens.peek_is(MacroTokenType::Operator, None) {
                         match Self::parse_operator_double(&inner, tokens.peek().unwrap().inner()) {
@@ -296,6 +281,44 @@ impl ValueStage {
 
         } else {
             (Symbol::from(name), None)
+        }
+    }
+
+    fn parse_global_label(
+        tokens: &mut TokenIterator<MacroToken>,
+        global_labels: &mut HashMap<(Symbol, Option<usize>), (InnerToken, usize)>,
+        global_labels_names: &mut Vec<Symbol>,
+        unique_label_id: &mut usize,
+        is_argument: bool,
+        local_labels: &mut HashMap<Symbol, InnerToken>,
+        mut inner: InnerToken
+
+    ) -> Result<ValueToken, SourceError> {
+        if tokens.peek_is(MacroTokenType::Colon, None) {
+            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing global label definition")?.into_inner();
+            let label_id = Self::global_label_id(&inner, false);
+            if let Some((previous, _)) = global_labels.get(&label_id) {
+                Err(inner.error(format!(
+                    "Global label \"{}\" was already defined.",
+                    inner.value
+
+                )).with_reference(previous, "Original definition of global label was"))
+
+            } else if is_argument {
+                Err(inner.error("Global label cannot be defined inside an argument list".to_string()))
+
+            } else {
+                *unique_label_id += 1;
+                inner.end_index = colon.end_index;
+                global_labels.insert(label_id.clone(), (inner.clone(), *unique_label_id));
+                global_labels_names.push(label_id.0.clone());
+                local_labels.clear();
+
+                Ok(ValueToken::GlobalLabelDef(inner, *unique_label_id))
+            }
+
+        } else {
+            Ok(ValueToken::Name(inner))
         }
     }
 
