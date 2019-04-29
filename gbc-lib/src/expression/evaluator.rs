@@ -159,18 +159,18 @@ impl EvaluatorContext {
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
-        Ok(match expression {
+        match expression {
             Expression::Binary { inner, op, left, right } => {
                 let left = self.inner_dyn_resolve(left, address_offset, from_file_index)?;
                 let right = self.inner_dyn_resolve(right, address_offset, from_file_index)?;
-                Self::apply_binary_operator(&inner, op, left, right)?
+                Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
                 let right = self.inner_dyn_resolve(right, address_offset, from_file_index)?;
-                Self::apply_unary_operator(&inner, op, right)?
+                Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
-                match value {
+                Ok(match value {
                     ExpressionValue::ConstantValue(inner, name) => {
                         // Global Lookup
                         if let Some(value) = self.constants.get(&(name.clone(), None)) {
@@ -197,7 +197,7 @@ impl EvaluatorContext {
                     ExpressionValue::LocalLabelAddress(_, id) => {
                         ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
                     }
-                }
+                })
             },
             Expression::BuiltinCall { inner, name, args } => {
                 let mut arguments = Vec::with_capacity(args.len());
@@ -208,9 +208,9 @@ impl EvaluatorContext {
                         from_file_index
                     )?);
                 }
-                Self::execute_builtin_call(&inner, &name, arguments)?
+                Self::execute_builtin_call(&inner, &name, arguments)
             }
-        })
+        }
     }
 
     fn inner_const_resolve(
@@ -220,18 +220,18 @@ impl EvaluatorContext {
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
-        Ok(match expression {
+        match expression {
             Expression::Binary { inner, op, left, right } => {
                 let left = self.inner_const_resolve(constant_stack, left, from_file_index)?;
                 let right = self.inner_const_resolve(constant_stack, right, from_file_index)?;
-                Self::apply_binary_operator(&inner, op, left, right)?
+                Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
                 let right = self.inner_const_resolve(constant_stack, right, from_file_index)?;
-                Self::apply_unary_operator(&inner, op, right)?
+                Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
-                match value {
+                Ok(match value {
                     ExpressionValue::ConstantValue(parent, name) => {
 
                         // Global lookup
@@ -285,7 +285,7 @@ impl EvaluatorContext {
                     ExpressionValue::LocalLabelAddress(_, _) => {
                         unreachable!("Invalid constant expression containing LocalLabelAddress");
                     }
-                }
+                })
             },
             Expression::BuiltinCall { inner, name, args } => {
                 let mut arguments = Vec::with_capacity(args.len());
@@ -296,9 +296,9 @@ impl EvaluatorContext {
                         from_file_index
                     )?);
                 }
-                Self::execute_builtin_call(&inner, &name, arguments)?
+                Self::execute_builtin_call(&inner, &name, arguments)
             }
-        })
+        }
     }
 
     fn declare_constant_inline(
