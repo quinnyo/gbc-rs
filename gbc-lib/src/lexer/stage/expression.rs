@@ -56,7 +56,7 @@ impl ExpressionToken {
             ValueToken::OpenBracket(inner) => Ok(ExpressionToken::OpenBracket(inner)),
             ValueToken::CloseBracket(inner) => Ok(ExpressionToken::CloseBracket(inner)),
             ValueToken::GlobalLabelDef(inner, id) => Ok(ExpressionToken::GlobalLabelDef(inner, id)),
-            ValueToken::LocalLabelDef(inner, id) => Ok(ExpressionToken::LocalLabelDef(inner, id)),
+            ValueToken::LocalLabelDef(inner, id, _) => Ok(ExpressionToken::LocalLabelDef(inner, id)),
             ValueToken::Register { inner, name } => Ok(ExpressionToken::Register {
                 inner,
                 name
@@ -361,7 +361,7 @@ impl ExpressionParser {
                 Some(ValueToken::GlobalLabelRef(inner, id)) => Ok(
                     Expression::Value(ExpressionValue::GlobalLabelAddress(inner, id)),
                 ),
-                Some(ValueToken::LocalLabelRef(inner, id)) => Ok(
+                Some(ValueToken::LocalLabelRef(inner, id, _)) => Ok(
                     Expression::Value(ExpressionValue::LocalLabelAddress(inner, id)),
                 ),
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {

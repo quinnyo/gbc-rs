@@ -46,8 +46,7 @@ impl EvaluatorContext {
 
     pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, is_private: bool, value: DataExpression) {
 
-        // TODO detect private by not having a export keyword
-        // TODO private or public default?
+        // TODO set private unless EXPORT keyword is present
         let index = if is_private {
             (inner.value.clone(), Some(inner.file_index))
 
@@ -172,12 +171,14 @@ impl EvaluatorContext {
             Expression::Value(value) => {
                 Ok(match value {
                     ExpressionValue::ConstantValue(inner, name) => {
-                        // Global Lookup
-                        if let Some(value) = self.constants.get(&(name.clone(), None)) {
+                        // TODO test local global override once EXPORT keywords are used
+                        // also test that global does not get overidden by local
+                        // Local Lookup
+                        if let Some(value) = self.constants.get(&(name.clone(), Some(from_file_index))) {
                             value.clone()
 
-                        // Local Lookup
-                        } else if let Some(value) = self.constants.get(&(name.clone(), Some(from_file_index))) {
+                        // Global Lookup
+                        } else if let Some(value) = self.constants.get(&(name.clone(), None)) {
                             value.clone()
 
                         } else {
@@ -235,29 +236,20 @@ impl EvaluatorContext {
                 Ok(match value {
                     ExpressionValue::ConstantValue(parent, name) => {
 
-                        // Global lookup
                         let global_index = (name.clone(), None);
                         let local_index = (name.clone(), Some(from_file_index));
-                        let value = if let Some(result) = self.constants.get(&global_index) {
+
+                        // Local Lookup
+                        // TODO test local global override once EXPORT keywords are used
+                        // also test that global does not get overidden by local
+                        let value = if let Some(result) = self.constants.get(&local_index) {
                             result.clone()
 
-                        // File lookup
-                        } else if let Some(result) = self.constants.get(&local_index) {
+                        // Global Lookup
+                        } else if let Some(result) = self.constants.get(&global_index) {
                             result.clone()
 
-                        // Global declaration
-                        } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&global_index).cloned() {
-                            self.declare_constant_inline(
-                                constant_stack,
-                                parent,
-                                inner,
-                                name,
-                                expression,
-                                from_file_index,
-                                global_index
-                            )?
-
-                        // Local declaration
+                        // Local Declaration
                         } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&local_index).cloned() {
                             self.declare_constant_inline(
                                 constant_stack,
@@ -267,6 +259,18 @@ impl EvaluatorContext {
                                 expression,
                                 from_file_index,
                                 local_index
+                            )?
+
+                        // Global Declaration
+                        } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&global_index).cloned() {
+                            self.declare_constant_inline(
+                                constant_stack,
+                                parent,
+                                inner,
+                                name,
+                                expression,
+                                from_file_index,
+                                global_index
                             )?
 
                         } else {
