@@ -18,7 +18,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 // Expression Specific Tokens -------------------------------------------------
 lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
-    Constant((bool)),
+    Constant((bool, bool)),
     Reserved(()),
     Segment(()),
     Instruction(()),
@@ -79,7 +79,7 @@ impl ExpressionToken {
             },
             ValueToken::ForStatement(inner, for_statement) => {
                 let binding = if let ValueToken::Name(inner) = *for_statement.binding {
-                    Box::new(ExpressionToken::Constant(inner, false))
+                    Box::new(ExpressionToken::Constant(inner, false, false))
 
                 } else {
                     unreachable!();
@@ -135,7 +135,10 @@ impl ExpressionStage {
             if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::DEFAULT)) {
                 let def = tokens.expect(ValueTokenType::Reserved, Some(Symbol::DEFAULT), "while parsing DEFAULT declaration.")?;
                 if tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
-                    expression_tokens.push(ExpressionToken::Constant(token.into_inner(), true));
+                    let inner = token.into_inner();
+                    // TODO use EXPORT keyword instead
+                    let is_private = inner.value.as_str().starts_with('_');
+                    expression_tokens.push(ExpressionToken::Constant(inner, true, is_private));
 
                 } else {
                     return Err(
@@ -144,7 +147,10 @@ impl ExpressionStage {
                 }
 
             } else if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
-                expression_tokens.push(ExpressionToken::Constant(token.into_inner(), false));
+                let inner = token.into_inner();
+                // TODO use EXPORT keyword instead
+                let is_private = inner.value.as_str().starts_with('_');
+                expression_tokens.push(ExpressionToken::Constant(inner, false, is_private));
 
             } else {
                 expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument)?);
@@ -504,16 +510,24 @@ mod test {
     #[test]
     fn test_constants() {
         assert_eq!(tfe("foo EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 3, "foo"), false),
+            ExpressionToken::Constant(itk!(0, 3, "foo"), false, false),
             ExpressionToken::Reserved(itk!(4, 7, "EQU"))
+        ]);
+        assert_eq!(tfe("_foo EQU"), vec![
+            ExpressionToken::Constant(itk!(0, 4, "_foo"), false, true),
+            ExpressionToken::Reserved(itk!(5, 8, "EQU"))
         ]);
     }
 
     #[test]
     fn test_constants_defaults() {
         assert_eq!(tfe("foo DEFAULT EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 3, "foo"), true),
+            ExpressionToken::Constant(itk!(0, 3, "foo"), true, false),
             ExpressionToken::Reserved(itk!(12, 15, "EQU"))
+        ]);
+        assert_eq!(tfe("_foo DEFAULT EQU"), vec![
+            ExpressionToken::Constant(itk!(0, 4, "_foo"), true, true),
+            ExpressionToken::Reserved(itk!(13, 16, "EQU"))
         ]);
     }
 
@@ -1379,7 +1393,7 @@ mod test {
         let lexer = expr_lexer("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
         assert_eq!(lexer.tokens, vec![
             ExpressionToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
-                binding: Box::new(ExpressionToken::Constant(itk!(4, 5, "x"), false)),
+                binding: Box::new(ExpressionToken::Constant(itk!(4, 5, "x"), false, false)),
                 from: vec![
                     ExpressionToken::ConstExpression(itk!(9, 10, "0"), Expression::Value(ExpressionValue::Integer(0)))
                 ],

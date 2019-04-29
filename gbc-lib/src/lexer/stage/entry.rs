@@ -224,9 +224,9 @@ impl EntryStage {
                 },
 
                 // Constant Declarations
-                ExpressionToken::Constant(inner, is_default) => {
+                ExpressionToken::Constant(inner, is_default, is_private) => {
                     if tokens.peek_is(ExpressionTokenType::Reserved, Some(Symbol::EQU)) {
-                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default)?
+                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default, is_private)?
 
                     } else {
                         unreachable!("Expression lexer failed to return \"Constant\" token only if followed by EQU");
@@ -367,12 +367,12 @@ impl EntryStage {
         fixed_constants: &mut HashMap<Symbol, InnerToken>,
         default_constants: &mut HashMap<Symbol, InnerToken>,
         inner: InnerToken,
-        is_default: bool
+        is_default: bool,
+        is_private: bool
 
     ) -> Result<EntryToken, SourceError> {
         tokens.expect(ExpressionTokenType::Reserved, None, "when parsing constant declaration")?;
         if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing constant declaration")? {
-            let is_private = inner.value.as_str().starts_with('_');
             if is_default {
                 if let Some(constant_def) = default_constants.get(&inner.value) {
                     Err(inner.error(
