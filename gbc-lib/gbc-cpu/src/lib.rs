@@ -149,7 +149,7 @@ impl Register {
         }
     }
 
-    pub fn instruction_offset(&self) -> usize {
+    pub fn instruction_offset(&self) -> u16 {
         match self {
             Register::Accumulator => 7,
             Register::B => 0,
@@ -168,7 +168,7 @@ impl Register {
         }
     }
 
-    pub fn instruction_offset_into_a(&self) -> usize {
+    pub fn instruction_offset_into_a(&self) -> u16 {
         match self {
             Register::Accumulator => 0,
             Register::B => 0,
@@ -237,7 +237,7 @@ impl fmt::Debug for Register {
 // Instructions ---------------------------------------------------------------
 #[derive(Debug)]
 pub struct Instruction {
-    pub code: usize,
+    pub code: u16,
     pub prefix: Option<usize>,
     pub name: &'static str,
     pub size: usize,
@@ -245,7 +245,7 @@ pub struct Instruction {
     pub cycles_min: Option<usize>,
     pub layout: Vec<Argument>,
     pub argument: Option<Argument>,
-    pub offsets: Option<Vec<(usize, usize)>>,
+    pub offsets: Option<Vec<(usize, u16)>>,
     pub flags: FlagState
 }
 

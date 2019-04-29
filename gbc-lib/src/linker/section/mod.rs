@@ -749,7 +749,7 @@ impl Section {
     fn resolve_instruction_argument_to_bytes(
         inner: &InnerToken,
         context: &EvaluatorContext,
-        op_code: usize,
+        op_code: u16,
         expression: &DataExpression,
         end_of_instruction: Option<i32>
 
@@ -829,7 +829,7 @@ impl Section {
     fn instruction_entry(
         inner: &InnerToken,
         context: &EvaluatorContext,
-        op_code: usize,
+        op_code: u16,
         expression: Option<DataExpression>,
         volatile: bool,
         debug_only: bool

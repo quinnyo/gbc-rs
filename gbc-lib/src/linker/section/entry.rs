@@ -23,7 +23,7 @@ pub enum EntryData {
         debug_only: bool
     },
     Instruction {
-        op_code: usize,
+        op_code: u16,
         expression: OptionalDataExpression,
         bytes: Vec<u8>,
         volatile: bool,

@@ -17,7 +17,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Types ----------------------------------------------------------------------
-pub type InstructionLayouts = HashMap<(Symbol, Vec<LexerArgument>), usize>;
+pub type InstructionLayouts = HashMap<(Symbol, Vec<LexerArgument>), u16>;
 
 
 // Entry Specific Structs -----------------------------------------------------
@@ -37,10 +37,10 @@ pub struct ForStatement {
 
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
-    Instruction((usize)),
-    InstructionWithArg((usize, DataExpression)),
-    DebugInstruction((usize)),
-    DebugInstructionWithArg((usize, DataExpression)),
+    Instruction((u16)),
+    InstructionWithArg((u16, DataExpression)),
+    DebugInstruction((u16)),
+    DebugInstructionWithArg((u16, DataExpression)),
     GlobalLabelDef((usize)),
     LocalLabelDef((usize)),
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
@@ -142,7 +142,7 @@ impl LexerStage for EntryStage {
         for (index, instr) in gbc_cpu::instruction_list().into_iter().enumerate() {
             let layout = instr.layout.into_iter().map(Into::into).collect();
             let key: (Symbol, Vec<LexerArgument>) = (Symbol::from(instr.name.to_string()), layout);
-            layouts.entry(key).or_insert(index);
+            layouts.entry(key).or_insert(index as u16);
         }
         Self::parse_entry_tokens(tokens, &layouts)
     }

@@ -194,20 +194,20 @@ pub mod instruction {
         }
     }
 
-    pub fn size(op_code: usize) -> usize {
-        INSTRUCTIONS[op_code].size
+    pub fn size(op_code: u16) -> usize {
+        INSTRUCTIONS[op_code as usize].size
     }
 
-    pub fn bytes(op_code: usize) -> Vec<u8> {
-        INSTRUCTIONS[op_code].to_bytes()
+    pub fn bytes(op_code: u16) -> Vec<u8> {
+        INSTRUCTIONS[op_code as usize].to_bytes()
     }
 
-    pub fn offsets(op_code: usize) -> Option<&'static Vec<(usize, usize)>> {
-        INSTRUCTIONS[op_code].offsets.as_ref()
+    pub fn offsets(op_code: u16) -> Option<&'static Vec<(usize, u16)>> {
+        INSTRUCTIONS[op_code as usize].offsets.as_ref()
     }
 
-    pub fn argument(op_code: usize) -> Option<&'static Argument> {
-        INSTRUCTIONS[op_code].argument.as_ref()
+    pub fn argument(op_code: u16) -> Option<&'static Argument> {
+        INSTRUCTIONS[op_code as usize].argument.as_ref()
     }
 
     fn from_twos_byte(i: u8) -> i32 {

@@ -11,7 +11,7 @@ use super::util::instruction;
 // Low Level Instruction Optimizer --------------------------------------------
 pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
 
-    fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(usize, i32, &OptionalDataExpression, &[u8])> {
+    fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(u16, i32, &OptionalDataExpression, &[u8])> {
         if let Some(entry) = entries.get(i) {
             if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
                 if volatile {
@@ -94,12 +94,12 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
 }
 
 fn optimize_instructions(
-    op_code: usize,
+    op_code: u16,
     end_of_instruction: i32,
     expression: &OptionalDataExpression,
     bytes: &[u8],
-    b: Option<(usize, i32, &OptionalDataExpression, &[u8])>,
-    c: Option<(usize, i32, &OptionalDataExpression, &[u8])>
+    b: Option<(u16, i32, &OptionalDataExpression, &[u8])>,
+    c: Option<(u16, i32, &OptionalDataExpression, &[u8])>
 
 ) -> Option<(usize, Vec<EntryData>)> {
     match (op_code, b, c) {
