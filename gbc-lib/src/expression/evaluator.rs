@@ -46,7 +46,6 @@ impl EvaluatorContext {
 
     pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, is_private: bool, value: DataExpression) {
 
-        // TODO set private unless EXPORT keyword is present
         let index = if is_private {
             (inner.value.clone(), Some(inner.file_index))
 
@@ -171,8 +170,6 @@ impl EvaluatorContext {
             Expression::Value(value) => {
                 Ok(match value {
                     ExpressionValue::ConstantValue(inner, name) => {
-                        // TODO test local global override once EXPORT keywords are used
-                        // also test that global does not get overidden by local
                         // Local Lookup
                         if let Some(value) = self.constants.get(&(name.clone(), Some(from_file_index))) {
                             value.clone()
@@ -182,8 +179,7 @@ impl EvaluatorContext {
                             value.clone()
 
                         } else {
-                            // TODO check if a similar named private constant is defined in another file
-                            return Err(inner.error(format!("Reference to undeclared constant \"{}\".", name)))
+                            return Err(self.undeclared_const_error(inner, name));
                         }
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
@@ -240,8 +236,6 @@ impl EvaluatorContext {
                         let local_index = (name.clone(), Some(from_file_index));
 
                         // Local Lookup
-                        // TODO test local global override once EXPORT keywords are used
-                        // also test that global does not get overidden by local
                         let value = if let Some(result) = self.constants.get(&local_index) {
                             result.clone()
 
@@ -274,8 +268,7 @@ impl EvaluatorContext {
                             )?
 
                         } else {
-                            // TODO check if a similar named private constant is defined in another file
-                            return Err(parent.error(format!("Reference to undeclared constant \"{}\".", name)))
+                            return Err(self.undeclared_const_error(parent, name));
                         };
                         value
                     },
@@ -305,6 +298,17 @@ impl EvaluatorContext {
                 Self::execute_builtin_call(&inner, &name, arguments)
             }
         }
+    }
+
+    fn undeclared_const_error(&self, parent: &InnerToken, name: &Symbol) -> SourceError {
+        let error = parent.error(format!("Reference to undeclared constant \"{}\".", name));
+        for ((symbol, _), constant) in self.raw_constants.iter() {
+            // TODO also check lehvenstein distance
+            if symbol == name {
+                return error.with_reference(&constant.inner, "A non-global constant with the same name is defined");
+            }
+        }
+        error
     }
 
     fn declare_constant_inline(
@@ -1092,10 +1096,6 @@ mod test {
         assert_eq!(const_expression("ATAN2(2, 1)"), ExpressionResult::Float(OrderedFloat(1.1071488)));
         assert_eq!(const_expression("ATAN2(2.5, 1)"), ExpressionResult::Float(OrderedFloat(1.19029)));
         assert_eq!(const_expression("ATAN2(2.5, 1.5)"), ExpressionResult::Float(OrderedFloat(1.0303768)));
-
-        // TODO implement and test rand macro
-        // assert_eq!(const_expression("RAND(0, 10)"), ExpressionResult::Integer(3));
-        // assert_eq!(const_expression("RAND(0.0, 1.0)"), ExpressionResult::Float(OrderedFloat(3.0)));
 
     }
 

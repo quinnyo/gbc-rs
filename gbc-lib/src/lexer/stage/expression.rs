@@ -132,31 +132,46 @@ impl ExpressionStage {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::DEFAULT)) {
-                let def = tokens.expect(ValueTokenType::Reserved, Some(Symbol::DEFAULT), "while parsing DEFAULT declaration.")?;
-                if tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
-                    let inner = token.into_inner();
-                    // TODO use EXPORT keyword instead
-                    let is_private = inner.value.as_str().starts_with('_');
-                    expression_tokens.push(ExpressionToken::Constant(inner, true, is_private));
+            if token.is_symbol(Symbol::GLOBAL) {
+                let name = tokens.expect(ValueTokenType::Name, None, "while parsing GLOBAL declaration.")?;
+                if let Some(c) = Self::parse_constant(&name, &mut tokens, true)? {
+                    expression_tokens.push(c);
 
                 } else {
-                    return Err(
-                        def.error(format!("Unexpected {:?}, expected a EQU keyword instead.", token.typ()))
-                    );
+                    return Err(name.error("Incomplete GLOBAL declaration, expected a EQU keyword instead.".to_string()));
                 }
 
-            } else if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
-                let inner = token.into_inner();
-                // TODO use EXPORT keyword instead
-                let is_private = inner.value.as_str().starts_with('_');
-                expression_tokens.push(ExpressionToken::Constant(inner, false, is_private));
+            } else if let Some(c) = Self::parse_constant(&token, &mut tokens, false)? {
+                expression_tokens.push(c);
 
             } else {
                 expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument)?);
             }
         }
         Ok(expression_tokens)
+    }
+
+    fn parse_constant(
+        token: &ValueToken,
+        tokens: &mut TokenIterator<ValueToken>,
+        is_exported: bool
+
+    ) -> Result<Option<ExpressionToken>, SourceError> {
+        if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::DEFAULT)) {
+            let def = tokens.expect(ValueTokenType::Reserved, Some(Symbol::DEFAULT), "while parsing DEFAULT declaration.")?;
+            if tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
+                Ok(Some(ExpressionToken::Constant(token.inner().clone(), true, !is_exported)))
+
+            } else {
+                Err(def.error("Incomplete DEFAULT declaration, expected a EQU keyword instead.".to_string()))
+            }
+
+        } else if token.is(ValueTokenType::Name) && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
+            Ok(Some(ExpressionToken::Constant(token.inner().clone(), false, !is_exported)))
+
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_expression_tokens(
@@ -510,25 +525,37 @@ mod test {
     #[test]
     fn test_constants() {
         assert_eq!(tfe("foo EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 3, "foo"), false, false),
+            ExpressionToken::Constant(itk!(0, 3, "foo"), false, true),
             ExpressionToken::Reserved(itk!(4, 7, "EQU"))
         ]);
-        assert_eq!(tfe("_foo EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 4, "_foo"), false, true),
-            ExpressionToken::Reserved(itk!(5, 8, "EQU"))
+        assert_eq!(tfe("GLOBAL foo EQU"), vec![
+            ExpressionToken::Constant(itk!(7, 10, "foo"), false, false),
+            ExpressionToken::Reserved(itk!(11, 14, "EQU"))
         ]);
+    }
+
+    #[test]
+    fn test_error_constants_export() {
+        assert_eq!(expr_lexer_error("GLOBAL"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing GLOBAL declaration., expected a \"Name\" token instead.\n\nGLOBAL\n^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL foo"), "In file \"main.gb.s\" on line 1, column 8: Incomplete GLOBAL declaration, expected a EQU keyword instead.\n\nGLOBAL foo\n       ^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL foo DEFAULT"), "In file \"main.gb.s\" on line 1, column 12: Incomplete DEFAULT declaration, expected a EQU keyword instead.\n\nGLOBAL foo DEFAULT\n           ^--- Here");
     }
 
     #[test]
     fn test_constants_defaults() {
         assert_eq!(tfe("foo DEFAULT EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 3, "foo"), true, false),
+            ExpressionToken::Constant(itk!(0, 3, "foo"), true, true),
             ExpressionToken::Reserved(itk!(12, 15, "EQU"))
         ]);
-        assert_eq!(tfe("_foo DEFAULT EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 4, "_foo"), true, true),
-            ExpressionToken::Reserved(itk!(13, 16, "EQU"))
+        assert_eq!(tfe("GLOBAL foo DEFAULT EQU"), vec![
+            ExpressionToken::Constant(itk!(7, 10, "foo"), true, false),
+            ExpressionToken::Reserved(itk!(19, 22, "EQU"))
         ]);
+    }
+
+    #[test]
+    fn test_error_constants_defaults() {
+        assert_eq!(expr_lexer_error("foo DEFAULT"), "In file \"main.gb.s\" on line 1, column 5: Incomplete DEFAULT declaration, expected a EQU keyword instead.\n\nfoo DEFAULT\n    ^--- Here");
     }
 
     #[test]

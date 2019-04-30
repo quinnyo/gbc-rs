@@ -10,6 +10,7 @@ pub enum Symbol {
     USING,
     VOLATILE,
     SECTION,
+    GLOBAL,
 
     DB,
     DW,
@@ -173,6 +174,7 @@ impl Symbol {
             Symbol::USING    => "USING",
             Symbol::VOLATILE => "VOLATILE",
             Symbol::SECTION  => "SECTION",
+            Symbol::GLOBAL   => "GLOBAL",
 
             Symbol::DB       => "DB",
             Symbol::DW       => "DW",
@@ -348,6 +350,7 @@ impl From<String> for Symbol {
             "USING"     =>  Symbol::USING,
             "VOLATILE"  =>  Symbol::VOLATILE,
             "SECTION"   =>  Symbol::SECTION,
+            "GLOBAL"    =>  Symbol::GLOBAL,
 
             "DB"        =>  Symbol::DB,
             "DW"        =>  Symbol::DW,

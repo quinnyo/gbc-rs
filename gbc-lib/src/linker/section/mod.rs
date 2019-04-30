@@ -1088,7 +1088,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_constant_eval() {
-        let l = linker_child("PARENT EQU CHILD + 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB PARENT", "CHILD EQU 1");
+        let l = linker_child("PARENT EQU CHILD + 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB PARENT", "GLOBAL CHILD EQU 1");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1096,6 +1096,61 @@ mod test {
                     endianess: DataEndianess::Little,
                     expressions: None,
                     bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_child_no_global_override() {
+        let l = linker_child("FOO EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "FOO EQU 2\nSECTION ROM0\nDB FOO");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                }),
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_child_global_override_default_export() {
+        let l = linker_child("GLOBAL FOO DEFAULT EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL FOO EQU 2");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![2]),
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_section_entry_child_global_no_override_default_private() {
+        let l = linker_child("FOO DEFAULT EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL FOO EQU 2");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Data {
+                    alignment: DataAlignment::Byte,
+                    endianess: DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![1]),
                     debug_only: false
                 })
             ]
@@ -1128,11 +1183,6 @@ mod test {
                 })
             ]
         ]);
-    }
-
-    #[test]
-    fn test_error_section_entry_local_dyn_eval() {
-        assert_eq!(linker_error("SECTION ROM0\nglobal:\nDB global + A"), "In file \"main.gb.s\" on line 3, column 13: Reference to undeclared constant \"A\".\n\nDB global + A\n            ^--- Here");
     }
 
     // Labels Entries ---------------------------------------------------------

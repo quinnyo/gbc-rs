@@ -494,10 +494,10 @@ mod test {
 
     #[test]
     fn test_error_constant_eval_file_local() {
-        assert_eq!(linker_error_child("A EQU _B\nINCLUDE 'child.gb.s'", "_B EQU 1"), "In file \"main.gb.s\" on line 1, column 7: Reference to undeclared constant \"_B\".\n\nA EQU _B\n      ^--- Here");
-        assert_eq!(linker_error_child("A EQU 1 + _B\nINCLUDE 'child.gb.s'", "_B EQU 1"), "In file \"main.gb.s\" on line 1, column 11: Reference to undeclared constant \"_B\".\n\nA EQU 1 + _B\n          ^--- Here");
-        assert_eq!(linker_error_child("_A EQU 1\nINCLUDE 'child.gb.s'", "B EQU _A"), "In file \"child.gb.s\" on line 1, column 7: Reference to undeclared constant \"_A\".\n\nB EQU _A\n      ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9");
-        assert_eq!(linker_error_child("_A EQU 1\nINCLUDE 'child.gb.s'", "B EQU 1 + _A"), "In file \"child.gb.s\" on line 1, column 11: Reference to undeclared constant \"_A\".\n\nB EQU 1 + _A\n          ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9");
+        assert_eq!(linker_error_child("A EQU B\nINCLUDE 'child.gb.s'", "B EQU 1"), "In file \"main.gb.s\" on line 1, column 7: Reference to undeclared constant \"B\".\n\nA EQU B\n      ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nB EQU 1\n^--- Here");
+        assert_eq!(linker_error_child("A EQU 1 + B\nINCLUDE 'child.gb.s'", "B EQU 1"), "In file \"main.gb.s\" on line 1, column 11: Reference to undeclared constant \"B\".\n\nA EQU 1 + B\n          ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nB EQU 1\n^--- Here");
+        assert_eq!(linker_error_child("A EQU 1\nINCLUDE 'child.gb.s'", "B EQU A"), "In file \"child.gb.s\" on line 1, column 7: Reference to undeclared constant \"A\".\n\nB EQU A\n      ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 1:\n\nA EQU 1\n^--- Here");
+        assert_eq!(linker_error_child("A EQU 1\nINCLUDE 'child.gb.s'", "B EQU 1 + A"), "In file \"child.gb.s\" on line 1, column 11: Reference to undeclared constant \"A\".\n\nB EQU 1 + A\n          ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 1:\n\nA EQU 1\n^--- Here");
     }
 
     // Section Mapping --------------------------------------------------------
