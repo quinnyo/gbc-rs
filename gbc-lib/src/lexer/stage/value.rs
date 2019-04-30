@@ -180,7 +180,7 @@ impl ValueStage {
                 },
                 // Labels
                 MacroToken::Name(inner) => {
-                    // TODO use EXPORT keyword instead
+                    // TODO use GLOBAL keyword instead
                     let is_private = inner.value.as_str().starts_with('_');
                     Self::parse_global_label(
                         &mut tokens,

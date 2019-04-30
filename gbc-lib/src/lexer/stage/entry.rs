@@ -17,7 +17,8 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Types ----------------------------------------------------------------------
-pub type InstructionLayouts = HashMap<(Symbol, Vec<LexerArgument>), u16>;
+type ConstantIndex = (Symbol, Option<usize>);
+type InstructionLayouts = HashMap<(Symbol, Vec<LexerArgument>), u16>;
 
 
 // Entry Specific Structs -----------------------------------------------------
@@ -364,24 +365,31 @@ impl EntryStage {
 
     fn parse_constant_declaration(
         tokens: &mut TokenIterator<ExpressionToken>,
-        fixed_constants: &mut HashMap<Symbol, InnerToken>,
-        default_constants: &mut HashMap<Symbol, InnerToken>,
+        fixed_constants: &mut HashMap<ConstantIndex, InnerToken>,
+        default_constants: &mut HashMap<ConstantIndex, InnerToken>,
         inner: InnerToken,
         is_default: bool,
         is_private: bool
 
     ) -> Result<EntryToken, SourceError> {
         tokens.expect(ExpressionTokenType::Reserved, None, "when parsing constant declaration")?;
+        let file_index = if is_private {
+            Some(inner.file_index)
+
+        } else {
+            None
+        };
+        let index = (inner.value.clone(), file_index);
         if let ExpressionToken::ConstExpression(_, expr) = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing constant declaration")? {
             if is_default {
-                if let Some(constant_def) = default_constants.get(&inner.value) {
+                if let Some(constant_def) = default_constants.get(&index) {
                     Err(inner.error(
                         format!("Re-definition of previously declared constant default \"{}\".", inner.value)
 
                     ).with_reference(&constant_def, "Original definition was"))
 
                 } else {
-                    default_constants.insert(inner.value.clone(), inner.clone());
+                    default_constants.insert(index, inner.clone());
                     Ok(EntryToken::Constant {
                         inner,
                         is_default,
@@ -390,14 +398,14 @@ impl EntryStage {
                     })
                 }
 
-            } else if let Some(constant_def) = fixed_constants.get(&inner.value) {
+            } else if let Some(constant_def) = fixed_constants.get(&index) {
                 Err(inner.error(
                     format!("Re-definition of previously declared constant \"{}\".", inner.value)
 
                 ).with_reference(&constant_def, "Original definition was"))
 
             } else {
-                fixed_constants.insert(inner.value.clone(), inner.clone());
+                fixed_constants.insert(index, inner.clone());
                 Ok(EntryToken::Constant {
                     inner,
                     is_default,
@@ -1539,7 +1547,7 @@ impl EntryStage {
 #[cfg(test)]
 mod test {
     use crate::lexer::{Lexer, Symbol};
-    use crate::mocks::{expr_lex, expr_lex_binary};
+    use crate::mocks::{expr_lex, expr_lex_binary, entry_lex_child_error};
     use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement};
     use crate::expression::{Expression, ExpressionValue, Operator};
 
@@ -1615,19 +1623,19 @@ mod test {
         assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: false,
-            is_private: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
-        assert_eq!(tfe("_foo EQU 2"), vec![EntryToken::Constant {
-            inner: itk!(0, 4, "_foo"),
+        assert_eq!(tfe("GLOBAL foo EQU 2"), vec![EntryToken::Constant {
+            inner: itk!(7, 10, "foo"),
             is_default: false,
-            is_private: true,
+            is_private: false,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
         assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: false,
-            is_private: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(8, 11, "bar"),
                 Symbol::from("bar".to_string())
@@ -1636,7 +1644,7 @@ mod test {
         assert_eq!(tfe("foo DEFAULT EQU bar"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: true,
-            is_private: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::ConstantValue(
                 itk!(16, 19, "bar"),
                 Symbol::from("bar".to_string())
@@ -1645,7 +1653,7 @@ mod test {
         assert_eq!(tfe("foo EQU 'test'"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: false,
-            is_private: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::String("test".to_string()))
         }]);
     }
@@ -1655,13 +1663,13 @@ mod test {
         assert_eq!(tfe("foo DEFAULT EQU 1\nfoo EQU 2"), vec![EntryToken::Constant {
             inner: itk!(0, 3, "foo"),
             is_default: true,
-            is_private: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::Integer(1))
 
         }, EntryToken::Constant {
             inner: itk!(18, 21, "foo"),
             is_default: false,
-            is_private: false,
+            is_private: true,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
     }
@@ -1686,6 +1694,11 @@ mod test {
         assert_eq!(entry_lexer_error("foo EQU"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU\n    ^--- Here");
         assert_eq!(entry_lexer_error("foo EQU DB"), "In file \"main.gb.s\" on line 1, column 9: Unexpected token \"Reserved\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU DB\n        ^--- Here");
         assert_eq!(entry_lexer_error("global_label:\nfoo EQU global_label"), "In file \"main.gb.s\" on line 2, column 9: Unexpected token \"Expression\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU global_label\n        ^--- Here");
+    }
+
+    #[test]
+    fn test_error_const_declaration_child_global_override() {
+        assert_eq!(entry_lex_child_error("GLOBAL FOO EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL FOO EQU 2"), "In file \"child.gb.s\" on line 1, column 8: Re-definition of previously declared constant \"FOO\".\n\nGLOBAL FOO EQU 2\n       ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 8:\n\nGLOBAL FOO EQU 1\n       ^--- Here");
     }
 
     // Data Declarations ------------------------------------------------------
