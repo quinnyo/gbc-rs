@@ -469,6 +469,7 @@ mod test {
     }
 
     fn include_lexer_error<S: Into<String>>(s: S) -> String {
+        colored::control::set_override(false);
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap().to_string()

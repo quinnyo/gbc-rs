@@ -1561,6 +1561,7 @@ mod test {
     }
 
     fn entry_lexer_error<S: Into<String>>(s: S) -> String {
+        colored::control::set_override(false);
         Lexer::<EntryStage>::from_lexer(expr_lex(s)).err().expect("Expected a SourceError").to_string()
     }
 

@@ -110,6 +110,7 @@ pub enum BlockStatement<T: LexerToken> {
 // Macro Specific Tokens ------------------------------------------------------
 lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
     Name(()),
+    GlobalName(()),
     Reserved(()),
     Segment(()),
     Register(()),
@@ -882,6 +883,7 @@ mod test {
     }
 
     fn macro_lexer_error<S: Into<String>>(s: S) -> String {
+        colored::control::set_override(false);
         Lexer::<MacroStage>::from_lexer(include_lex(s)).err().unwrap().to_string()
     }
 

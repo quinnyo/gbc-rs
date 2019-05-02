@@ -2102,8 +2102,6 @@ mod test {
 
     #[test]
     fn test_error_section_block_using_missing_command() {
-        use colored;
-        colored::control::set_override(false);
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
         let l = linker_error_reader(&reader, "SECTION ROM0\nBLOCK USING '' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK");
@@ -2112,8 +2110,6 @@ mod test {
 
     #[test]
     fn test_error_section_block_using_failed_command() {
-        use colored;
-        colored::control::set_override(false);
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
         reader.add_command(
