@@ -17,7 +17,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 // Modules --------------------------------------------------------------------
 mod label_resolver;
-use self::label_resolver::{LabelResolver, GlobalLabelIndex, LocalLabelIndex};
+use self::label_resolver::{LabelResolver, ParentLabelIndex, ChildLabelIndex};
 
 
 // Types ----------------------------------------------------------------------
@@ -42,10 +42,10 @@ lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch<ValueToken>>)),
     ForStatement((ForStatement<ValueToken>)),
     BlockStatement((BlockStatement<ValueToken>)),
-    GlobalLabelDef((usize)),
-    GlobalLabelRef((usize)),
-    LocalLabelDef((usize, Option<usize>)),
-    LocalLabelRef((usize, Option<usize>))
+    ParentLabelDef((usize)),
+    ParentLabelRef((usize)),
+    ChildLabelDef((usize, Option<usize>)),
+    ChildLabelRef((usize, Option<usize>))
 
 }, {
     Offset {
@@ -86,12 +86,12 @@ impl LexerStage for ValueStage {
         _data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let mut global_labels: HashMap<GlobalLabelIndex, (InnerToken, usize)> = HashMap::new();
-        let mut global_labels_names: Vec<Symbol> = Vec::with_capacity(64);
+        let mut parent_labels: HashMap<ParentLabelIndex, (InnerToken, usize)> = HashMap::new();
+        let mut parent_labels_names: Vec<Symbol> = Vec::with_capacity(64);
         let mut unique_label_id = 0;
-        LabelResolver::convert_local_labels_refs(Self::parse_tokens(
-            &mut global_labels,
-            &mut global_labels_names,
+        LabelResolver::convert_child_labels_refs(Self::parse_tokens(
+            &mut parent_labels,
+            &mut parent_labels_names,
             &mut unique_label_id,
             false,
             tokens
@@ -103,15 +103,15 @@ impl LexerStage for ValueStage {
 impl ValueStage {
 
     fn parse_tokens(
-        global_labels: &mut HashMap<GlobalLabelIndex, (InnerToken, usize)>,
-        global_labels_names: &mut Vec<Symbol>,
+        parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
+        parent_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
         is_argument: bool,
         tokens: Vec<MacroToken>
 
     ) -> Result<Vec<ValueToken>, SourceError> {
 
-        let mut local_labels: HashMap<LocalLabelIndex, InnerToken> = HashMap::new();
+        let mut child_labels: HashMap<ChildLabelIndex, InnerToken> = HashMap::new();
 
         let mut value_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
@@ -146,24 +146,24 @@ impl ValueStage {
                     let mut value_branches = Vec::with_capacity(branches.len());
                     for branch in branches {
                         value_branches.push(branch.into_other(|tokens| {
-                            Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, tokens)
+                            Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, tokens)
                         })?);
                     }
                     ValueToken::IfStatement(inner, value_branches)
                 }
                 MacroToken::ForStatement(inner, for_statement) => {
-                    let mut binding = Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, vec![*for_statement.binding])?;
+                    let mut binding = Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, vec![*for_statement.binding])?;
                     ValueToken::ForStatement(inner, ForStatement {
                         binding: Box::new(binding.remove(0)),
-                        from: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.from)?,
-                        to: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.to)?,
-                        body: Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, for_statement.body)?
+                        from: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.from)?,
+                        to: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.to)?,
+                        body: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.body)?
                     })
                 },
                 MacroToken::BlockStatement(inner, block) => {
                     ValueToken::BlockStatement(inner, match block {
-                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?),
-                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(global_labels, global_labels_names, unique_label_id, false, body)?)
+                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, body)?),
+                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, body)?)
                     })
                 },
 
@@ -184,8 +184,8 @@ impl ValueStage {
                     let mut value_args = Vec::with_capacity(args.len());
                     for tokens in args {
                         value_args.push(Self::parse_tokens(
-                            global_labels,
-                            global_labels_names,
+                            parent_labels,
+                            parent_labels_names,
                             unique_label_id,
                             true,
                             tokens
@@ -195,36 +195,36 @@ impl ValueStage {
                 },
                 // Labels
                 MacroToken::GlobalName(inner) => {
-                    Self::parse_global_label(
+                    Self::parse_parent_label(
                         &mut tokens,
-                        global_labels,
-                        global_labels_names,
+                        parent_labels,
+                        parent_labels_names,
                         unique_label_id,
                         is_argument,
                         true,
-                        &mut local_labels,
+                        &mut child_labels,
                         inner
                     )?
                 },
                 MacroToken::Name(inner) => {
-                    Self::parse_global_label(
+                    Self::parse_parent_label(
                         &mut tokens,
-                        global_labels,
-                        global_labels_names,
+                        parent_labels,
+                        parent_labels_names,
                         unique_label_id,
                         is_argument,
                         false,
-                        &mut local_labels,
+                        &mut child_labels,
                         inner
                     )?
                 },
-                MacroToken::Point(inner) => Self::parse_local_label(
+                MacroToken::Point(inner) => Self::parse_child_label(
                     &mut tokens,
-                    global_labels,
-                    global_labels_names,
+                    parent_labels,
+                    parent_labels_names,
                     unique_label_id,
                     is_argument,
-                    &mut local_labels,
+                    &mut child_labels,
                     inner
                 )?,
                 // Offsets
@@ -265,53 +265,53 @@ impl ValueStage {
             value_tokens.push(value_token);
         }
 
-        // Convert name tokens into corresponding global label references
-        Ok(LabelResolver::convert_global_label_refs(&global_labels, value_tokens))
+        // Convert name tokens into corresponding parent label references
+        Ok(LabelResolver::convert_parent_label_refs(&parent_labels, value_tokens))
     }
 
-    fn parse_global_label(
+    fn parse_parent_label(
         tokens: &mut TokenIterator<MacroToken>,
-        global_labels: &mut HashMap<GlobalLabelIndex, (InnerToken, usize)>,
-        global_labels_names: &mut Vec<Symbol>,
+        parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
+        parent_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
         is_argument: bool,
         is_global: bool,
-        local_labels: &mut HashMap<LocalLabelIndex, InnerToken>,
+        child_labels: &mut HashMap<ChildLabelIndex, InnerToken>,
         mut inner: InnerToken
 
     ) -> Result<ValueToken, SourceError> {
         if tokens.peek_is(MacroTokenType::Colon, None) {
 
-            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing global label definition")?.into_inner();
+            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing label definition")?.into_inner();
 
             // TODO differentiate via is_global instead
             let is_private = inner.value.as_str().starts_with('_');
-            let label_id = LabelResolver::global_label_id(&inner, false, if is_private {
+            let label_id = LabelResolver::parent_label_id(&inner, false, if is_private {
                 Some(inner.file_index)
 
             } else {
                 None
             });
 
-            if let Some((previous, _)) = global_labels.get(&label_id) {
+            if let Some((previous, _)) = parent_labels.get(&label_id) {
                 Err(inner.error(format!(
                     // TODO rename to ParentLabel and ChildLabel
-                    "Global label \"{}\" was already defined.",
+                    "A label with the name \"{}\" was already defined.",
                     inner.value
 
-                )).with_reference(previous, "Original definition of global label was"))
+                )).with_reference(previous, "Original definition of label was"))
 
             } else if is_argument {
-                Err(inner.error("Global label cannot be defined inside an argument list".to_string()))
+                Err(inner.error("A label cannot be defined inside an argument list".to_string()))
 
             } else {
                 *unique_label_id += 1;
                 inner.end_index = colon.end_index;
-                global_labels.insert(label_id.clone(), (inner.clone(), *unique_label_id));
-                global_labels_names.push(label_id.0.clone());
-                local_labels.clear();
+                parent_labels.insert(label_id.clone(), (inner.clone(), *unique_label_id));
+                parent_labels_names.push(label_id.0.clone());
+                child_labels.clear();
 
-                Ok(ValueToken::GlobalLabelDef(inner, *unique_label_id))
+                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id))
             }
 
         } else if is_global {
@@ -322,25 +322,25 @@ impl ValueStage {
         }
     }
 
-    fn parse_local_label(
+    fn parse_child_label(
         tokens: &mut TokenIterator<MacroToken>,
-        global_labels: &mut HashMap<GlobalLabelIndex, (InnerToken, usize)>,
-        global_labels_names: &mut Vec<Symbol>,
+        parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
+        parent_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
         is_argument: bool,
-        local_labels: &mut HashMap<LocalLabelIndex, InnerToken>,
+        child_labels: &mut HashMap<ChildLabelIndex, InnerToken>,
         mut inner: InnerToken
 
     ) -> Result<ValueToken, SourceError> {
-        // For local labels all kinds of names are allowed
+        // For child labels all kinds of names are allowed
         let name_token = if tokens.peek_is(MacroTokenType::Instruction, None) {
-            tokens.expect(MacroTokenType::Instruction, None, "when parsing local label")?.into_inner()
+            tokens.expect(MacroTokenType::Instruction, None, "when parsing child label")?.into_inner()
 
         } else if tokens.peek_is(MacroTokenType::Reserved, None) {
-            tokens.expect(MacroTokenType::Reserved, None, "when parsing local label")?.into_inner()
+            tokens.expect(MacroTokenType::Reserved, None, "when parsing child label")?.into_inner()
 
         } else {
-            tokens.expect(MacroTokenType::Name, None, "when parsing local label")?.into_inner()
+            tokens.expect(MacroTokenType::Name, None, "when parsing child label")?.into_inner()
         };
 
         // Postfix labels created by macros calls so they are unique
@@ -352,43 +352,43 @@ impl ValueStage {
         };
 
         if tokens.peek_is(MacroTokenType::Colon, None) {
-            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing local label definition")?.into_inner();
-            if global_labels.is_empty() {
+            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing child label definition")?.into_inner();
+            if parent_labels.is_empty() {
                 Err(inner.error(format!(
-                    "Unexpected definition of local label \"{}\" before any global label was defined.",
+                    "Unexpected definition of child label \"{}\" without parent.",
                     name_token.value
                 )))
 
-            } else if let Some(previous) = local_labels.get(&label_index) {
+            } else if let Some(previous) = child_labels.get(&label_index) {
                 Err(inner.error(format!(
-                    "Local label \"{}\" was already defined under the current global label \"{}\".",
+                    "child label \"{}\" was already defined under the current parent label \"{}\".",
                     label_index.0,
-                    global_labels_names.last().unwrap()
+                    parent_labels_names.last().unwrap()
 
-                )).with_reference(previous, "Original definition of local label was"))
+                )).with_reference(previous, "Original definition of child label was"))
 
             } else if is_argument {
-                Err(inner.error("Local label cannot be defined inside an argument list".to_string()))
+                Err(inner.error("A child label cannot be defined inside an argument list".to_string()))
 
             } else {
                 inner.end_index = colon.end_index;
                 inner.value = label_index.0.clone();
-                local_labels.insert(label_index.clone(), inner.clone());
+                child_labels.insert(label_index.clone(), inner.clone());
 
                 *unique_label_id += 1;
-                Ok(ValueToken::LocalLabelDef(inner, *unique_label_id, label_index.1))
+                Ok(ValueToken::ChildLabelDef(inner, *unique_label_id, label_index.1))
             }
 
-        } else if global_labels.is_empty() {
+        } else if parent_labels.is_empty() {
             Err(inner.error(format!(
-                "Unexpected reference to local label \"{}\" before any global label was defined.",
+                "Unexpected definition of child label \"{}\" without parent.",
                 name_token.value
             )))
 
         } else {
             inner.value = label_index.0;
             inner.end_index = name_token.end_index;
-            Ok(ValueToken::LocalLabelRef(inner, 0, label_index.1))
+            Ok(ValueToken::ChildLabelRef(inner, 0, label_index.1))
         }
     }
 
@@ -652,34 +652,34 @@ mod test {
     }
 
     #[test]
-    fn test_global_label_def() {
-        assert_eq!(tfv("global_label:"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_parent_label_def() {
+        assert_eq!(tfv("parent_label:"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
         )]);
     }
 
     #[test]
-    fn test_global_label_ref() {
-        assert_eq!(tfv("global_label:\nglobal_label"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_parent_label_ref() {
+        assert_eq!(tfv("parent_label:\nparent_label"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::GlobalLabelRef(
-            itf!(14, 26, "global_label", 0),
+        ), ValueToken::ParentLabelRef(
+            itf!(14, 26, "parent_label", 0),
             1
         )]);
-        assert_eq!(tfv("global_label:\nCEIL(global_label)"), vec![
-            ValueToken::GlobalLabelDef(
-                itk!(0, 13, "global_label"),
+        assert_eq!(tfv("parent_label:\nCEIL(parent_label)"), vec![
+            ValueToken::ParentLabelDef(
+                itk!(0, 13, "parent_label"),
                 1
             ),
             ValueToken::BuiltinCall(
                 itk!(14, 18, "CEIL"),
                 vec![
                     vec![
-                        ValueToken::GlobalLabelRef(
-                            itf!(19, 31, "global_label", 0),
+                        ValueToken::ParentLabelRef(
+                            itf!(19, 31, "parent_label", 0),
                             1
                         )
                     ]
@@ -689,135 +689,135 @@ mod test {
     }
 
     #[test]
-    fn test_global_label_no_ref() {
-        assert_eq!(tfv("global_label"), vec![ValueToken::Name(
-            itf!(0, 12, "global_label", 0)
+    fn test_parent_label_no_ref() {
+        assert_eq!(tfv("parent_label"), vec![ValueToken::Name(
+            itf!(0, 12, "parent_label", 0)
         )]);
     }
 
     #[test]
-    fn test_global_file_local_label_def() {
+    fn test_parent_file_child_label_def() {
         let tokens = value_lexer_child(
-            "_global_file_local_label:\nINCLUDE 'child.gb.s'",
-            "_global_file_local_label:"
+            "_parent_file_child_label:\nINCLUDE 'child.gb.s'",
+            "_parent_file_child_label:"
 
         ).tokens;
-        assert_eq!(tokens, vec![ValueToken::GlobalLabelDef(
-            itf!(0, 25, "_global_file_local_label", 0),
+        assert_eq!(tokens, vec![ValueToken::ParentLabelDef(
+            itf!(0, 25, "_parent_file_child_label", 0),
             1
 
-        ), ValueToken::GlobalLabelDef(
-            itf!(0, 25, "_global_file_local_label", 1),
+        ), ValueToken::ParentLabelDef(
+            itf!(0, 25, "_parent_file_child_label", 1),
             2
         )]);
     }
 
     #[test]
-    fn test_global_file_local_label_ref() {
+    fn test_parent_file_child_label_ref() {
         let tokens = value_lexer_child(
-            "_global_file_local_label:\n_global_file_local_label\nINCLUDE 'child.gb.s'",
-            "_global_file_local_label:\n_global_file_local_label"
+            "_parent_file_child_label:\n_parent_file_child_label\nINCLUDE 'child.gb.s'",
+            "_parent_file_child_label:\n_parent_file_child_label"
 
         ).tokens;
-        assert_eq!(tokens, vec![ValueToken::GlobalLabelDef(
-            itf!(0, 25, "_global_file_local_label", 0),
+        assert_eq!(tokens, vec![ValueToken::ParentLabelDef(
+            itf!(0, 25, "_parent_file_child_label", 0),
             1
 
-        ), ValueToken::GlobalLabelRef(
-            itf!(26, 50, "_global_file_local_label", 0),
+        ), ValueToken::ParentLabelRef(
+            itf!(26, 50, "_parent_file_child_label", 0),
             1
 
-        ), ValueToken::GlobalLabelDef(
-            itf!(0, 25, "_global_file_local_label", 1),
+        ), ValueToken::ParentLabelDef(
+            itf!(0, 25, "_parent_file_child_label", 1),
             2
 
-        ), ValueToken::GlobalLabelRef(
-            itf!(26, 50, "_global_file_local_label", 1),
+        ), ValueToken::ParentLabelRef(
+            itf!(26, 50, "_parent_file_child_label", 1),
             2
         )]);
     }
 
     #[test]
-    fn test_global_file_local_label_no_ref() {
+    fn test_parent_file_child_label_no_ref() {
         let tokens = value_lexer_child(
-            "_global_file_local_label\nINCLUDE 'child.gb.s'",
-            "_global_file_local_label"
+            "_parent_file_child_label\nINCLUDE 'child.gb.s'",
+            "_parent_file_child_label"
 
         ).tokens;
         assert_eq!(tokens, vec![ValueToken::Name(
-            itf!(0, 24, "_global_file_local_label", 0)
+            itf!(0, 24, "_parent_file_child_label", 0)
 
         ), ValueToken::Name(
-            itf!(0, 24, "_global_file_local_label", 1)
+            itf!(0, 24, "_parent_file_child_label", 1)
         )]);
     }
 
     #[test]
-    fn test_error_global_label_def_duplicate() {
+    fn test_error_parent_label_def_duplicate() {
         assert_eq!(value_lexer_error(
-            "global_label:\nglobal_label:"
+            "parent_label:\nparent_label:"
 
-        ), "In file \"main.gb.s\" on line 2, column 1: Global label \"global_label\" was already defined.\n\nglobal_label:\n^--- Here\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+        ), "In file \"main.gb.s\" on line 2, column 1: A label with the name \"parent_label\" was already defined.\n\nparent_label:\n^--- Here\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
-    fn test_error_global_file_local_label_def_duplicate() {
+    fn test_error_parent_file_child_label_def_duplicate() {
         assert_eq!(
-            value_lexer_error("_global_file_local_label:\n_global_file_local_label:"),
-            "In file \"main.gb.s\" on line 2, column 1: Global label \"_global_file_local_label\" was already defined.\n\n_global_file_local_label:\n^--- Here\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\n_global_file_local_label:\n^--- Here"
+            value_lexer_error("_parent_file_child_label:\n_parent_file_child_label:"),
+            "In file \"main.gb.s\" on line 2, column 1: A label with the name \"_parent_file_child_label\" was already defined.\n\n_parent_file_child_label:\n^--- Here\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 1:\n\n_parent_file_child_label:\n^--- Here"
         );
     }
 
     #[test]
-    fn test_error_global_label_def_duplicate_child() {
+    fn test_error_parent_label_def_duplicate_child() {
         assert_eq!(value_lexer_child_error(
-            "global_label:\nINCLUDE 'child.gb.s'",
-            "global_label:"
+            "parent_label:\nINCLUDE 'child.gb.s'",
+            "parent_label:"
 
-        ), "In file \"child.gb.s\" on line 1, column 1: Global label \"global_label\" was already defined.\n\nglobal_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+        ), "In file \"child.gb.s\" on line 1, column 1: A label with the name \"parent_label\" was already defined.\n\nparent_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
-    fn test_error_global_label_def_in_call() {
+    fn test_error_parent_label_def_in_call() {
         assert_eq!(value_lexer_error(
-            "CEIL(global_label:)"
+            "CEIL(parent_label:)"
 
-        ), "In file \"main.gb.s\" on line 1, column 6: Global label cannot be defined inside an argument list\n\nCEIL(global_label:)\n     ^--- Here");
+        ), "In file \"main.gb.s\" on line 1, column 6: A label cannot be defined inside an argument list\n\nCEIL(parent_label:)\n     ^--- Here");
     }
 
     #[test]
-    fn test_error_local_label_def_in_call() {
+    fn test_error_child_label_def_in_call() {
         assert_eq!(value_lexer_error(
-            "global_label:\nCEIL(.locall_label:)"
+            "parent_label:\nCEIL(.child_label:)"
 
-        ), "In file \"main.gb.s\" on line 2, column 6: Local label cannot be defined inside an argument list\n\nCEIL(.locall_label:)\n     ^--- Here");
+        ), "In file \"main.gb.s\" on line 2, column 6: A child label cannot be defined inside an argument list\n\nCEIL(.child_label:)\n     ^--- Here");
     }
 
     #[test]
-    fn test_local_label_def() {
-        assert_eq!(tfv("global_label:\n.local_label:\n.local_other_label:"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_def() {
+        assert_eq!(tfv("parent_label:\n.child_label:\n.child_other_label:"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::LocalLabelDef(
-            itk!(14, 27, "local_label"),
+        ), ValueToken::ChildLabelDef(
+            itk!(14, 27, "child_label"),
             2,
             None
 
-        ), ValueToken::LocalLabelDef(
-            itk!(28, 47, "local_other_label"),
+        ), ValueToken::ChildLabelDef(
+            itk!(28, 47, "child_other_label"),
             3,
             None
         )]);
     }
 
     #[test]
-    fn test_local_label_def_instruction() {
-        assert_eq!(tfv("global_label:\n.stop:"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_def_instruction() {
+        assert_eq!(tfv("parent_label:\n.stop:"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::LocalLabelDef(
+        ), ValueToken::ChildLabelDef(
             itk!(14, 20, "stop"),
             2,
             None
@@ -825,12 +825,12 @@ mod test {
     }
 
     #[test]
-    fn test_local_label_def_reserved() {
-        assert_eq!(tfv("global_label:\n.DS:"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_def_reserved() {
+        assert_eq!(tfv("parent_label:\n.DS:"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::LocalLabelDef(
+        ), ValueToken::ChildLabelDef(
             itk!(14, 18, "DS"),
             2,
             None
@@ -838,31 +838,31 @@ mod test {
     }
 
     #[test]
-    fn test_local_label_ref_backward() {
-        assert_eq!(tfv("global_label:\n.local_label:\n.local_label"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_ref_backward() {
+        assert_eq!(tfv("parent_label:\n.child_label:\n.child_label"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::LocalLabelDef(
-            itk!(14, 27, "local_label"),
+        ), ValueToken::ChildLabelDef(
+            itk!(14, 27, "child_label"),
             2,
             None
 
-        ), ValueToken::LocalLabelRef(
-            itk!(28, 40, "local_label"),
+        ), ValueToken::ChildLabelRef(
+            itk!(28, 40, "child_label"),
             2,
             None
         )]);
     }
 
     #[test]
-    fn test_local_label_ref_backward_builtin_call() {
-        assert_eq!(tfv("global_label:\n.local_label:\nCEIL(.local_label)"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_ref_backward_builtin_call() {
+        assert_eq!(tfv("parent_label:\n.child_label:\nCEIL(.child_label)"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::LocalLabelDef(
-            itk!(14, 27, "local_label"),
+        ), ValueToken::ChildLabelDef(
+            itk!(14, 27, "child_label"),
             2,
             None
 
@@ -870,8 +870,8 @@ mod test {
             itk!(28, 32, "CEIL"),
             vec![
                 vec![
-                    ValueToken::LocalLabelRef(
-                        itf!(33, 45, "local_label", 0),
+                    ValueToken::ChildLabelRef(
+                        itf!(33, 45, "child_label", 0),
                         2,
                         None
                     )
@@ -881,72 +881,72 @@ mod test {
     }
 
     #[test]
-    fn test_local_label_ref_forward() {
-        assert_eq!(tfv("global_label:\n.local_label\n.local_label:"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_ref_forward() {
+        assert_eq!(tfv("parent_label:\n.child_label\n.child_label:"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
-        ), ValueToken::LocalLabelRef(
-            itk!(14, 26, "local_label"),
+        ), ValueToken::ChildLabelRef(
+            itk!(14, 26, "child_label"),
             2,
             None
 
-        ), ValueToken::LocalLabelDef(
-            itk!(27, 40, "local_label"),
+        ), ValueToken::ChildLabelDef(
+            itk!(27, 40, "child_label"),
             2,
             None
         )]);
     }
 
     #[test]
-    fn test_local_label_ref_forward_builtin_call() {
-        assert_eq!(tfv("global_label:\nCEIL(.local_label)\n.local_label:"), vec![ValueToken::GlobalLabelDef(
-            itk!(0, 13, "global_label"),
+    fn test_child_label_ref_forward_builtin_call() {
+        assert_eq!(tfv("parent_label:\nCEIL(.child_label)\n.child_label:"), vec![ValueToken::ParentLabelDef(
+            itk!(0, 13, "parent_label"),
             1
 
         ), ValueToken::BuiltinCall(
             itk!(14, 18, "CEIL"),
             vec![
                 vec![
-                    ValueToken::LocalLabelRef( itf!(19, 31, "local_label", 0), 2, None)
+                    ValueToken::ChildLabelRef( itf!(19, 31, "child_label", 0), 2, None)
                 ]
             ]
-        ), ValueToken::LocalLabelDef(
-            itk!(33, 46, "local_label"),
+        ), ValueToken::ChildLabelDef(
+            itk!(33, 46, "child_label"),
             2,
             None
         )]);
     }
 
     #[test]
-    fn test_local_label_ref_forward_macro_intercept() {
+    fn test_child_label_ref_forward_macro_intercept() {
         assert_eq!(
-            tfv("global_label:\n.local_label\nFOO()\n.local_label:\nMACRO FOO()\n_macro_label:\n.macro_local\n.macro_local:ENDMACRO"), vec![
-            ValueToken::GlobalLabelDef(
-                itk!(0, 13, "global_label"),
+            tfv("parent_label:\n.child_label\nFOO()\n.child_label:\nMACRO FOO()\n_macro_label:\n.macro_child\n.macro_child:ENDMACRO"), vec![
+            ValueToken::ParentLabelDef(
+                itk!(0, 13, "parent_label"),
                 1
 
-            ), ValueToken::LocalLabelRef(
-                itk!(14, 26, "local_label"),
+            ), ValueToken::ChildLabelRef(
+                itk!(14, 26, "child_label"),
                 4,
                 None
 
-            ), ValueToken::GlobalLabelDef(
+            ), ValueToken::ParentLabelDef(
                 itkm!(59, 72, "_macro_label", 0),
                 2
 
-            ), ValueToken::LocalLabelRef(
-                itkm!(73, 85, "macro_local", 0),
+            ), ValueToken::ChildLabelRef(
+                itkm!(73, 85, "macro_child", 0),
                 3,
                 Some(0)
 
-            ), ValueToken::LocalLabelDef(
-                itkm!(86, 99, "macro_local", 0),
+            ), ValueToken::ChildLabelDef(
+                itkm!(86, 99, "macro_child", 0),
                 3,
                 Some(0)
 
-            ), ValueToken::LocalLabelDef(
-                itk!(33, 46, "local_label"),
+            ), ValueToken::ChildLabelDef(
+                itk!(33, 46, "child_label"),
                 4,
                 None
             )
@@ -954,69 +954,69 @@ mod test {
     }
 
     #[test]
-    fn test_error_local_label_ref_no_macro_leak() {
-        assert_eq!(value_lexer_error("global_label:\n.local_label\nFOO()\nMACRO FOO()_macro_label:\n.local_label:\nENDMACRO"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown local label \"local_label\", not defined under the current global label \"global_label\".\n\n.local_label\n^--- Here\n\nDefinition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+    fn test_error_child_label_ref_no_macro_leak() {
+        assert_eq!(value_lexer_error("parent_label:\n.child_label\nFOO()\nMACRO FOO()_macro_label:\n.child_label:\nENDMACRO"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\n.child_label\n^--- Here\n\nDefinition of parent label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
     fn test_label_macro_postfix() {
-        assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.local_macro_label_def:\n.local_macro_label_def\nENDMACRO"), vec![
-            ValueToken::GlobalLabelDef(
+        assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.child_macro_label_def:\n.child_macro_label_def\nENDMACRO"), vec![
+            ValueToken::ParentLabelDef(
                 itkm!(24, 40, "macro_label_def", 0), 1
             ),
-            ValueToken::LocalLabelDef(itkm!(41, 64, "local_macro_label_def", 0), 2, Some(0)),
-            ValueToken::LocalLabelRef(itkm!(65, 87, "local_macro_label_def", 0), 2, Some(0)),
-            ValueToken::GlobalLabelDef(itkm!(24, 40, "macro_label_def", 1), 3),
-            ValueToken::LocalLabelDef(itkm!(41, 64, "local_macro_label_def", 1), 4, Some(1)),
-            ValueToken::LocalLabelRef(itkm!(65, 87, "local_macro_label_def", 1), 4, Some(1))
+            ValueToken::ChildLabelDef(itkm!(41, 64, "child_macro_label_def", 0), 2, Some(0)),
+            ValueToken::ChildLabelRef(itkm!(65, 87, "child_macro_label_def", 0), 2, Some(0)),
+            ValueToken::ParentLabelDef(itkm!(24, 40, "macro_label_def", 1), 3),
+            ValueToken::ChildLabelDef(itkm!(41, 64, "child_macro_label_def", 1), 4, Some(1)),
+            ValueToken::ChildLabelRef(itkm!(65, 87, "child_macro_label_def", 1), 4, Some(1))
         ]);
     }
 
     #[test]
-    fn test_macro_arg_global_label_ref() {
-        assert_eq!(tfv("global:\nMACRO FOO(@a) DB @a ENDMACRO\nFOO(global)"), vec![
-            ValueToken::GlobalLabelDef(
-                itk!(0, 7, "global"), 1
+    fn test_macro_arg_parent_label_ref() {
+        assert_eq!(tfv("parent:\nMACRO FOO(@a) DB @a ENDMACRO\nFOO(parent)"), vec![
+            ValueToken::ParentLabelDef(
+                itk!(0, 7, "parent"), 1
             ),
             vtkm!(Reserved, 22, 24, "DB", 0),
-            ValueToken::GlobalLabelRef(
-                itkm!(41, 47, "global", 0),
+            ValueToken::ParentLabelRef(
+                itkm!(41, 47, "parent", 0),
                 1
             )
         ]);
     }
 
     #[test]
-    fn test_error_local_label_def_outside_global() {
-        assert_eq!(value_lexer_error(".local_label:"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of local label \"local_label\" before any global label was defined.\n\n.local_label:\n^--- Here");
+    fn test_error_child_label_def_outside_parent() {
+        assert_eq!(value_lexer_error(".child_label:"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label:\n^--- Here");
     }
 
     #[test]
-    fn test_error_local_label_ref_outside_global() {
-        assert_eq!(value_lexer_error(".local_label"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reference to local label \"local_label\" before any global label was defined.\n\n.local_label\n^--- Here");
+    fn test_error_child_label_ref_outside_parent() {
+        assert_eq!(value_lexer_error(".child_label"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label\n^--- Here");
     }
 
     #[test]
-    fn test_error_local_label_ref_without_def() {
-        assert_eq!(value_lexer_error("global_label:\n.local_label"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown local label \"local_label\", not defined under the current global label \"global_label\".\n\n.local_label\n^--- Here\n\nDefinition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+    fn test_error_child_label_ref_without_def() {
+        assert_eq!(value_lexer_error("parent_label:\n.child_label"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\n.child_label\n^--- Here\n\nDefinition of parent label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
-    fn test_error_local_label_ref_without_def_in_builtin_call() {
-        assert_eq!(value_lexer_error("global_label:\nCEIL(.local_label)"), "In file \"main.gb.s\" on line 2, column 6: Reference to unknown local label \"local_label\", not defined under the current global label \"global_label\".\n\nCEIL(.local_label)\n     ^--- Here\n\nDefinition of global label was in file \"main.gb.s\" on line 1, column 1:\n\nglobal_label:\n^--- Here");
+    fn test_error_child_label_ref_without_def_in_builtin_call() {
+        assert_eq!(value_lexer_error("parent_label:\nCEIL(.child_label)"), "In file \"main.gb.s\" on line 2, column 6: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\nCEIL(.child_label)\n     ^--- Here\n\nDefinition of parent label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
-    fn test_error_local_label_def_duplicate() {
+    fn test_error_child_label_def_duplicate() {
         assert_eq!(
-            value_lexer_error("global_label:\n.local_label:\n.local_label:"),
-            "In file \"main.gb.s\" on line 3, column 1: Local label \"local_label\" was already defined under the current global label \"global_label\".\n\n.local_label:\n^--- Here\n\nOriginal definition of local label was in file \"main.gb.s\" on line 2, column 1:\n\n.local_label:\n^--- Here"
+            value_lexer_error("parent_label:\n.child_label:\n.child_label:"),
+            "In file \"main.gb.s\" on line 3, column 1: child label \"child_label\" was already defined under the current parent label \"parent_label\".\n\n.child_label:\n^--- Here\n\nOriginal definition of child label was in file \"main.gb.s\" on line 2, column 1:\n\n.child_label:\n^--- Here"
         );
     }
 
     #[test]
-    fn test_error_local_label_def() {
-        assert_eq!(value_lexer_error(".4"), "In file \"main.gb.s\" on line 1, column 2: Unexpected token \"NumberLiteral\" when parsing local label, expected a \"Name\" token instead.\n\n.4\n ^--- Here");
+    fn test_error_child_label_def() {
+        assert_eq!(value_lexer_error(".4"), "In file \"main.gb.s\" on line 1, column 2: Unexpected token \"NumberLiteral\" when parsing child label, expected a \"Name\" token instead.\n\n.4\n ^--- Here");
     }
 
     #[test]
@@ -1191,14 +1191,14 @@ mod test {
     // Block Label IDs --------------------------------------------------------
     #[test]
     fn test_label_ref_block() {
-        let lexer = value_lexer("BLOCK VOLATILE\nglobal:\n.local:\nDB .local\nENDBLOCK");
+        let lexer = value_lexer("BLOCK VOLATILE\nparent:\n.child:\nDB .child\nENDBLOCK");
         assert_eq!(lexer.tokens, vec![
             ValueToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
                 vec![
-                    ValueToken::GlobalLabelDef(itk!(15, 22, "global"), 1),
-                    ValueToken::LocalLabelDef(itk!(23, 30, "local"), 2, None),
+                    ValueToken::ParentLabelDef(itk!(15, 22, "parent"), 1),
+                    ValueToken::ChildLabelDef(itk!(23, 30, "child"), 2, None),
                     ValueToken::Reserved(itk!(31, 33, "DB")),
-                    ValueToken::LocalLabelRef(itk!(34, 40, "local"), 2, None)
+                    ValueToken::ChildLabelRef(itk!(34, 40, "child"), 2, None)
                 ]
             ))
         ]);
@@ -1206,16 +1206,16 @@ mod test {
 
     #[test]
     fn test_label_ref_if_statement() {
-        let lexer = value_lexer("IF foo THEN\nglobal:\n.local:\nDB .local\nENDIF");
+        let lexer = value_lexer("IF foo THEN\nparent:\n.child:\nDB .child\nENDIF");
         assert_eq!(lexer.tokens, vec![
             ValueToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
                     condition: Some(vec![ValueToken::Name(itk!(3, 6, "foo"))]),
                     body: vec![
-                        ValueToken::GlobalLabelDef(itk!(12, 19, "global"), 1),
-                        ValueToken::LocalLabelDef(itk!(20, 27, "local"), 2, None),
+                        ValueToken::ParentLabelDef(itk!(12, 19, "parent"), 1),
+                        ValueToken::ChildLabelDef(itk!(20, 27, "child"), 2, None),
                         ValueToken::Reserved(itk!(28, 30, "DB")),
-                        ValueToken::LocalLabelRef(itk!(31, 37, "local"), 2, None)
+                        ValueToken::ChildLabelRef(itk!(31, 37, "child"), 2, None)
                     ]
                 }
             ])
@@ -1224,7 +1224,7 @@ mod test {
 
     #[test]
     fn test_label_ref_for_statement() {
-        let lexer = value_lexer("FOR x IN 0 TO 10 REPEAT\nglobal:\n.local:\nDB .local\nENDFOR");
+        let lexer = value_lexer("FOR x IN 0 TO 10 REPEAT\nparent:\n.child:\nDB .child\nENDFOR");
         assert_eq!(lexer.tokens, vec![
             ValueToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
                 binding: Box::new(ValueToken::Name(itk!(4, 5, "x"))),
@@ -1237,10 +1237,10 @@ mod test {
                     value: 10
                 }],
                 body: vec![
-                    ValueToken::GlobalLabelDef(itk!(24, 31, "global"), 1),
-                    ValueToken::LocalLabelDef(itk!(32, 39, "local"), 2, None),
+                    ValueToken::ParentLabelDef(itk!(24, 31, "parent"), 1),
+                    ValueToken::ChildLabelDef(itk!(32, 39, "child"), 2, None),
                     ValueToken::Reserved(itk!(40, 42, "DB")),
-                    ValueToken::LocalLabelRef(itk!(43, 49, "local"), 2, None)
+                    ValueToken::ChildLabelRef(itk!(43, 49, "child"), 2, None)
                 ]
             })
         ]);

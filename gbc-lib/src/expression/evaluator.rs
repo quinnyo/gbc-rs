@@ -189,10 +189,10 @@ impl EvaluatorContext {
                         let relative_address_offset = address_offset.expect("Address offset without supplied base address");
                         ExpressionResult::Integer(relative_address_offset + offset)
                     },
-                    ExpressionValue::GlobalLabelAddress(_, id) => {
+                    ExpressionValue::ParentLabelAddress(_, id) => {
                         ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
                     },
-                    ExpressionValue::LocalLabelAddress(_, id) => {
+                    ExpressionValue::ChildLabelAddress(_, id) => {
                         ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
                     }
                 })
@@ -278,11 +278,11 @@ impl EvaluatorContext {
                     ExpressionValue::OffsetAddress(_, _) => {
                         unreachable!("Invalid constant expression containing OffsetAddress");
                     },
-                    ExpressionValue::GlobalLabelAddress(_, _) => {
-                        unreachable!("Invalid constant expression containing GlobalLabelAddress");
+                    ExpressionValue::ParentLabelAddress(_, _) => {
+                        unreachable!("Invalid constant expression containing ParentLabelAddress");
                     },
-                    ExpressionValue::LocalLabelAddress(_, _) => {
-                        unreachable!("Invalid constant expression containing LocalLabelAddress");
+                    ExpressionValue::ChildLabelAddress(_, _) => {
+                        unreachable!("Invalid constant expression containing ChildLabelAddress");
                     }
                 })
             },

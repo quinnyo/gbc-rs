@@ -42,8 +42,8 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     InstructionWithArg((u16, DataExpression)),
     DebugInstruction((u16)),
     DebugInstructionWithArg((u16, DataExpression)),
-    GlobalLabelDef((usize)),
-    LocalLabelDef((usize)),
+    ParentLabelDef((usize)),
+    ChildLabelDef((usize)),
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
     IfStatement((Vec<IfStatementBranch>)),
     // FOR [Sring] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
@@ -166,8 +166,8 @@ impl EntryStage {
             let entry = match token {
 
                 // Passthrough Label Defs
-                ExpressionToken::GlobalLabelDef(inner, id) => EntryToken::GlobalLabelDef(inner, id),
-                ExpressionToken::LocalLabelDef(inner, id) => EntryToken::LocalLabelDef(inner, id),
+                ExpressionToken::ParentLabelDef(inner, id) => EntryToken::ParentLabelDef(inner, id),
+                ExpressionToken::ChildLabelDef(inner, id) => EntryToken::ChildLabelDef(inner, id),
 
                 // If Statements
                 ExpressionToken::IfStatement(inner, branches) => {
@@ -1583,7 +1583,7 @@ mod test {
 
     #[test]
     fn test_passthrough_global_label_def() {
-        assert_eq!(tfe("global_label:"), vec![EntryToken::GlobalLabelDef(
+        assert_eq!(tfe("global_label:"), vec![EntryToken::ParentLabelDef(
             itk!(0, 13, "global_label"),
             1
         )]);
@@ -1591,11 +1591,11 @@ mod test {
 
     #[test]
     fn test_passthrough_local_label_def() {
-        assert_eq!(tfe("global_label:\n.local_label:"), vec![EntryToken::GlobalLabelDef(
+        assert_eq!(tfe("global_label:\n.local_label:"), vec![EntryToken::ParentLabelDef(
             itk!(0, 13, "global_label"),
             1
 
-        ), EntryToken::LocalLabelDef(
+        ), EntryToken::ChildLabelDef(
             itk!(14, 27, "local_label"),
             2
         )]);
@@ -1750,14 +1750,14 @@ mod test {
             is_constant: true,
             debug_only: false
         }]);
-        assert_eq!(tfe("global:\nDB global"), vec![EntryToken::GlobalLabelDef(
+        assert_eq!(tfe("global:\nDB global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
             1
         ), EntryToken::Data {
             inner: itk!(8, 10, "DB"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            storage: DataStorage::Bytes(vec![Expression::Value(ExpressionValue::ParentLabelAddress(itk!(11, 17, "global"), 1))]),
             is_constant: false,
             debug_only: false
         }]);
@@ -1810,14 +1810,14 @@ mod test {
             is_constant: true,
             debug_only: false
         }]);
-        assert_eq!(tfe("global:\nDW global"), vec![EntryToken::GlobalLabelDef(
+        assert_eq!(tfe("global:\nDW global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
             1
         ), EntryToken::Data {
             inner: itk!(8, 10, "DW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Little,
-            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::ParentLabelAddress(itk!(11, 17, "global"), 1))]),
             is_constant: false,
             debug_only: false
         }]);
@@ -1870,14 +1870,14 @@ mod test {
             is_constant: true,
             debug_only: false
         }]);
-        assert_eq!(tfe("global:\nBW global"), vec![EntryToken::GlobalLabelDef(
+        assert_eq!(tfe("global:\nBW global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
             1
         ), EntryToken::Data {
             inner: itk!(8, 10, "BW"),
             alignment: DataAlignment::Byte,
             endianess: DataEndianess::Big,
-            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(11, 17, "global"), 1))]),
+            storage: DataStorage::Words(vec![Expression::Value(ExpressionValue::ParentLabelAddress(itk!(11, 17, "global"), 1))]),
             is_constant: false,
             debug_only: false
         }]);

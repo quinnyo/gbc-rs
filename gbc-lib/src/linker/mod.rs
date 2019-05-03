@@ -1012,7 +1012,7 @@ mod test {
     fn test_error_block_using() {
         assert_eq!(linker_error("BLOCK USING 'cmd' nop ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected Instruction, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' nop ENDBLOCK\n                  ^--- Here");
         assert_eq!(linker_error("global:\nBLOCK USING 'cmd' DW global ENDBLOCK"), "In file \"main.gb.s\" on line 2, column 19: Only constant Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' DW global ENDBLOCK\n                  ^--- Here");
-        assert_eq!(linker_error("BLOCK USING 'cmd' global: ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected GlobalLabelDef, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' global: ENDBLOCK\n                  ^--- Here");
+        assert_eq!(linker_error("BLOCK USING 'cmd' global: ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected ParentLabelDef, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' global: ENDBLOCK\n                  ^--- Here");
     }
 
     #[test]

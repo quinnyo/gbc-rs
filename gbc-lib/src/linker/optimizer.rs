@@ -323,7 +323,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 2))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(18, 24, "global"), 2))),
                     bytes: vec![205, 130, 0],
                     volatile: false,
                     debug_only: false
@@ -458,7 +458,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![195, 130, 0],
                     volatile: false,
                     debug_only: false
@@ -488,7 +488,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![24, 127],
                     volatile: false,
                     debug_only: false
@@ -518,7 +518,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![24, 127],
                     volatile: false,
                     debug_only: false
@@ -544,7 +544,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 24,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(42, 48, "global"), 1))),
                     bytes: vec![24, 130],
                     volatile: false,
                     debug_only: false
@@ -557,7 +557,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 56,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![56, 127],
                     volatile: false,
                     debug_only: false
@@ -576,7 +576,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 48,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(19, 25, "global"), 1))),
                     bytes: vec![48, 127],
                     volatile: false,
                     debug_only: false
@@ -595,7 +595,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 40,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(18, 24, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(18, 24, "global"), 1))),
                     bytes: vec![40, 127],
                     volatile: false,
                     debug_only: false
@@ -614,7 +614,7 @@ mod test {
             vec![
                 (2, EntryData::Instruction {
                     op_code: 32,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(19, 25, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(19, 25, "global"), 1))),
                     bytes: vec![32, 127],
                     volatile: false,
                     debug_only: false
@@ -637,7 +637,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![195, 129, 0],
                     volatile: false,
                     debug_only: false
@@ -667,7 +667,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(16, 22, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(16, 22, "global"), 1))),
                     bytes: vec![195, 130, 0],
                     volatile: false,
                     debug_only: false
@@ -693,7 +693,7 @@ mod test {
             vec![
                 (3, EntryData::Instruction {
                     op_code: 195,
-                    expression: Some(Expression::Value(ExpressionValue::GlobalLabelAddress(itk!(42, 48, "global"), 1))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(42, 48, "global"), 1))),
                     bytes: vec![195, 0, 0],
                     volatile: false,
                     debug_only: false

@@ -80,8 +80,8 @@ pub enum ExpressionValue {
     Float(OrderedFloat<f32>),
     String(String),
     OffsetAddress(InnerToken, i32),
-    GlobalLabelAddress(InnerToken, usize),
-    LocalLabelAddress(InnerToken, usize)
+    ParentLabelAddress(InnerToken, usize),
+    ChildLabelAddress(InnerToken, usize)
 }
 
 impl ExpressionValue {
@@ -89,7 +89,7 @@ impl ExpressionValue {
     fn is_constant(&self) -> bool {
         match self {
             ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
-            ExpressionValue::OffsetAddress(_, _) | ExpressionValue::GlobalLabelAddress(_, _) | ExpressionValue::LocalLabelAddress(_, _) => false
+            ExpressionValue::OffsetAddress(_, _) | ExpressionValue::ParentLabelAddress(_, _) | ExpressionValue::ChildLabelAddress(_, _) => false
         }
     }
 
