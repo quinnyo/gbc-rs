@@ -29,6 +29,7 @@ pub struct EvaluatorContext {
     constants: HashMap<ConstantIndex, ExpressionResult>,
     raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,
     label_addresses: HashMap<usize, usize>,
+    raw_labels: HashMap<Symbol, InnerToken>,
     relative_address_offset: i32
 }
 
@@ -40,6 +41,7 @@ impl EvaluatorContext {
             constants: HashMap::new(),
             raw_constants: HashMap::new(),
             label_addresses: HashMap::new(),
+            raw_labels: HashMap::new(),
             relative_address_offset: 0
         }
     }
@@ -74,6 +76,10 @@ impl EvaluatorContext {
                 expression: value
             });
         }
+    }
+
+    pub fn declare_label(&mut self, inner: &InnerToken) {
+        self.raw_labels.insert(inner.value.clone(), inner.clone());
     }
 
     pub fn update_label_address(&mut self, label_id: usize, address: usize) {
@@ -308,7 +314,13 @@ impl EvaluatorContext {
                 return error.with_reference(&constant.inner, "A non-global constant with the same name is defined");
             }
         }
-        error
+
+        if let Some(inner) = self.raw_labels.get(&name) {
+            error.with_reference(inner, "A non-global label with the same name is defined")
+
+        } else {
+            error
+        }
     }
 
     fn declare_constant_inline(

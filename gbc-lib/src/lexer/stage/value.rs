@@ -283,10 +283,7 @@ impl ValueStage {
         if tokens.peek_is(MacroTokenType::Colon, None) {
 
             let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing label definition")?.into_inner();
-
-            // TODO differentiate via is_global instead
-            let is_private = inner.value.as_str().starts_with('_');
-            let label_id = LabelResolver::parent_label_id(&inner, false, if is_private {
+            let label_id = LabelResolver::parent_label_id(&inner, false, if !is_global {
                 Some(inner.file_index)
 
             } else {
@@ -295,7 +292,6 @@ impl ValueStage {
 
             if let Some((previous, _)) = parent_labels.get(&label_id) {
                 Err(inner.error(format!(
-                    // TODO rename to ParentLabel and ChildLabel
                     "A label with the name \"{}\" was already defined.",
                     inner.value
 
@@ -769,12 +765,65 @@ mod test {
     }
 
     #[test]
-    fn test_error_parent_label_def_duplicate_child() {
-        assert_eq!(value_lexer_child_error(
+    fn test_parent_label_def_child_both_local() {
+        let tokens = value_lexer_child(
             "parent_label:\nINCLUDE 'child.gb.s'",
             "parent_label:"
+        ).tokens;
 
-        ), "In file \"child.gb.s\" on line 1, column 1: A label with the name \"parent_label\" was already defined.\n\nparent_label:\n^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
+        assert_eq!(tokens, vec![
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 0), 1),
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 1), 2)
+        ]);
+    }
+
+    #[test]
+    fn test_parent_label_def_child_one_local() {
+        let tokens = value_lexer_child(
+            "GLOBAL parent_label:\nINCLUDE 'child.gb.s'",
+            "parent_label:"
+        ).tokens;
+
+        assert_eq!(tokens, vec![
+            ValueToken::ParentLabelDef(itf!(7, 20, "parent_label", 0), 1),
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 1), 2)
+        ]);
+    }
+
+
+    #[test]
+    fn test_parent_label_ref_global_from_child() {
+        let tokens = value_lexer_child(
+            "GLOBAL parent_label:\nINCLUDE 'child.gb.s'",
+            "parent_label"
+        ).tokens;
+
+        assert_eq!(tokens, vec![
+            ValueToken::ParentLabelDef(itf!(7, 20, "parent_label", 0), 1),
+            ValueToken::ParentLabelRef(itf!(0, 12, "parent_label", 1), 1)
+        ]);
+    }
+
+    #[test]
+    fn test_parent_label_ref_local_child_keep_name() {
+        let tokens = value_lexer_child(
+            "parent_label:\nINCLUDE 'child.gb.s'",
+            "parent_label"
+        ).tokens;
+
+        assert_eq!(tokens, vec![
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 0), 1),
+            ValueToken::Name(itf!(0, 12, "parent_label", 1))
+        ]);
+    }
+
+    #[test]
+    fn test_error_parent_label_def_duplicate_global_child() {
+        assert_eq!(value_lexer_child_error(
+            "GLOBAL parent_label:\nINCLUDE 'child.gb.s'",
+            "GLOBAL parent_label:"
+
+        ), "In file \"child.gb.s\" on line 1, column 8: A label with the name \"parent_label\" was already defined.\n\nGLOBAL parent_label:\n       ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 8:\n\nGLOBAL parent_label:\n       ^--- Here");
     }
 
     #[test]

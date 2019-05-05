@@ -217,6 +217,11 @@ impl Linker {
                     ));
                 }
 
+            // Note label definitions for error messages
+            } else if let EntryToken::ParentLabelDef(ref inner, _) = token {
+                context.declare_label(inner);
+                remaining_tokens.push((volatile_instructions, token));
+
             // Evaluate if conditions and insert the corresponding branch into
             // the output tokens
             } else if let EntryToken::IfStatement(inner, branches) = token {
@@ -405,10 +410,12 @@ mod test {
     }
 
     pub fn linker_error_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> String {
+        colored::control::set_override(false);
         Linker::from_lexer(reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_error<S: Into<String>>(s: S) -> String {
+        colored::control::set_override(false);
         let reader = MockFileReader::default();
         Linker::from_lexer(&reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
     }
@@ -419,6 +426,7 @@ mod test {
     }
 
     pub fn linker_error_child<S: Into<String>>(s: S, c: S) -> String {
+        colored::control::set_override(false);
         let reader = MockFileReader::default();
         Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false).err().expect("Expected a Linker Error").to_string()
     }
@@ -498,6 +506,11 @@ mod test {
         assert_eq!(linker_error_child("A EQU 1 + B\nINCLUDE 'child.gb.s'", "B EQU 1"), "In file \"main.gb.s\" on line 1, column 11: Reference to undeclared constant \"B\".\n\nA EQU 1 + B\n          ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nB EQU 1\n^--- Here");
         assert_eq!(linker_error_child("A EQU 1\nINCLUDE 'child.gb.s'", "B EQU A"), "In file \"child.gb.s\" on line 1, column 7: Reference to undeclared constant \"A\".\n\nB EQU A\n      ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 1:\n\nA EQU 1\n^--- Here");
         assert_eq!(linker_error_child("A EQU 1\nINCLUDE 'child.gb.s'", "B EQU 1 + A"), "In file \"child.gb.s\" on line 1, column 11: Reference to undeclared constant \"A\".\n\nB EQU 1 + A\n          ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 1:\n\nA EQU 1\n^--- Here");
+    }
+
+    #[test]
+    fn test_error_label_lookup_file_local() {
+        assert_eq!(linker_error_child("SECTION ROM0\nINCLUDE 'child.gb.s'\nDW child_label", "child_label:"), "In file \"main.gb.s\" on line 3, column 4: Reference to undeclared constant \"child_label\".\n\nDW child_label\n   ^--- Here\n\nA non-global label with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nchild_label:\n^--- Here");
     }
 
     // Section Mapping --------------------------------------------------------
