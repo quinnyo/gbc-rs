@@ -69,11 +69,11 @@ impl MMP {
         let instruments: Vec<String> = instruments.iter().map(Self::instrument_to_string).collect();
 
         format!(r#"; MMP Frequency Table ---------------------------------------------------------
-mmp_frequency_table:
+GLOBAL mmp_frequency_table:
     DW {}
 
 ; MMP Instrument Table --------------------------------------------------------
-mmp_player_instrument_index:
+GLOBAL mmp_player_instrument_index:
 {}
 
 {}
@@ -91,7 +91,7 @@ mmp_player_instrument_index:
         match instrument {
             Instrument::Square1 { name, envelope, sweep, .. } => {
                 format!(r#"; Instrument
-instrument_{}:
+GLOBAL instrument_{}:
     ; Channel (SQ1)
     DB      ${:0>2X}
 
@@ -116,7 +116,7 @@ instrument_{}:
             },
             Instrument::Square2 { name, envelope, .. } => {
                 format!(r#"; Instrument
-instrument_{}:
+GLOBAL instrument_{}:
     ; Channel (SQ2)
     DB      ${:0>2X}
 
@@ -134,7 +134,7 @@ instrument_{}:
             },
             Instrument::PCM { name, volume, samples } => {
                 format!(r#"; Instrument
-instrument_{}:
+GLOBAL instrument_{}:
     ; Channel (PCM)
     DB      ${:0>2X}
 
@@ -160,7 +160,7 @@ instrument_{}:
             },
             Instrument::Noise { name, envelope, .. } => {
                 format!(r#"; Instrument
-instrument_{}:
+GLOBAL instrument_{}:
     ; Channel (Noise)
     DB      ${:0>2X}
 
@@ -181,7 +181,7 @@ instrument_{}:
 
     fn track_to_string(track: &CommandTrack, unique_notes: &[usize], instruments: &[Instrument]) -> String {
         let commands: Vec<String> = track.commands.iter().map(|c| Self::command_to_string(c, unique_notes, instruments)).collect();
-        format!("mmp_track_{}:\n{}", track.name, commands.join(""))
+        format!("GLOBAL mmp_track_{}:\n{}", track.name, commands.join(""))
     }
 
     fn command_to_string(command: &Command, unique_notes: &[usize], instruments: &[Instrument]) -> String {
