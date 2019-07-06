@@ -1019,6 +1019,11 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2049 REPEAT ENDFOR"), "In file \"main.gb.s\" on line 2, column 1: FOR statement with 2049 iterations exceeds the maximum of 2048 allowed iterations.\n\nFOR x IN 0 TO 2049 REPEAT ENDFOR\n^--- Here");
     }
 
+    // Macros -----------------------------------------------------------------
+    #[test]
+    fn test_macro_jump_to_internal_parent_label() {
+        linker("SECTION ROM0\nMACRO FOO() parent:\njr parent\n ENDMACRO\nFOO()");
+    }
 
     // Blocks -----------------------------------------------------------------
     #[test]

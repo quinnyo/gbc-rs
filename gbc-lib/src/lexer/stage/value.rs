@@ -1036,6 +1036,22 @@ mod test {
     }
 
     #[test]
+    fn test_macro_parent_label_ref() {
+        assert_eq!(tfv("MACRO FOO() parent_label:\nparent_label\n ENDMACRO\nFOO()"), vec![
+            ValueToken::ParentLabelDef(itkm!(12, 25, "parent_label", 0), 1),
+            ValueToken::ParentLabelRef(itkm!(26, 38, "parent_label", 0), 1)
+        ]);
+    }
+
+    #[test]
+    fn test_macro_child_label_ref_with_external_parent() {
+        assert_eq!(
+            value_lexer_error("MACRO FOO() .child_label:\n.child_label\n ENDMACRO\nparent_label:\nFOO()"),
+            "In file \"main.gb.s\" on line 2, column 1: Reference to child label inside of macro without a any parent label inside the macro.\n\n.child_label\n^--- Here\n\nIn file \"main.gb.s\" on line 5, column 1: Triggered by previous macro invocation\n\nFOO()\n^--- Here"
+        );
+    }
+
+    #[test]
     fn test_error_child_label_def_outside_parent() {
         assert_eq!(value_lexer_error(".child_label:"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label:\n^--- Here");
     }

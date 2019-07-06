@@ -62,8 +62,12 @@ impl LabelResolver {
         tokens.into_iter().map(|token| {
             if let ValueToken::Name(inner) = token {
 
-                // Local Lookup
-                if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, Some(inner.file_index))) {
+                // Macro Internal Lookup
+                if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
+                    ValueToken::ParentLabelRef(inner, *id)
+
+                // File Local Lookup
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, Some(inner.file_index))) {
                     ValueToken::ParentLabelRef(inner, *id)
 
                 // Global Lookup
@@ -98,7 +102,7 @@ impl LabelResolver {
             true,
             None,
             None
-        );
+        )?;
 
         // Verify any open parent label scopes
         for (_, mut parent_label) in parent_label_map.drain() {
@@ -190,13 +194,13 @@ impl LabelResolver {
         call_parent: ChildCallIndex,
         stmt_parent: Option<usize>
 
-    ) -> Option<ChildLabelError> {
+    ) -> Result<Option<ChildLabelError>, SourceError> {
         for (index, token) in tokens.iter_mut().enumerate() {
             match token {
                 ValueToken::ParentLabelDef(inner, _) if parent_def_allowed => {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(error) = Self::verify_child_label_refs_under_parent(parent_label.take(), child_label_refs) {
-                        return Some(error);
+                        return Ok(Some(error));
                     }
                     *parent_label = Some((index, Vec::new(), Vec::new()));
                 },
@@ -210,6 +214,12 @@ impl LabelResolver {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(parent_label) = parent_label.as_mut() {
                         parent_label.2.push(((inner.value.clone(), call_id.clone()), index, call_parent, stmt_parent));
+
+                    // Child labels in macros must have a local parent
+                    } else if inner.macro_call_id.is_some() {
+                        return Err(inner.error(format!(
+                            "Reference to child label inside of macro without a any parent label inside the macro."
+                        )));
                     }
                 },
                 ValueToken::BuiltinCall(_, arguments) => {
@@ -221,8 +231,8 @@ impl LabelResolver {
                             false,
                             Some((index, arg_index)),
                             None
-                        ) {
-                            return Some(error);
+                        )? {
+                            return Ok(Some(error));
                         }
                     }
                 },
@@ -234,8 +244,8 @@ impl LabelResolver {
                         true,
                         None,
                         Some(index)
-                    ) {
-                        return Some(error);
+                    )? {
+                        return Ok(Some(error));
                     }
                 },
                 ValueToken::IfStatement(_, if_branches) => {
@@ -247,8 +257,8 @@ impl LabelResolver {
                             true,
                             Some((index, branch_index)),
                             None
-                        ) {
-                            return Some(error);
+                        )? {
+                            return Ok(Some(error));
                         }
                     }
                 },
@@ -262,8 +272,8 @@ impl LabelResolver {
                                 true,
                                 None,
                                 Some(index)
-                            ) {
-                                return Some(error);
+                            )? {
+                                return Ok(Some(error));
                             }
                         }
                     }
@@ -271,7 +281,7 @@ impl LabelResolver {
                 _ => {}
             }
         }
-        None
+        Ok(None)
     }
 
     fn verify_child_label_refs_under_parent(
