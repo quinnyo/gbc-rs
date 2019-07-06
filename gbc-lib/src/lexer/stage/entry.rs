@@ -239,7 +239,7 @@ impl EntryStage {
                 ExpressionToken::MetaInstruction(inner) => {
                     entry_tokens.append(&mut Self::parse_meta_instruction(&mut tokens, inner)?);
                     continue;
-                }
+                },
 
                 // Binary Data Declarations
                 ExpressionToken::BinaryFile(inner, bytes) => {
@@ -328,6 +328,27 @@ impl EntryStage {
                         },
                         Symbol::DS16 => {
                             Self::parse_data_directive_ds(&mut tokens, inner, DataAlignment::Word)?
+                        },
+                        Symbol::VOLATILE => {
+                            match tokens.next() {
+                                Some(token) => match token {
+                                    ExpressionToken::Instruction(inner) => {
+                                        EntryToken::VolatileStatement(inner.clone(), vec![
+                                            Self::parse_instruction(&mut tokens, layouts, inner)?
+                                        ])
+                                    },
+                                    ExpressionToken::MetaInstruction(inner) => {
+                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction(&mut tokens, inner)?)
+                                    },
+                                    token => return Err(inner.error(format!(
+                                        "Unexpected {:?} after VOLATILE keyword, expected a Instruction instead.",
+                                        token.typ()
+                                    )))
+                                },
+                                _ => return Err(inner.error(
+                                    "Unexpected end of input after VOLATILE keyword, expected a Instruction instead.".to_string()
+                                ))
+                            }
                         },
                         _ => return Err(inner.error(format!(
                             "Unexpected reserved keyword \"{}\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.",
@@ -3360,6 +3381,20 @@ mod test {
                     EntryToken::Instruction(itk!(26, 29, "ccf"), 63)
                 ]
             )
+        ]);
+    }
+
+    // Standalone Volatile ----------------------------------------------------
+    #[test]
+    fn test_standlone_volatile() {
+        let lexer = entry_lexer("VOLATILE nop\nVOLATILE ld a,0");
+        assert_eq!(lexer.tokens, vec![
+            EntryToken::VolatileStatement(itk!(9, 12, "nop"), vec![
+                EntryToken::Instruction(itk!(9, 12, "nop"), 0)
+            ]),
+            EntryToken::VolatileStatement(itk!(22, 24, "ld"), vec![
+                EntryToken::InstructionWithArg(itk!(22, 24, "ld"), 62, Expression::Value(ExpressionValue::Integer(0)))
+            ])
         ]);
     }
 
