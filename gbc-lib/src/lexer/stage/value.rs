@@ -94,7 +94,8 @@ impl LexerStage for ValueStage {
             &mut parent_labels_names,
             &mut unique_label_id,
             false,
-            tokens
+            tokens,
+            true
         )?)
     }
 
@@ -107,7 +108,8 @@ impl ValueStage {
         parent_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
         is_argument: bool,
-        tokens: Vec<MacroToken>
+        tokens: Vec<MacroToken>,
+        resolve_labels: bool
 
     ) -> Result<Vec<ValueToken>, SourceError> {
 
@@ -146,24 +148,24 @@ impl ValueStage {
                     let mut value_branches = Vec::with_capacity(branches.len());
                     for branch in branches {
                         value_branches.push(branch.into_other(|tokens| {
-                            Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, tokens)
+                            Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, tokens, false)
                         })?);
                     }
                     ValueToken::IfStatement(inner, value_branches)
                 }
                 MacroToken::ForStatement(inner, for_statement) => {
-                    let mut binding = Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, vec![*for_statement.binding])?;
+                    let mut binding = Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, vec![*for_statement.binding], true)?;
                     ValueToken::ForStatement(inner, ForStatement {
                         binding: Box::new(binding.remove(0)),
-                        from: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.from)?,
-                        to: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.to)?,
-                        body: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.body)?
+                        from: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.from, true)?,
+                        to: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.to, true)?,
+                        body: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, for_statement.body, false)?
                     })
                 },
                 MacroToken::BlockStatement(inner, block) => {
                     ValueToken::BlockStatement(inner, match block {
-                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, body)?),
-                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, body)?)
+                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, body, false)?),
+                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, false, body, false)?)
                     })
                 },
 
@@ -188,7 +190,8 @@ impl ValueStage {
                             parent_labels_names,
                             unique_label_id,
                             true,
-                            tokens
+                            tokens,
+                            true
                         )?);
                     }
                     ValueToken::BuiltinCall(inner, value_args)
@@ -266,7 +269,12 @@ impl ValueStage {
         }
 
         // Convert name tokens into corresponding parent label references
-        Ok(LabelResolver::convert_parent_label_refs(&parent_labels, value_tokens))
+        if resolve_labels {
+            LabelResolver::convert_parent_label_refs(&parent_labels, value_tokens)
+
+        } else {
+            Ok(value_tokens)
+        }
     }
 
     fn parse_parent_label(
@@ -1182,7 +1190,7 @@ mod test {
 
     // If Statements ----------------------------------------------------------
     #[test]
-    fn test_if_statment_forwarding() {
+    fn test_if_statement_forwarding() {
         let lexer = value_lexer("IF foo THEN IF bar THEN baz ENDIF ENDIF");
         assert_eq!(lexer.tokens, vec![
             ValueToken::IfStatement(itk!(0, 2, "IF"), vec![
@@ -1203,9 +1211,26 @@ mod test {
         ]);
     }
 
+    #[test]
+    fn test_if_statement_label_reference() {
+        let lexer = value_lexer("IF foo THEN jp global_label ENDIF\nglobal_label:");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::IfStatement(itk!(0, 2, "IF"), vec![
+                IfStatementBranch {
+                    condition: Some(vec![ValueToken::Name(itk!(3, 6, "foo"))]),
+                    body: vec![
+                        ValueToken::Instruction(itk!(12, 14, "jp")),
+                        ValueToken::ParentLabelRef(itf!(15, 27, "global_label", 0), 1)
+                    ]
+                }
+            ]),
+            ValueToken::ParentLabelDef(itf!(34, 47, "global_label", 0), 1)
+        ]);
+    }
+
     // FOR Statements ---------------------------------------------------------
     #[test]
-    fn test_for_statment_forwarding() {
+    fn test_for_statement_forwarding() {
         let lexer = value_lexer("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
         assert_eq!(lexer.tokens, vec![
             ValueToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
@@ -1220,6 +1245,28 @@ mod test {
                 }],
                 body: vec![ValueToken::Name(itk!(24, 27, "bar"))]
             })
+        ]);
+    }
+
+    #[test]
+    fn test_for_statement_label_reference() {
+        let lexer = value_lexer("FOR x IN 0 TO 10 REPEAT global_label ENDFOR\nglobal_label:");
+        assert_eq!(lexer.tokens, vec![
+            ValueToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
+                binding: Box::new(ValueToken::Name(itk!(4, 5, "x"))),
+                from: vec![ValueToken::Integer {
+                    inner: itk!(9, 10, "0"),
+                    value: 0
+                }],
+                to: vec![ValueToken::Integer {
+                    inner: itk!(14, 16, "10"),
+                    value: 10
+                }],
+                body: vec![
+                    ValueToken::ParentLabelRef(itf!(24, 36, "global_label", 0), 1)
+                ]
+            }),
+            ValueToken::ParentLabelDef(itf!(44, 57, "global_label", 0), 1)
         ]);
     }
 

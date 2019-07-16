@@ -3,11 +3,11 @@ use std::collections::HashMap;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::{ValueToken, MacroCallIndex};
+use super::{ValueToken, MacroCallIndex, IfStatementBranch};
 use crate::lexer::Symbol;
 use crate::error::SourceError;
 use crate::lexer::token::{InnerToken, LexerToken};
-use crate::lexer::stage::macros::BlockStatement;
+use crate::lexer::stage::macros::{BlockStatement, ForStatement};
 
 
 // Types ----------------------------------------------------------------------
@@ -58,9 +58,10 @@ impl LabelResolver {
         parent_labels: &HashMap<ParentLabelIndex, (InnerToken, usize)>,
         tokens: Vec<ValueToken>
 
-    ) -> Vec<ValueToken> {
-        tokens.into_iter().map(|token| {
-            if let ValueToken::Name(inner) = token {
+    ) -> Result<Vec<ValueToken>, SourceError> {
+        let mut label_tokens = Vec::with_capacity(tokens.len());
+        for token in tokens {
+            label_tokens.push(if let ValueToken::Name(inner) = token {
 
                 // Macro Internal Lookup
                 if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
@@ -79,16 +80,46 @@ impl LabelResolver {
                 }
 
             } else if let ValueToken::BuiltinCall(inner, arguments) = token {
-                ValueToken::BuiltinCall(inner, arguments.into_iter().map(|tokens| {
-                    Self::convert_parent_label_refs(parent_labels, tokens)
+                let mut args = Vec::with_capacity(arguments.len());
+                for arg_tokens in arguments {
+                    args.push(Self::convert_parent_label_refs(parent_labels, arg_tokens)?);
+                }
+                ValueToken::BuiltinCall(inner, args)
 
-                }).collect())
+            } else if let ValueToken::IfStatement(inner, branches) = token {
+                let mut label_branches: Vec<IfStatementBranch<ValueToken>> = Vec::with_capacity(branches.len());
+                for branch in branches {
+                    label_branches.push(branch.into_other(|tokens| {
+                        Self::convert_parent_label_refs(parent_labels, tokens)
+                    })?);
+                }
+                ValueToken::IfStatement(
+                    inner,
+                    label_branches
+                )
+
+            } else if let ValueToken::ForStatement(inner, for_statement) = token {
+                ValueToken::ForStatement(
+                   inner,
+                   ForStatement {
+                       binding: for_statement.binding,
+                       from: for_statement.from,
+                       to: for_statement.to,
+                       body: Self::convert_parent_label_refs(parent_labels, for_statement.body)?
+                   }
+                )
+
+            } else if let ValueToken::BlockStatement(inner, block) = token {
+                ValueToken::BlockStatement(inner, match block {
+                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::convert_parent_label_refs(parent_labels, body)?),
+                    BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::convert_parent_label_refs(parent_labels, body)?)
+                })
 
             } else {
                 token
-            }
-
-        }).collect()
+            });
+        }
+        Ok(label_tokens)
     }
 
     pub fn convert_child_labels_refs(mut tokens: Vec<ValueToken>) -> Result<Vec<ValueToken>, SourceError> {
