@@ -213,9 +213,9 @@ impl Compiler {
                     "  ######".to_string()
 
                 } else {
-                    "  ......".bright_black().to_string()
+                    "  ......".to_string()
                 };
-                self.output.push(format!(
+                let line = format!(
                     "             ${:0>4x}{}=${:0>4x} {}  {: >5} bytes{}",
                     start,
                     "..".bright_black(),
@@ -223,7 +223,13 @@ impl Compiler {
                     marker,
                     end - start,
                     display_name
-                ));
+                );
+                self.output.push(if used {
+                    line
+
+                } else {
+                    line.bright_black().to_string()
+                });
             }
             self.output.push("".to_string());
             self.output.push("".to_string());
