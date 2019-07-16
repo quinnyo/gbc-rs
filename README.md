@@ -51,6 +51,23 @@ ARGS:
 
 ## General Syntax
 
+### Visibility
+
+By default all **constants* and **labels** are visible only within their file of declaration.
+
+To expose them to other files i.e. the global namespace, they must be prefixed with the `GLOBAL` keyword:
+
+```asm
+; File local Constant and label
+foo EQU 2
+file_label:
+
+
+; Global Constant and label
+GLOBAL foo EQU 2
+GLOBAL file_label:
+```
+
 ### Includes
 
 gbc supports two types of includes:
@@ -158,7 +175,7 @@ USER_MACRO_NAME(a, 2)
 
 Compile time if statements are supported, these can be nested and chained to any depth.
 
-> Note: There is no scoping, any constants declared inside an IF statement will be in the global scope.
+> Note: There is no scoping, any constants or labels declared inside an IF statement will have the same scoping rules applied as all other constants or labels.
 
 ```asm
 IF 1 + 1 == 2 THEN 
@@ -188,7 +205,7 @@ ENDFOR
 ### Meta Instructions
 
 Meta instructions encode multiple *native* instruction at the source level in order
-to abstract and simplfy often used code paths.
+to abstract and simplify often used code paths.
 
 These aim at increasing the readability of the source and reducing the potential
 for off-by-one errors.
