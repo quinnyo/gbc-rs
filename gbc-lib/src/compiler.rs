@@ -210,10 +210,10 @@ impl Compiler {
                     "".to_string()
                 };
                 let marker = if used {
-                    "  ######".to_string()
+                    "  ======".to_string()
 
                 } else {
-                    "  ......".to_string()
+                    "  ~~~~~~".to_string()
                 };
                 let line = format!(
                     "             ${:0>4x}{}=${:0>4x} {}  {: >5} bytes{}",
