@@ -89,14 +89,16 @@ impl LexerStage for ValueStage {
         let mut parent_labels: HashMap<ParentLabelIndex, (InnerToken, usize)> = HashMap::new();
         let mut parent_labels_names: Vec<Symbol> = Vec::with_capacity(64);
         let mut unique_label_id = 0;
-        LabelResolver::convert_child_labels_refs(Self::parse_tokens(
+        let mut tokens = Self::parse_tokens(
             &mut parent_labels,
             &mut parent_labels_names,
             &mut unique_label_id,
             false,
             tokens,
             true
-        )?)
+        )?;
+        LabelResolver::convert_child_labels_refs(&mut tokens)?;
+        Ok(tokens)
     }
 
 }
@@ -270,11 +272,10 @@ impl ValueStage {
 
         // Convert name tokens into corresponding parent label references
         if resolve_labels {
-            LabelResolver::convert_parent_label_refs(&parent_labels, value_tokens)
-
-        } else {
-            Ok(value_tokens)
+            LabelResolver::convert_parent_label_refs(&parent_labels, &mut value_tokens);
         }
+
+        Ok(value_tokens)
     }
 
     fn parse_parent_label(

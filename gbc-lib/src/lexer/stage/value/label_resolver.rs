@@ -3,11 +3,11 @@ use std::collections::HashMap;
 
 
 // Internal Dependencies ------------------------------------------------------
-use super::{ValueToken, MacroCallIndex, IfStatementBranch};
+use super::{ValueToken, MacroCallIndex};
 use crate::lexer::Symbol;
 use crate::error::SourceError;
 use crate::lexer::token::{InnerToken, LexerToken};
-use crate::lexer::stage::macros::{BlockStatement, ForStatement};
+use crate::lexer::stage::macros::BlockStatement;
 
 
 // Types ----------------------------------------------------------------------
@@ -56,78 +56,65 @@ impl LabelResolver {
 
     pub fn convert_parent_label_refs(
         parent_labels: &HashMap<ParentLabelIndex, (InnerToken, usize)>,
-        tokens: Vec<ValueToken>
+        tokens: &mut [ValueToken]
 
-    ) -> Result<Vec<ValueToken>, SourceError> {
-        let mut label_tokens = Vec::with_capacity(tokens.len());
+    ) {
         for token in tokens {
-            label_tokens.push(if let ValueToken::Name(inner) = token {
-
+            let reference = if let ValueToken::Name(inner) = token {
                 // Macro Internal Lookup
                 if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
-                    ValueToken::ParentLabelRef(inner, *id)
+                    Some(ValueToken::ParentLabelRef(inner.clone(), *id))
 
                 // File Local Lookup
                 } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, Some(inner.file_index))) {
-                    ValueToken::ParentLabelRef(inner, *id)
+                    Some(ValueToken::ParentLabelRef(inner.clone(), *id))
 
                 // Global Lookup
                 } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, None)) {
-                    ValueToken::ParentLabelRef(inner, *id)
+                    Some(ValueToken::ParentLabelRef(inner.clone(), *id))
 
                 } else {
-                    ValueToken::Name(inner)
+                    Some(ValueToken::Name(inner.clone()))
                 }
-
-            } else if let ValueToken::BuiltinCall(inner, arguments) = token {
-                let mut args = Vec::with_capacity(arguments.len());
-                for arg_tokens in arguments {
-                    args.push(Self::convert_parent_label_refs(parent_labels, arg_tokens)?);
-                }
-                ValueToken::BuiltinCall(inner, args)
-
-            } else if let ValueToken::IfStatement(inner, branches) = token {
-                let mut label_branches: Vec<IfStatementBranch<ValueToken>> = Vec::with_capacity(branches.len());
-                for branch in branches {
-                    label_branches.push(branch.into_other(|tokens| {
-                        Self::convert_parent_label_refs(parent_labels, tokens)
-                    })?);
-                }
-                ValueToken::IfStatement(
-                    inner,
-                    label_branches
-                )
-
-            } else if let ValueToken::ForStatement(inner, for_statement) = token {
-                ValueToken::ForStatement(
-                   inner,
-                   ForStatement {
-                       binding: for_statement.binding,
-                       from: for_statement.from,
-                       to: for_statement.to,
-                       body: Self::convert_parent_label_refs(parent_labels, for_statement.body)?
-                   }
-                )
-
-            } else if let ValueToken::BlockStatement(inner, block) = token {
-                ValueToken::BlockStatement(inner, match block {
-                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::convert_parent_label_refs(parent_labels, body)?),
-                    BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::convert_parent_label_refs(parent_labels, body)?)
-                })
 
             } else {
-                token
-            });
+                None
+            };
+
+            if let Some(reference) = reference {
+                *token = reference;
+
+            } else if let ValueToken::BuiltinCall(_, arguments) = token {
+                for arg_tokens in arguments {
+                    Self::convert_parent_label_refs(parent_labels, arg_tokens)
+                }
+
+            } else if let ValueToken::IfStatement(_, branches) = token {
+                for branch in branches {
+                    if let Some(condition) = branch.condition.as_mut() {
+                        Self::convert_parent_label_refs(parent_labels, condition);
+                    }
+                    Self::convert_parent_label_refs(parent_labels, &mut branch.body);
+                }
+
+            } else if let ValueToken::ForStatement(_, for_statement) = token {
+                Self::convert_parent_label_refs(parent_labels, &mut for_statement.body);
+
+            } else if let ValueToken::BlockStatement(_, block) = token {
+                match block {
+                    BlockStatement::Using(_, body) => Self::convert_parent_label_refs(parent_labels, body),
+                    BlockStatement::Volatile(body) => Self::convert_parent_label_refs(parent_labels, body)
+                };
+            }
         }
-        Ok(label_tokens)
     }
 
-    pub fn convert_child_labels_refs(mut tokens: Vec<ValueToken>) -> Result<Vec<ValueToken>, SourceError> {
+    pub fn convert_child_labels_refs(tokens: &mut [ValueToken]) -> Result<(), SourceError> {
 
         let mut parent_label_map = HashMap::new();
         let mut child_label_refs = Vec::with_capacity(64);
         let mut error = Self::inner_assign_and_verify_child_label_refs(
-            &mut tokens,
+            tokens,
             &mut parent_label_map,
             &mut child_label_refs,
             true,
@@ -214,7 +201,7 @@ impl LabelResolver {
             unreachable!("Invalid child label ref generated: {:?}", r);
         }
 
-        Ok(tokens)
+        Ok(())
     }
 
     fn inner_assign_and_verify_child_label_refs(
