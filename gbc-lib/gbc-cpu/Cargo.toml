@@ -1,6 +1,6 @@
 [package]
 name = "gbc-cpu"
-version = "0.1.0"
+version = "0.5.0"
 authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
 edition = "2018"
 

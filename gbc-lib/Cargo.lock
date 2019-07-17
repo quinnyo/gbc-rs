@@ -18,14 +18,14 @@ dependencies = [
 
 [[package]]
 name = "gbc-cpu"
-version = "0.1.0"
+version = "0.5.0"
 
 [[package]]
 name = "gbc-lib"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "colored 1.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gbc-cpu 0.1.0",
+ "gbc-cpu 0.5.0",
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ordered-float 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 1.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
