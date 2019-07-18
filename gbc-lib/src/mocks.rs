@@ -106,18 +106,28 @@ pub fn include_lex<S: Into<String>>(s: S) -> Lexer<IncludeStage> {
     lexer
 }
 
+pub fn include_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<IncludeStage> {
+    let mut reader = MockFileReader::default();
+    reader.add_file("main.gb.s", s.into().as_str());
+    reader.add_file("child.gb.s", c.into().as_str());
+    Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed")
+}
+
 pub fn macro_lex<S: Into<String>>(s: S) -> Lexer<MacroStage> {
     let lexer = include_lex(s);
     Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed")
 }
 
 pub fn macro_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<MacroStage> {
-    let mut reader = MockFileReader::default();
-    reader.add_file("main.gb.s", s.into().as_str());
-    reader.add_file("child.gb.s", c.into().as_str());
-    let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
+    let lexer = include_lex_child(s, c);
     assert_eq!(lexer.files.len(), 2);
     Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed")
+}
+
+pub fn macro_lex_child_error<S: Into<String>>(s: S, c: S) -> String {
+    let lexer = include_lex_child(s, c);
+    assert_eq!(lexer.files.len(), 2);
+    Lexer::<MacroStage>::from_lexer(lexer).err().expect("Expected a SourceError").to_string()
 }
 
 pub fn value_lex<S: Into<String>>(s: S) -> Lexer<ValueStage> {

@@ -178,7 +178,9 @@ pub struct MacroDefinition {
     name: InnerToken,
     pub parameters: Vec<(ExpressionArgumenType, InnerToken)>,
     body: Vec<IncludeToken>,
-    builtin: bool
+    file_index: Option<usize>,
+    is_builtin: bool,
+    is_exported: bool,
 }
 
 impl MacroDefinition {
@@ -190,7 +192,9 @@ impl MacroDefinition {
 
             }).collect(),
             body: Vec::with_capacity(64),
-            builtin: true
+            file_index: None,
+            is_builtin: true,
+            is_exported: true,
         }
     }
 }
@@ -246,58 +250,21 @@ impl MacroStage {
 
         // Extract Macro Definitions
         while let Some(token) = tokens.next() {
+            // ENDMACRO
             if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDMACRO) {
                 return Err(token.error(format!("Unexpected \"{}\" token outside of macro definition.", token.symbol())));
 
+            // MACRO
             } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::MACRO) {
+                Self::parse_user_macro_definition(&mut tokens, &mut user_macro_defs, false)?;
 
-                // Verify Macro Name
-                let name_token = tokens.expect(IncludeType::Name, None, "when parsing macro definition")?;
-                if Self::get_macro_by_name(&BUILTIN_MACRO_DEFS, name_token.symbol()).is_some() {
-                    return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.symbol())));
+            // GLOBAL MACRO
+            } else if token.is(IncludeType::Reserved)
+                   && token.is_symbol(Symbol::GLOBAL)
+                   && tokens.peek_is(IncludeType::Reserved, Some(Symbol::MACRO)) {
 
-                } else if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.symbol()) {
-                    return Err(name_token.error(
-                        format!("Re-definition of user macro \"{}\".", name_token.symbol())
-
-                    ).with_reference(&user_def.name, "Original definition was"));
-                }
-
-                // Parse Macro Parameter list
-                let param_tokens = Self::parse_macro_def_arguments(&mut tokens)?;
-                let parameters: Vec<(ExpressionArgumenType, InnerToken)> = param_tokens.into_iter().map(|t| (ExpressionArgumenType::Any, t.into_inner())).collect();
-
-                // Check against duplicate names
-                let mut param_names: HashSet<Symbol> = HashSet::new();
-                for (_, arg) in &parameters {
-                    if param_names.contains(&arg.value) {
-                        return Err(arg.error(format!("Duplicate macro parameter \"{}\", a parameter with the same name was already defined.", arg.value)));
-
-                    } else {
-                        param_names.insert(arg.value.clone());
-                    }
-                }
-
-                // Collect Body Tokens
-                let mut body_tokens = Vec::new();
-                while !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDMACRO)) {
-                    let token = tokens.get("Unexpected end of input while parsing macro body.")?;
-                    if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::MACRO) {
-                        return Err(token.error("Invalid nested macro definition.".to_string()));
-
-                    } else {
-                        body_tokens.push(token);
-                    }
-                }
-                tokens.expect(IncludeType::Reserved, Some(Symbol::ENDMACRO), "when parsing macro definition")?;
-
-                // Add Macro Definition
-                user_macro_defs.push(MacroDefinition {
-                    name: name_token.into_inner(),
-                    parameters,
-                    body: body_tokens,
-                    builtin: false
-                });
+                tokens.expect(IncludeType::Reserved, Some(Symbol::MACRO), "when parsing macro definition")?;
+                Self::parse_user_macro_definition(&mut tokens, &mut user_macro_defs, true)?;
 
             } else {
                 tokens_without_macro_defs.push(token);
@@ -338,6 +305,85 @@ impl MacroStage {
             user_macro_defs,
             tokens_with_statements
         ))
+
+    }
+
+    fn parse_user_macro_definition(
+        tokens: &mut TokenIterator<IncludeToken>,
+        user_macro_defs: &mut Vec<MacroDefinition>,
+        is_exported: bool
+
+    ) -> Result<(), SourceError> {
+
+        // Verify Macro Name
+        let name_token = tokens.expect(IncludeType::Name, None, "when parsing macro definition")?;
+
+        // Check for shadowing of builtin
+        if Self::get_macro_by_name(&BUILTIN_MACRO_DEFS, name_token.symbol(), None).is_some() {
+            return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.symbol())));
+
+        // Check for shadowing of macro in same file
+        } else if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.symbol(), Some(name_token.inner().file_index)) {
+            return Err(name_token.error(
+                format!("Re-definition of non-global user macro \"{}\".", name_token.symbol())
+
+            ).with_reference(&user_def.name, "Original definition was"));
+        }
+
+        // Check for shadowing of macro global macro
+        if is_exported {
+            if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.symbol(), None) {
+                return Err(name_token.error(
+                    format!("Re-definition of global user macro \"{}\".", name_token.symbol())
+
+                ).with_reference(&user_def.name, "Original definition was"));
+            }
+        }
+
+        // Parse Macro Parameter list
+        let param_tokens = Self::parse_macro_def_arguments(tokens)?;
+        let parameters: Vec<(ExpressionArgumenType, InnerToken)> = param_tokens.into_iter().map(|t| (ExpressionArgumenType::Any, t.into_inner())).collect();
+
+        // Check against duplicate names
+        let mut param_names: HashSet<Symbol> = HashSet::new();
+        for (_, arg) in &parameters {
+            if param_names.contains(&arg.value) {
+                return Err(arg.error(format!("Duplicate macro parameter \"{}\", a parameter with the same name was already defined.", arg.value)));
+
+            } else {
+                param_names.insert(arg.value.clone());
+            }
+        }
+
+        // Collect Body Tokens
+        let mut body_tokens = Vec::new();
+        while !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDMACRO)) {
+            let token = tokens.get("Unexpected end of input while parsing macro body.")?;
+            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::MACRO) {
+                return Err(token.error("Invalid nested macro definition.".to_string()));
+
+            } else {
+                body_tokens.push(token);
+            }
+        }
+        tokens.expect(IncludeType::Reserved, Some(Symbol::ENDMACRO), "when parsing macro definition")?;
+
+        // Add Macro Definition
+        let inner = name_token.into_inner();
+        user_macro_defs.push(MacroDefinition {
+            parameters,
+            body: body_tokens,
+            file_index: if is_exported {
+                None
+
+            } else {
+                Some(inner.file_index)
+            },
+            name: inner,
+            is_builtin: false,
+            is_exported
+        });
+        Ok(())
 
     }
 
@@ -442,14 +488,28 @@ impl MacroStage {
         while let Some(token) = tokens.next() {
 
             if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::OpenParen, None) {
-                let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.symbol()) {
+
+                // Builtin
+                let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.symbol(), None) {
                     def
 
-                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol()) {
+                // File local lookup
+                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), Some(token.inner().file_index)) {
                     def
 
+                // Global lookup
+                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), None) {
+                    def
+
+                // Nout found
                 } else {
-                    return Err(token.error(format!("Invocation of undefined macro \"{}\"", token.symbol())));
+                    let error = token.error(format!("Invocation of undefined macro \"{}\"", token.symbol()));
+                    if let Some(def) = Self::get_macro_by_name_all(&user_macro_defs, token.symbol()) {
+                        return Err(error.with_reference(&def.name, "A non-global macro with the same name is defined"));
+
+                    } else {
+                        return Err(error);
+                    }
                 };
 
                 let arg_tokens = Self::parse_macro_call_arguments(&mut tokens)?;
@@ -470,7 +530,7 @@ impl MacroStage {
                 });
 
                 // Replace builtin calls
-                if macro_def.builtin {
+                if macro_def.is_builtin {
                     tokens_without_macro_calls.push(
                         Self::parse_builtin_call(
                             token.into_inner(),
@@ -648,7 +708,16 @@ impl MacroStage {
         None
     }
 
-    fn get_macro_by_name<'a>(defs: &'a [MacroDefinition], name: &Symbol) -> Option<&'a MacroDefinition> {
+    fn get_macro_by_name<'a>(defs: &'a [MacroDefinition], name: &Symbol, file_index: Option<usize>) -> Option<&'a MacroDefinition> {
+        for def in defs {
+            if &def.name.value == name && def.file_index == file_index {
+                return Some(def);
+            }
+        }
+        None
+    }
+
+    fn get_macro_by_name_all<'a>(defs: &'a [MacroDefinition], name: &Symbol) -> Option<&'a MacroDefinition> {
         for def in defs {
             if &def.name.value == name {
                 return Some(def);
@@ -864,7 +933,7 @@ impl MacroStage {
 #[cfg(test)]
 mod test {
     use crate::lexer::Lexer;
-    use crate::mocks::include_lex;
+    use crate::mocks::{include_lex, macro_lex, macro_lex_child, macro_lex_child_error};
     use crate::expression::ExpressionArgumenType;
     use super::{
         MacroStage,
@@ -878,26 +947,42 @@ mod test {
         BlockStatement
     };
 
-    fn macro_lexer<S: Into<String>>(s: S) -> Lexer<MacroStage> {
-        Lexer::<MacroStage>::from_lexer(include_lex(s)).expect("MacroLexer failed")
-    }
-
     fn macro_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
         Lexer::<MacroStage>::from_lexer(include_lex(s)).err().unwrap().to_string()
     }
 
+    fn macro_lexer_error_child<S: Into<String>>(s: S, c: S) -> String {
+        colored::control::set_override(false);
+        macro_lex_child_error(s, c)
+    }
+
     fn tfm<S: Into<String>>(s: S) -> Vec<MacroToken> {
-        macro_lexer(s).tokens
+        macro_lex(s).tokens
     }
 
     macro_rules! mdef {
+        ($name:expr, $args:expr, $body:expr, $file:expr) => {
+            MacroDefinition {
+                name: $name,
+                parameters: $args,
+                body: $body,
+                file_index: Some($file),
+                is_builtin: false,
+                is_exported: false
+            }
+        }
+    }
+
+    macro_rules! mgdef {
         ($name:expr, $args:expr, $body:expr) => {
             MacroDefinition {
                 name: $name,
                 parameters: $args,
                 body: $body,
-                builtin: false
+                file_index: None,
+                is_builtin: false,
+                is_exported: true
             }
         }
     }
@@ -918,6 +1003,12 @@ mod test {
         }
     }
 
+    macro_rules! itkf {
+        ($start:expr, $end:expr, $parsed:expr, $file:expr) => {
+            InnerToken::new($file, $start, $end, $parsed.into())
+        }
+    }
+
     macro_rules! itke {
         ($start:expr, $end:expr, $parsed:expr, $id:expr) => {
             {
@@ -934,6 +1025,12 @@ mod test {
         }
     }
 
+    macro_rules! tkf {
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr, $file:expr) => {
+            IncludeToken::$tok(itkf!($start, $end, $parsed, $file))
+        }
+    }
+
     macro_rules! mtk {
         ($tok:ident, $start:expr, $end:expr, $parsed:expr) => {
             MacroToken::$tok(itk!($start, $end, $parsed))
@@ -944,6 +1041,16 @@ mod test {
         ($tok:ident, $start:expr, $end:expr, $parsed:expr, $id:expr) => {
             {
                 let mut t = itk!($start, $end, $parsed);
+                t.set_macro_call_id($id);
+                MacroToken::$tok(t)
+            }
+        }
+    }
+
+    macro_rules! mtkef {
+        ($tok:ident, $start:expr, $end:expr, $parsed:expr, $id:expr, $file:expr) => {
+            {
+                let mut t = itkf!($start, $end, $parsed, $file);
                 t.set_macro_call_id($id);
                 MacroToken::$tok(t)
             }
@@ -976,28 +1083,28 @@ mod test {
 
     #[test]
     fn test_macro_def_no_args_no_body() {
-        let mut lexer = macro_lexer("MACRO FOO() ENDMACRO");
+        let mut lexer = macro_lex("MACRO FOO() ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.data(), vec![
-            mdef!(itk!(6, 9, "FOO"), vec![], vec![])
+            mdef!(itk!(6, 9, "FOO"), vec![], vec![], 0)
         ]);
     }
 
     #[test]
     fn test_macro_def_one_arg() {
-        let mut lexer = macro_lexer("MACRO FOO(@a) ENDMACRO");
+        let mut lexer = macro_lex("MACRO FOO(@a) ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![
                 (ExpressionArgumenType::Any, itk!(10, 12, "a"))
 
-            ], vec![])
+            ], vec![], 0)
         ]);
     }
 
     #[test]
     fn test_macro_def_multiple_args() {
-        let mut lexer = macro_lexer("MACRO FOO(@a, @b, @c) ENDMACRO");
+        let mut lexer = macro_lex("MACRO FOO(@a, @b, @c) ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![
@@ -1005,20 +1112,62 @@ mod test {
                 (ExpressionArgumenType::Any, itk!(14, 16, "b")),
                 (ExpressionArgumenType::Any, itk!(18, 20, "c"))
 
-            ], vec![])
+            ], vec![], 0)
         ]);
     }
 
     #[test]
     fn test_macro_def_body() {
-        let mut lexer = macro_lexer("MACRO FOO() hl,a ENDMACRO");
+        let mut lexer = macro_lex("MACRO FOO() hl,a ENDMACRO");
         assert!(lexer.tokens.is_empty());
         assert_eq!(lexer.data(), vec![
             mdef!(itk!(6, 9, "FOO"), vec![], vec![
                 tk!(Register, 12, 14, "hl"),
                 tk!(Comma, 14, 15, ","),
                 tk!(Register, 15, 16, "a")
-            ])
+            ], 0)
+        ]);
+    }
+
+    #[test]
+    fn test_macro_def_multiple_files() {
+        let mut lexer = macro_lex_child(
+            "INCLUDE 'child.gb.s'\nMACRO FOO() hl,a ENDMACRO" ,
+            "MACRO FOO() hl,b ENDMACRO"
+        );
+        assert!(lexer.tokens.is_empty());
+        assert_eq!(lexer.data(), vec![
+            mdef!(itkf!(6, 9, "FOO", 1), vec![], vec![
+                tkf!(Register, 12, 14, "hl", 1),
+                tkf!(Comma, 14, 15, ",", 1),
+                tkf!(Register, 15, 16, "b", 1)
+            ], 1),
+            mdef!(itkf!(27, 30, "FOO", 0), vec![], vec![
+                tkf!(Register, 33, 35, "hl", 0),
+                tkf!(Comma, 35, 36, ",", 0),
+                tkf!(Register, 36, 37, "a", 0)
+            ], 0)
+        ]);
+    }
+
+    #[test]
+    fn test_macro_def_multiple_files_global_local() {
+        let mut lexer = macro_lex_child(
+            "INCLUDE 'child.gb.s'\nMACRO FOO() hl,a ENDMACRO" ,
+            "GLOBAL MACRO FOO() hl,b ENDMACRO"
+        );
+        assert!(lexer.tokens.is_empty());
+        assert_eq!(lexer.data(), vec![
+            mgdef!(itkf!(13, 16, "FOO", 1), vec![], vec![
+                tkf!(Register, 19, 21, "hl", 1),
+                tkf!(Comma, 21, 22, ",", 1),
+                tkf!(Register, 22, 23, "b", 1)
+            ]),
+            mdef!(itkf!(27, 30, "FOO", 0), vec![], vec![
+                tkf!(Register, 33, 35, "hl", 0),
+                tkf!(Comma, 35, 36, ",", 0),
+                tkf!(Register, 36, 37, "a", 0)
+            ], 0)
         ]);
     }
 
@@ -1039,10 +1188,37 @@ mod test {
     }
 
     #[test]
-    fn test_macro_def_re_user() {
+    fn test_macro_def_re_user_local() {
         assert_eq!(
             macro_lexer_error("MACRO FOO() ENDMACRO MACRO FOO() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 28: Re-definition of user macro \"FOO\".\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n                           ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n      ^--- Here"
+            "In file \"main.gb.s\" on line 1, column 28: Re-definition of non-global user macro \"FOO\".\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n                           ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n      ^--- Here"
+        );
+    }
+
+    #[test]
+    fn test_macro_def_re_user_mixed() {
+        assert_eq!(
+            macro_lexer_error("MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO"),
+            "In file \"main.gb.s\" on line 1, column 35: Re-definition of non-global user macro \"FOO\".\n\nMACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n                                  ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n      ^--- Here"
+        );
+    }
+
+    #[test]
+    fn test_macro_def_re_user_global_same_file() {
+        assert_eq!(
+            macro_lexer_error("GLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO"),
+            "In file \"main.gb.s\" on line 1, column 42: Re-definition of global user macro \"FOO\".\n\nGLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n                                         ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 14:\n\nGLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n             ^--- Here"
+        );
+    }
+
+    #[test]
+    fn test_macro_def_re_user_global_other_file_global() {
+        assert_eq!(
+            macro_lexer_error_child(
+                "INCLUDE 'child.gb.s'\nGLOBAL MACRO FOO() ENDMACRO",
+                "GLOBAL MACRO FOO() ENDMACRO"
+            ),
+            "In file \"main.gb.s\" on line 2, column 14: Re-definition of global user macro \"FOO\".\n\nGLOBAL MACRO FOO() ENDMACRO\n             ^--- Here\n\nOriginal definition was in file \"child.gb.s\" on line 1, column 14:\n\nGLOBAL MACRO FOO() ENDMACRO\n             ^--- Here"
         );
     }
 
@@ -1064,13 +1240,25 @@ mod test {
 
     #[test]
     fn test_macro_extract() {
-        let mut lexer = macro_lexer("2 MACRO FOO() ENDMACRO 4");
+        let mut lexer = macro_lex("2 MACRO FOO() ENDMACRO 4");
         assert_eq!(lexer.tokens, vec![
             mtk!(NumberLiteral, 0, 1, "2"),
             mtk!(NumberLiteral, 23, 24, "4"),
         ]);
         assert_eq!(lexer.data(), vec![
-            mdef!(itk!(8, 11, "FOO"), vec![], vec![])
+            mdef!(itk!(8, 11, "FOO"), vec![], vec![], 0)
+        ]);
+    }
+
+    #[test]
+    fn test_macro_extract_global() {
+        let mut lexer = macro_lex("2 GLOBAL MACRO FOO() ENDMACRO 4");
+        assert_eq!(lexer.tokens, vec![
+            mtk!(NumberLiteral, 0, 1, "2"),
+            mtk!(NumberLiteral, 30, 31, "4"),
+        ]);
+        assert_eq!(lexer.data(), vec![
+            mgdef!(itk!(15, 18, "FOO"), vec![], vec![])
         ]);
     }
 
@@ -1078,7 +1266,7 @@ mod test {
 
     #[test]
     fn test_macro_call_no_args() {
-        let lexer = macro_lexer("DBG()");
+        let lexer = macro_lex("DBG()");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
                 itk!(0, 3, "DBG"),
@@ -1093,7 +1281,7 @@ mod test {
 
     #[test]
     fn test_macro_call_one_arg() {
-        let lexer = macro_lexer("ABS(4)");
+        let lexer = macro_lex("ABS(4)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
                 itk!(0, 3, "ABS"),
@@ -1112,7 +1300,7 @@ mod test {
 
     #[test]
     fn test_macro_call_unwrap_token_group_args() {
-        let lexer = macro_lexer("ABS(`i k`)");
+        let lexer = macro_lex("ABS(`i k`)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
                 itk!(0, 3, "ABS"),
@@ -1137,7 +1325,7 @@ mod test {
 
     #[test]
     fn test_macro_call_multiple_args() {
-        let lexer = macro_lexer("MAX(4, 2)");
+        let lexer = macro_lex("MAX(4, 2)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
                 itk!(0, 3, "MAX"),
@@ -1158,7 +1346,7 @@ mod test {
 
     #[test]
     fn test_macro_call_expression_args() {
-        let lexer = macro_lexer("MAX((4, 2) + (2 - 1), 2)");
+        let lexer = macro_lex("MAX((4, 2) + (2 - 1), 2)");
         assert_eq!(lexer.tokens, vec![
            MacroToken::BuiltinCall(
                 itk!(0, 3, "MAX"),
@@ -1203,7 +1391,7 @@ mod test {
 
     #[test]
     fn test_macro_call_expression_args_recursive() {
-        let lexer = macro_lexer("MAX(MIN(4, FLOOR(2) + CEIL(1)), 2)");
+        let lexer = macro_lex("MAX(MIN(4, FLOOR(2) + CEIL(1)), 2)");
         assert_eq!(lexer.tokens, vec![
             MacroToken::BuiltinCall(itk!(0, 3, "MAX"), vec![
                 vec![MacroToken::BuiltinCall(itk!(4, 7, "MIN"), vec![
@@ -1226,7 +1414,7 @@ mod test {
 
     #[test]
     fn test_macro_call_expression_args_recursive_with_user() {
-        let lexer = macro_lexer("CEIL(BAR()) MACRO BAR() 4 ENDMACRO");
+        let lexer = macro_lex("CEIL(BAR()) MACRO BAR() 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             MacroToken::BuiltinCall(itk!(0, 4, "CEIL"), vec![
                 vec![mtke!(NumberLiteral, 24, 25, "4", 0)],
@@ -1237,7 +1425,7 @@ mod test {
 
     #[test]
     fn test_macro_call_expression_args_recursive_with_user_unused_param() {
-        let lexer = macro_lexer("CEIL(BAR(BAR(2))) MACRO BAR(@a) 4 ENDMACRO");
+        let lexer = macro_lex("CEIL(BAR(BAR(2))) MACRO BAR(@a) 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             MacroToken::BuiltinCall(itk!(0, 4, "CEIL"), vec![
                 vec![mtke!(NumberLiteral, 32, 33, "4", 0)],
@@ -1248,7 +1436,7 @@ mod test {
 
     #[test]
     fn test_macro_call_expression_args_recursive_with_user_used_param() {
-        let lexer = macro_lexer("CEIL(BAR(BAR(4))) MACRO BAR(@a) @a ENDMACRO");
+        let lexer = macro_lex("CEIL(BAR(BAR(4))) MACRO BAR(@a) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             MacroToken::BuiltinCall(itk!(0, 4, "CEIL"), vec![
                 vec![mtke!(NumberLiteral, 13, 14, "4", 1)],
@@ -1277,7 +1465,7 @@ mod test {
 
     #[test]
     fn test_macro_user_call_no_args() {
-        let lexer = macro_lexer("FOO() MACRO FOO() op 4 ENDMACRO");
+        let lexer = macro_lex("FOO() MACRO FOO() op 4 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(Name, 18, 20, "op", 0),
             mtke!(NumberLiteral, 21, 22, "4", 0),
@@ -1290,7 +1478,7 @@ mod test {
 
     #[test]
     fn test_macro_user_call_one_arg() {
-        let lexer = macro_lexer("FOO(4) MACRO FOO(@a) op @a ENDMACRO");
+        let lexer = macro_lex("FOO(4) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(Name, 21, 23, "op", 0),
             mtke!(NumberLiteral, 4, 5, "4", 0),
@@ -1307,7 +1495,7 @@ mod test {
 
     #[test]
     fn test_macro_user_call_expression() {
-        let lexer = macro_lexer("FOO((4 + 2)) MACRO FOO(@a) @a ENDMACRO");
+        let lexer = macro_lex("FOO((4 + 2)) MACRO FOO(@a) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(OpenParen, 4, 5, "(", 0),
             mtke!(NumberLiteral, 5, 6, "4", 0),
@@ -1330,7 +1518,7 @@ mod test {
 
     #[test]
     fn test_macro_user_call_token_group_arg() {
-        let lexer = macro_lexer("FOO(`a b`) MACRO FOO(@a) op @a ENDMACRO");
+        let lexer = macro_lex("FOO(`a b`) MACRO FOO(@a) op @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(Name, 25, 27, "op", 0),
             mtke!(Register, 5, 6, "a", 0),
@@ -1352,7 +1540,7 @@ mod test {
 
     #[test]
     fn test_macro_user_call_multiple_args() {
-        let lexer = macro_lexer("FOO(4, 8) MACRO FOO(@a, @b) op @b @a ENDMACRO");
+        let lexer = macro_lex("FOO(4, 8) MACRO FOO(@a, @b) op @b @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(Name, 28, 30, "op", 0),
             mtke!(NumberLiteral, 7, 8, "8", 0),
@@ -1373,7 +1561,7 @@ mod test {
 
     #[test]
     fn test_macro_user_recursive() {
-        let lexer = macro_lexer("FOO() MACRO FOO() 4 BAR() ENDMACRO MACRO BAR() 8 ENDMACRO");
+        let lexer = macro_lex("FOO() MACRO FOO() 4 BAR() ENDMACRO MACRO BAR() 8 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(NumberLiteral, 18, 19, "4", 0),
             mtke!(NumberLiteral, 47, 48, "8", 1),
@@ -1387,7 +1575,7 @@ mod test {
 
     #[test]
     fn test_macro_user_recursive_token_group() {
-        let lexer = macro_lexer("FOO(`BAR()`) MACRO FOO(@a) 4 @a ENDMACRO MACRO BAR() 8 ENDMACRO");
+        let lexer = macro_lex("FOO(`BAR()`) MACRO FOO(@a) 4 @a ENDMACRO MACRO BAR() 8 ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(NumberLiteral, 27, 28, "4", 0),
             mtke!(NumberLiteral, 53, 54, "8", 1),
@@ -1410,11 +1598,46 @@ mod test {
 
     #[test]
     fn test_macro_user_recursive_token_group_parameters() {
-        let lexer = macro_lexer("FOO(`@b`, `@c`, 4) MACRO FOO(@a, @b, @c) @a ENDMACRO");
+        let lexer = macro_lex("FOO(`@b`, `@c`, 4) MACRO FOO(@a, @b, @c) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(NumberLiteral, 16, 17, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
+    }
+
+    #[test]
+    fn test_macro_user_call_global() {
+        let lexer = macro_lex_child(
+            "INCLUDE 'child.gb.s'\nFOO()",
+            "GLOBAL MACRO FOO() 8 ENDMACRO"
+        );
+        assert_eq!(lexer.tokens, vec![
+            mtkef!(NumberLiteral, 19, 20, "8", 0, 1),
+        ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
+    }
+
+    #[test]
+    fn test_macro_user_call_local_over_global() {
+        let lexer = macro_lex_child(
+            "INCLUDE 'child.gb.s'\nMACRO FOO() 4 ENDMACRO\nFOO()",
+            "GLOBAL MACRO FOO() 8 ENDMACRO"
+        );
+        assert_eq!(lexer.tokens, vec![
+            mtke!(NumberLiteral, 33, 34, "4", 0),
+        ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
+    }
+
+    #[test]
+    fn test_macro_error_user_call_defined_non_global_other_file() {
+        assert_eq!(
+            macro_lexer_error_child(
+                "INCLUDE 'child.gb.s'\nFOO()",
+                "MACRO FOO() ENDMACRO"
+            ),
+            "In file \"main.gb.s\" on line 2, column 1: Invocation of undefined macro \"FOO\"\n\nFOO()\n^--- Here\n\nA non-global macro with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO\n      ^--- Here"
+        );
     }
 
     #[test]
@@ -1436,7 +1659,7 @@ mod test {
     #[test]
     fn test_macro_user_expansion_parallel() {
         assert_eq!(
-            macro_lexer("FOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\n MACRO FOO() ENDMACRO").macro_calls_count(),
+            macro_lex("FOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\nFOO()\n MACRO FOO() ENDMACRO").macro_calls_count(),
             9
         );
     }
@@ -1459,7 +1682,7 @@ mod test {
 
     #[test]
     fn test_macro_user_recursive_params() {
-        let lexer = macro_lexer("FOO(FOO(FOO(4))) MACRO FOO(@a) @a ENDMACRO");
+        let lexer = macro_lex("FOO(FOO(FOO(4))) MACRO FOO(@a) @a ENDMACRO");
         assert_eq!(lexer.tokens, vec![
             mtke!(NumberLiteral, 12, 13, "4", 2),
         ]);
@@ -1469,7 +1692,7 @@ mod test {
     // IF Statements ----------------------------------------------------------
     #[test]
     fn test_if_statement_endif() {
-        let lexer = macro_lexer("IF foo THEN bar ENDIF");
+        let lexer = macro_lex("IF foo THEN bar ENDIF");
         assert_eq!(lexer.tokens, vec![
             MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
@@ -1482,7 +1705,7 @@ mod test {
 
     #[test]
     fn test_if_statement_endif_nested() {
-        let lexer = macro_lexer("IF foo THEN IF bar THEN baz ENDIF ENDIF");
+        let lexer = macro_lex("IF foo THEN IF bar THEN baz ENDIF ENDIF");
         assert_eq!(lexer.tokens, vec![
             MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
@@ -1504,7 +1727,7 @@ mod test {
 
     #[test]
     fn test_if_statement_else() {
-        let lexer = macro_lexer("IF foo THEN bar ELSE baz ENDIF");
+        let lexer = macro_lex("IF foo THEN bar ELSE baz ENDIF");
         assert_eq!(lexer.tokens, vec![
             MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
@@ -1521,7 +1744,7 @@ mod test {
 
     #[test]
     fn test_if_statement_else_if_endif() {
-        let lexer = macro_lexer("IF foo THEN bar ELSE IF fuz THEN baz ENDIF");
+        let lexer = macro_lex("IF foo THEN bar ELSE IF fuz THEN baz ENDIF");
         assert_eq!(lexer.tokens, vec![
             MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
@@ -1538,7 +1761,7 @@ mod test {
 
     #[test]
     fn test_if_statement_else_if_else_endif() {
-        let lexer = macro_lexer("IF foo THEN bar ELSE IF fuz THEN baz ELSE fub ENDIF");
+        let lexer = macro_lex("IF foo THEN bar ELSE IF fuz THEN baz ELSE fub ENDIF");
         assert_eq!(lexer.tokens, vec![
             MacroToken::IfStatement(itk!(0, 2, "IF"), vec![
                 IfStatementBranch {
@@ -1559,7 +1782,7 @@ mod test {
 
     #[test]
     fn test_if_statement_macro() {
-        let lexer = macro_lexer("MACRO BAR(@a) IF @a THEN bar ENDIF ENDMACRO\nBAR(1)");
+        let lexer = macro_lex("MACRO BAR(@a) IF @a THEN bar ENDIF ENDMACRO\nBAR(1)");
         assert_eq!(lexer.tokens, vec![
             MacroToken::IfStatement(itke!(14, 16, "IF", 0), vec![
                 IfStatementBranch {
@@ -1601,7 +1824,7 @@ mod test {
     // FOR Statements ---------------------------------------------------------
     #[test]
     fn test_for_statement() {
-        let lexer = macro_lexer("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
+        let lexer = macro_lex("FOR x IN 0 TO 10 REPEAT bar ENDFOR");
         assert_eq!(lexer.tokens, vec![
             MacroToken::ForStatement(itk!(0, 3, "FOR"), ForStatement {
                 binding: Box::new(MacroToken::Name(itk!(4, 5, "x"))),
@@ -1634,7 +1857,7 @@ mod test {
     // Blocks -----------------------------------------------------------------
     #[test]
     fn test_block_using() {
-        let lexer = macro_lexer("BLOCK USING 'cmd' DB 1 ENDBLOCK");
+        let lexer = macro_lex("BLOCK USING 'cmd' DB 1 ENDBLOCK");
         assert_eq!(lexer.tokens, vec![
             MacroToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Using(
                 "cmd".to_string(),
@@ -1648,7 +1871,7 @@ mod test {
 
     #[test]
     fn test_block_volatile() {
-        let lexer = macro_lexer("BLOCK VOLATILE nop ENDBLOCK");
+        let lexer = macro_lex("BLOCK VOLATILE nop ENDBLOCK");
         assert_eq!(lexer.tokens, vec![
             MacroToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
                 vec![
