@@ -225,19 +225,19 @@ impl LabelResolver {
                 ValueToken::ChildLabelDef(inner, id, call_id) => {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(parent_label) = parent_label.as_mut() {
-                        parent_label.1.push(((inner.value.clone(), call_id.clone()), *id));
+                        parent_label.1.push(((inner.value.clone(), *call_id), *id));
                     }
                 },
                 ValueToken::ChildLabelRef(inner, _, call_id) => {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(parent_label) = parent_label.as_mut() {
-                        parent_label.2.push(((inner.value.clone(), call_id.clone()), index, call_parent, stmt_parent));
+                        parent_label.2.push(((inner.value.clone(), *call_id), index, call_parent, stmt_parent));
 
                     // Child labels in macros must have a local parent
                     } else if inner.macro_call_id.is_some() {
-                        return Err(inner.error(format!(
-                            "Reference to child label inside of macro without a any parent label inside the macro."
-                        )));
+                        return Err(inner.error(
+                            "Reference to child label inside of macro without a any parent label inside the macro.".to_string()
+                        ));
                     }
                 },
                 ValueToken::BuiltinCall(_, arguments) => {

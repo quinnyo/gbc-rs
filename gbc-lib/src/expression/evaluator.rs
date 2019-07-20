@@ -242,7 +242,7 @@ impl EvaluatorContext {
                         let local_index = (name.clone(), Some(from_file_index));
 
                         // Local Lookup
-                        let value = if let Some(result) = self.constants.get(&local_index) {
+                        if let Some(result) = self.constants.get(&local_index) {
                             result.clone()
 
                         // Global Lookup
@@ -275,8 +275,7 @@ impl EvaluatorContext {
 
                         } else {
                             return Err(self.undeclared_const_error(parent, name));
-                        };
-                        value
+                        }
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),

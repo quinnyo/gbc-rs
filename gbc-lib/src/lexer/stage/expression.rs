@@ -18,6 +18,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 // Expression Specific Tokens -------------------------------------------------
 lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
+    // Default, Exported
     Constant((bool, bool)),
     Reserved(()),
     Segment(()),

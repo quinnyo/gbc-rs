@@ -25,6 +25,10 @@ use self::entry::{EntryData, SectionEntry};
 use super::util::{self, instruction};
 
 
+// Types ----------------------------------------------------------------------
+type DataStorageResult = (usize, Option<Vec<u8>>, Option<Vec<(usize, DataExpression)>>);
+
+
 // Statics --------------------------------------------------------------------
 #[derive(Debug, Eq, PartialEq)]
 struct SectionDefault {
@@ -618,7 +622,7 @@ impl Section {
         storage: DataStorage,
         is_constant: bool
 
-    ) -> Result<(usize, Option<Vec<u8>>, Option<Vec<(usize, DataExpression)>>), SourceError> {
+    ) -> Result<DataStorageResult, SourceError> {
         Ok(match storage {
             // RAM Only
             DataStorage::Byte => {
