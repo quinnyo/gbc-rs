@@ -70,7 +70,7 @@ impl SourceError {
                 format!("\n\n{}", file.include_stack.iter().rev().map(|token| {
                     let file = &files[token.file_index];
                     let (line, col) = file.get_line_and_col(token.start_index);
-                    format!("included from file \"{}\" on line {}, column {}", file.path.display(), line + 1, col + 1)
+                    format!("included from file \"{}\" on line {}, column {}", error_path(file), line + 1, col + 1)
 
                 }).collect::<Vec<String>>().join("\n"))
 
@@ -137,7 +137,7 @@ impl SourceError {
                 let location = format!(
                     "{} in file \"{}\" on line {}, column {}:",
                     message,
-                    file.path.display(),
+                    error_path(file),
                     line + 1,
                     col + 1,
                 );
@@ -152,7 +152,7 @@ impl SourceError {
             } else {
                 let location = format!(
                     "In file \"{}\" on line {}, column {}:",
-                    file.path.display(),
+                    error_path(file),
                     line + 1,
                     col + 1,
                 );
@@ -175,6 +175,13 @@ impl SourceError {
 impl fmt::Display for SourceError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.message)
+    }
+}
+
+fn error_path(file: &LexerFile) -> String {
+    match file.path.canonicalize() {
+        Ok(p) => format!("{}", p.display()),
+        Err(_) => format!("{}", file.path.display())
     }
 }
 
