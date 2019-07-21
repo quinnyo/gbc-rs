@@ -383,11 +383,12 @@ mod test {
         (re.replace_all(err.0.as_str(), "XXms").to_string(), err.1.to_string())
     }
 
-    fn compiler_lint<S: Into<String>>(mut compiler: Compiler, s: S) -> String {
+    fn compiler_lint<S: Into<String>>(mut compiler: Compiler, s: S, c: S) -> String {
         compiler.set_no_color();
         compiler.set_linter_enabled();
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
+        reader.add_file("child.gb.s", c.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
         let output = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
         re.replace_all(output.as_str(), "XXms").to_string()
@@ -574,7 +575,7 @@ mod test {
     fn test_linting_unused_constant_direct() {
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(c, "SECTION ROM0\nUNUSED EQU 2\nUSED EQU 1\nDB USED"),
+            compiler_lint(c, "SECTION ROM0\nUNUSED EQU 2\nUSED EQU 1\nDB USED", ""),
             "        Info Linter Report\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 1\n".to_string()
         );
     }
@@ -583,7 +584,7 @@ mod test {
     fn test_linting_unused_constant_indirect() {
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(c, "SECTION ROM0\nUNUSED EQU INDIRECT_UNUSED\nINDIRECT_UNUSED EQU 2\nINDIRECT_USED EQU 1\nUSED EQU INDIRECT_USED\nDB USED"),
+            compiler_lint(c, "SECTION ROM0\nUNUSED EQU INDIRECT_UNUSED\nINDIRECT_UNUSED EQU 2\nINDIRECT_USED EQU 1\nUSED EQU INDIRECT_USED\nDB USED", ""),
             "        Info Linter Report\n     Warning Constant \"INDIRECT_UNUSED\" is never used, declared in file \"main.gb.s\" on line 3, column 1\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 1\n".to_string()
         );
     }
@@ -592,7 +593,7 @@ mod test {
     fn test_linting_unused_label_direct() {
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(c, "SECTION ROM0\nused_label:\nunused_label:\njp used_label"),
+            compiler_lint(c, "SECTION ROM0\nused_label:\nunused_label:\njp used_label", ""),
             "        Info Linter Report\n     Warning Label \"unused_label\" is never referenced, declared in file \"main.gb.s\" on line 3, column 1\n".to_string()
         );
     }
@@ -601,17 +602,16 @@ mod test {
     fn test_linting_replace_fixed_value_with_constant() {
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(c, "SECTION ROM0\nUSED EQU 2048\nDW USED\nDW 2048"),
+            compiler_lint(c, "SECTION ROM0\nUSED EQU 2048\nDW USED\nDW 2048", ""),
             "        Info Linter Report\n     Warning Fixed integer value ($0800) could be replaced with the constant \"USED\" that shares the same value in file \"main.gb.s\" on line 4, column 4\n".to_string()
         );
-        // TODO test multiple files
     }
 
     #[test]
     fn test_linting_constant_global_not_used_globally() {
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(c, "SECTION ROM0\nGLOBAL USED EQU 2048\nDW USED"),
+            compiler_lint(c, "SECTION ROM0\nGLOBAL USED EQU 2048\nDW USED\nGLOBAL SHARED EQU 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
             "        Info Linter Report\n     Warning Constant \"USED\" should be made non-global or default, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 8\n".to_string()
         );
     }
