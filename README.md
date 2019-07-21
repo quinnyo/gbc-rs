@@ -154,6 +154,12 @@ BLOCK VOLATILE
 ENDBLOCK
 ```
 
+There is also the option to disable optimization of a single instruction by prefixing it directly with 'VOLATILE':
+
+```asm
+    VOLATILE cp 0; will not be optimized to "or a"
+```
+
 ### User defined Macros
 
 User Macros work by generating and substituting tokens.
