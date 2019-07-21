@@ -36,9 +36,10 @@ FLAGS:
     -D, --debug          Enable debug instructions for BGB debugger
     -h, --help           Prints help information
     -i, --info           Display ROM info
+    -l, --lint           Run linter only and display warnings
         --no-optimize    Disable instruction optimizations
     -S, --segments       Display segments usage
-    -s, --silent         Surpresses all output
+    -s, --silent         Surpress all output
     -V, --version        Prints version information
 
 OPTIONS:

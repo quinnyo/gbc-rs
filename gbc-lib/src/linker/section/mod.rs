@@ -19,7 +19,7 @@ use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
-use crate::expression::evaluator::EvaluatorContext;
+use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
 use crate::traits::FileReader;
 use self::entry::{EntryData, SectionEntry};
 use super::util::{self, instruction};
@@ -234,6 +234,7 @@ impl Section {
     pub fn add_entry(
         &mut self,
         context: &EvaluatorContext,
+        usage: &mut UsageInformation,
         token: EntryToken,
         volatile: bool
 
@@ -241,7 +242,7 @@ impl Section {
         match token {
             EntryToken::Instruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, None, volatile, false)?;
+                let bytes = Self::instruction_entry(&inner, context, usage, op_code, None, volatile, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -251,7 +252,7 @@ impl Section {
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), volatile, false)?;
+                let bytes = Self::instruction_entry(&inner, context, usage, op_code, Some(expr), volatile, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -261,7 +262,7 @@ impl Section {
             },
             EntryToken::DebugInstruction(inner, op_code) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, None, volatile, true)?;
+                let bytes = Self::instruction_entry(&inner, context, usage, op_code, None, volatile, true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -271,7 +272,7 @@ impl Section {
             },
             EntryToken::DebugInstructionWithArg(inner, op_code, expr) => {
                 self.check_rom(&inner, "Instruction")?;
-                let bytes = Self::instruction_entry(&inner, context, op_code, Some(expr), volatile, true)?;
+                let bytes = Self::instruction_entry(&inner, context, usage, op_code, Some(expr), volatile, true)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
                     inner,
@@ -300,6 +301,7 @@ impl Section {
                 // Storage only consists of const expressions and can be evaluated here
                 let (size, bytes, expressions) = self.evaluate_data_storage(
                     context,
+                    usage,
                     &inner,
                     &endianess,
                     storage,
@@ -327,6 +329,7 @@ impl Section {
                         if is_constant {
                             let (_, bytes, _) = self.evaluate_data_storage(
                                 context,
+                                usage,
                                 &inner,
                                 &endianess,
                                 storage,
@@ -432,7 +435,12 @@ impl Section {
         Ok(())
     }
 
-    pub fn resolve_arguments(&mut self, context: &EvaluatorContext) -> Result<(), SourceError> {
+    pub fn resolve_arguments(
+        &mut self,
+        context: &EvaluatorContext,
+        usage: &mut UsageInformation
+
+    ) -> Result<(), SourceError> {
         for entry in &mut self.entries {
 
             // Set context rom_offset for relative offset calculation
@@ -444,6 +452,7 @@ impl Section {
                     *bytes = Some(Self::resolve_expression_arguments_to_bytes(
                         &entry.inner,
                         context,
+                        usage,
                         endianess,
                         expressions,
                         Some(end_of_instruction)
@@ -457,6 +466,7 @@ impl Section {
                     *bytes = Self::resolve_instruction_argument_to_bytes(
                         &entry.inner,
                         context,
+                        usage,
                         *op_code,
                         expr,
                         Some(end_of_instruction)
@@ -617,6 +627,7 @@ impl Section {
     fn evaluate_data_storage(
         &self,
         context: &EvaluatorContext,
+        usage: &mut UsageInformation,
         inner: &InnerToken,
         endianess: &DataEndianess,
         storage: DataStorage,
@@ -648,6 +659,7 @@ impl Section {
                         Self::resolve_expression_arguments_to_bytes(
                             inner,
                             context,
+                            usage,
                             endianess,
                             &expressions,
                             None
@@ -667,6 +679,7 @@ impl Section {
                         Self::resolve_expression_arguments_to_bytes(
                             inner,
                             context,
+                            usage,
                             endianess,
                             &expressions,
                             None
@@ -678,8 +691,8 @@ impl Section {
                 }
             },
             DataStorage::Buffer(ref length, ref fill) => {
-                let length_or_string = context.resolve_dyn_expression(length, None, inner.file_index)?;
-                let fill = context.resolve_opt_dyn_expression(fill, None, inner.file_index)?;
+                let length_or_string = context.resolve_dyn_expression(length, usage, None, inner.file_index)?;
+                let fill = context.resolve_opt_dyn_expression(fill, usage, None, inner.file_index)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"
                     (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
@@ -722,6 +735,7 @@ impl Section {
     fn resolve_expression_arguments_to_bytes(
         inner: &InnerToken,
         context: &EvaluatorContext,
+        usage: &mut UsageInformation,
         endianess: &DataEndianess,
         expressions: &[(usize, DataExpression)],
         end_of_instruction: Option<i32>
@@ -731,11 +745,11 @@ impl Section {
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_dyn_expression(expression, end_of_instruction, inner.file_index)?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_dyn_expression(expression, end_of_instruction, inner.file_index)?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -753,6 +767,7 @@ impl Section {
     fn resolve_instruction_argument_to_bytes(
         inner: &InnerToken,
         context: &EvaluatorContext,
+        usage: &mut UsageInformation,
         op_code: u16,
         expression: &DataExpression,
         end_of_instruction: Option<i32>
@@ -762,7 +777,7 @@ impl Section {
 
             // Handle constant/offset -> op code mapping
             if let Some(offsets) = instruction::offsets(op_code) {
-                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, end_of_instruction, inner.file_index)?, "Invalid constant argument")?;
+                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid constant argument")?;
                 let mut mapped_op_code = None;
                 for (constant_value, constant_op_code) in offsets {
                     if value == *constant_value as i32 {
@@ -787,11 +802,11 @@ impl Section {
                 let mut arg_bytes: Vec<u8> = match argument {
                     Argument::MemoryLookupByteValue | Argument::ByteValue => {
                         vec![
-                            util::byte_value(inner, context.resolve_dyn_expression(expression, end_of_instruction, inner.file_index)?, "Invalid byte argument")?
+                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid byte argument")?
                         ]
                     },
                     Argument::MemoryLookupWordValue | Argument::WordValue => {
-                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, end_of_instruction, inner.file_index)?, "Invalid word argument")?;
+                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid word argument")?;
                         vec![
                             word as u8,
                             (word >> 8) as u8
@@ -801,12 +816,12 @@ impl Section {
                         // ldsp hl,X
                         if op_code == 248 {
                             vec![
-                                util::byte_value(inner, context.resolve_dyn_expression(expression, end_of_instruction, inner.file_index)?, "Invalid signed byte argument")?
+                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid signed byte argument")?
                             ]
 
                         // jr
                         } else if let Some(end_of_instruction) = end_of_instruction {
-                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, Some(end_of_instruction), inner.file_index)?, "Invalid address")?;
+                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), inner.file_index)?, "Invalid address")?;
                             let target = address as i32 - end_of_instruction;
                             vec![
                                 util::signed_byte_value(inner, target, "").map_err(|mut e| {
@@ -833,6 +848,7 @@ impl Section {
     fn instruction_entry(
         inner: &InnerToken,
         context: &EvaluatorContext,
+        usage: &mut UsageInformation,
         op_code: u16,
         expression: Option<DataExpression>,
         volatile: bool,
@@ -844,6 +860,7 @@ impl Section {
                 if let Some(bytes) = Self::resolve_instruction_argument_to_bytes(
                     inner,
                     context,
+                    usage,
                     op_code,
                     &expression,
                     None

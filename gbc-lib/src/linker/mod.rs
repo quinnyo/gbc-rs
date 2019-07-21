@@ -11,9 +11,10 @@ mod util;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{Lexer, LexerToken, EntryStage, EntryToken, Symbol};
+use crate::compiler::Lint;
+use crate::lexer::{Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, ExpressionValue};
-use crate::expression::evaluator::EvaluatorContext;
+use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
 use crate::traits::FileReader;
 use self::section::Section;
 
@@ -32,7 +33,10 @@ pub struct SegmentUsage {
 
 // Linker Implementation ------------------------------------------------------
 pub struct Linker {
-    sections: Vec<Section>
+    sections: Vec<Section>,
+    context: EvaluatorContext,
+    usage: UsageInformation,
+    files: Vec<LexerFile>
 }
 
 impl Linker {
@@ -41,27 +45,32 @@ impl Linker {
         file_reader: &R,
         lexer: Lexer<EntryStage>,
         strip_debug: bool,
-        optimize: bool
+        optimize: bool,
+        linter_enabled: bool
 
     ) -> Result<Self, SourceError> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        Ok(Self::new(file_reader, lexer.tokens, strip_debug, optimize).map_err(|err| {
+        let mut linker = Self::new(file_reader, lexer.tokens, strip_debug, optimize, linter_enabled).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
-        })?)
+        })?;
+        linker.files = files;
+        Ok(linker)
     }
 
     fn new<R: FileReader>(
         file_reader: &R,
         tokens: Vec<EntryToken>,
         strip_debug: bool,
-        optimize: bool
+        optimize: bool,
+        linter_enabled: bool
 
     ) -> Result<Self, SourceError> {
 
-        let mut context = EvaluatorContext::new();
+        let mut context = EvaluatorContext::new(linter_enabled);
+        let mut usage = UsageInformation::new();
         let mut entry_tokens = Vec::with_capacity(tokens.len());
-        Self::parse_entries(&mut context, tokens, true, false, &mut entry_tokens)?;
+        Self::parse_entries(&mut context, &mut usage, tokens, true, false, &mut entry_tokens)?;
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
@@ -74,10 +83,10 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, inner.file_index)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, inner.file_index)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, inner.file_index)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, inner.file_index)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, &mut usage, inner.file_index)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, &mut usage, inner.file_index)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, &mut usage, inner.file_index)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, &mut usage, inner.file_index)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
@@ -110,7 +119,7 @@ impl Linker {
                 return Err(token.error("Unexpected ROM entry before any section declaration".to_string()))
 
             } else if let Some(section) = sections.get_mut(section_index) {
-                section.add_entry(&context, token, volatile)?;
+                section.add_entry(&context, &mut usage, token, volatile)?;
             }
         }
 
@@ -124,12 +133,12 @@ impl Linker {
             s.initialize_using_blocks(file_reader)?;
         }
 
-        Self::resolve_sections(&mut sections, &mut context)?;
+        Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
 
         if optimize {
             // Run passes until no more optimizations were applied
             while Self::optimize_instructions(&mut sections) {
-                Self::resolve_sections(&mut sections, &mut context)?;
+                Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
             }
         }
 
@@ -140,8 +149,26 @@ impl Linker {
         }
 
         Ok(Self {
-            sections
+            sections,
+            context,
+            usage,
+            files: Vec::new()
         })
+    }
+
+    pub fn to_lint_list(&self) -> Vec<Lint> {
+        let mut lints = Vec::new();
+        let mut unused = self.context.find_unused(&self.usage);
+        unused.append(&mut self.context.find_magic_numbers(&self.usage));
+        unused.sort_by(|a, b| {
+            (a.0, &a.1).cmp(&(b.0, &b.1))
+        });
+        for (_, _, error) in unused {
+            lints.push(Lint::new(
+                error.extend_with_basic_location(&self.files)
+            ));
+        }
+        lints
     }
 
     pub fn to_symbol_list(&self) -> Vec<(usize, usize, String)> {
@@ -199,6 +226,7 @@ impl Linker {
 
     fn parse_entries(
         context: &mut EvaluatorContext,
+        usage: &mut UsageInformation,
         tokens: Vec<EntryToken>,
         allow_constant_declaration: bool,
         volatile_instructions: bool,
@@ -218,8 +246,8 @@ impl Linker {
                 }
 
             // Note label definitions for error messages
-            } else if let EntryToken::ParentLabelDef(ref inner, _) = token {
-                context.declare_label(inner);
+            } else if let EntryToken::ParentLabelDef(ref inner, index) = token {
+                context.declare_label(inner, index);
                 remaining_tokens.push((volatile_instructions, token));
 
             // Evaluate if conditions and insert the corresponding branch into
@@ -227,13 +255,13 @@ impl Linker {
             } else if let EntryToken::IfStatement(inner, branches) = token {
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
-                        context.resolve_const_expression(&condition, inner.file_index)?
+                        context.resolve_const_expression(&condition, usage, inner.file_index)?
 
                     } else {
                         ExpressionResult::Integer(1)
                     };
                     if result.is_truthy() {
-                        Self::parse_entries(context, branch.body, true, false, remaining_tokens)?;
+                        Self::parse_entries(context, usage, branch.body, true, false, remaining_tokens)?;
                         break;
                     }
                 }
@@ -243,8 +271,8 @@ impl Linker {
             } else if let EntryToken::ForStatement(inner, for_statement) = token {
 
                 let binding = for_statement.binding;
-                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, inner.file_index)?, "Invalid for range argument")?;
-                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, inner.file_index)?, "Invalid for range argument")?;
+                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, usage, inner.file_index)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, usage, inner.file_index)?, "Invalid for range argument")?;
 
                 let iterations = to - from;
                 if iterations > 2048 {
@@ -266,7 +294,7 @@ impl Linker {
                             token
 
                         }).collect();
-                        Self::parse_entries(context, body_tokens, false, false, remaining_tokens)?;
+                        Self::parse_entries(context, usage, body_tokens, false, false, remaining_tokens)?;
                     }
                 }
 
@@ -274,7 +302,7 @@ impl Linker {
             } else if let EntryToken::UsingStatement(inner, cmd, tokens) = token {
 
                 let mut data_tokens = Vec::new();
-                Self::parse_entries(context, tokens, true, false, &mut data_tokens)?;
+                Self::parse_entries(context, usage, tokens, true, false, &mut data_tokens)?;
 
                 let mut body_tokens = Vec::new();
                 for (_, token) in data_tokens {
@@ -298,7 +326,7 @@ impl Linker {
 
             // Expand and set instructions to volatile inside volatile statements
             } else if let EntryToken::VolatileStatement(_, tokens) = token {
-                Self::parse_entries(context, tokens, true, true, remaining_tokens)?;
+                Self::parse_entries(context, usage, tokens, true, true, remaining_tokens)?;
 
             } else {
                 remaining_tokens.push((volatile_instructions, token));
@@ -339,14 +367,15 @@ impl Linker {
 
     fn resolve_sections(
         sections: &mut [Section],
-        context: &mut EvaluatorContext
+        context: &mut EvaluatorContext,
+        usage: &mut UsageInformation
 
     ) -> Result<(), SourceError> {
         for s in sections.iter_mut() {
             s.resolve_addresses(context)?;
         }
         for s in sections.iter_mut() {
-            s.resolve_arguments(context)?;
+            s.resolve_arguments(context, usage)?;
         }
         Ok(())
     }
@@ -371,6 +400,8 @@ impl Linker {
         }
 
         let mut v = cmp::max(max_start_address, 0x4000) / 0x4000;
+
+        // TODO verify against size in header and warn if mismatch
 
         // Next power of two
         v |= v >> 1;
@@ -402,48 +433,48 @@ mod test {
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), false, false).expect("Linker failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), false, false, false).expect("Linker failed")
     }
 
     pub fn linker_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> Linker {
-        Linker::from_lexer(reader, entry_lex(s.into()), false, false).expect("Linker failed")
+        Linker::from_lexer(reader, entry_lex(s.into()), false, false, false).expect("Linker failed")
     }
 
     pub fn linker_error_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> String {
         colored::control::set_override(false);
-        Linker::from_lexer(reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(reader, entry_lex(s.into()), false, false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(&reader, entry_lex(s.into()), false, false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_child<S: Into<String>>(s: S, c: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false).expect("Linker failed")
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false, false).expect("Linker failed")
     }
 
     pub fn linker_error_child<S: Into<String>>(s: S, c: S) -> String {
         colored::control::set_override(false);
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), true, false).expect("Debug stripping failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), true, false, false).expect("Debug stripping failed")
     }
 
     pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), true, true).expect("Instruction optimization failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), true, true, false).expect("Instruction optimization failed")
     }
 
     pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), false, false).expect("Binary Linker failed")
+        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), false, false, false).expect("Binary Linker failed")
     }
 
     pub fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {

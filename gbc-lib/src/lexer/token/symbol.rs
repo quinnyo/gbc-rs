@@ -3,7 +3,7 @@ use std::fmt;
 
 
 // Symbols --------------------------------------------------------------------
-#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
 pub enum Symbol {
     INCLUDE,
     BINARY,

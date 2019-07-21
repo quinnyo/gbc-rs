@@ -20,7 +20,7 @@ use gbc_lib::traits::{FileError, FileReader, FileWriter};
 fn main() {
 
     let matches = App::new("gbc")
-        .version("0.1")
+        .version("0.5")
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
         .about("GameBoy Compiler")
         .arg(Arg::with_name("SOURCE_FILE")
@@ -52,10 +52,15 @@ fn main() {
             .short("S")
             .help("Display segments usage")
         )
+        .arg(Arg::with_name("lint")
+            .long("lint")
+            .short("l")
+            .help("Run linter only and display warnings")
+        )
         .arg(Arg::with_name("silent")
             .long("silent")
             .short("s")
-            .help("Surpresses all output")
+            .help("Surpress all output")
         )
         .arg(Arg::with_name("no-optimize")
             .long("no-optimize")
@@ -80,6 +85,10 @@ fn main() {
 
         if matches.occurrences_of("segments") > 0 {
             compiler.set_print_segment_map();
+        }
+
+        if matches.occurrences_of("lint") > 0 {
+            compiler.set_linter_enabled();
         }
 
         if matches.occurrences_of("debug") == 0 {

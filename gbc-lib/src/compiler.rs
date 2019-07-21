@@ -16,12 +16,28 @@ use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage,
 use crate::traits::{FileReader, FileWriter};
 
 
+// Structs --------------------------------------------------------------------
+#[derive(Debug)]
+pub struct Lint {
+    error: SourceError
+}
+
+impl Lint {
+    pub fn new(error: SourceError) -> Self {
+        Self {
+            error
+        }
+    }
+}
+
+
 // Compiler Pipeline Implementation -------------------------------------------
 pub struct Compiler {
     silent: bool,
     no_color: bool,
     strip_debug_code: bool,
     optimize_instructions: bool,
+    linter_enabled: bool,
     print_segment_map: bool,
     print_rom_info: bool,
     generate_symbols: Option<PathBuf>,
@@ -37,6 +53,7 @@ impl Compiler {
             no_color: false,
             strip_debug_code: false,
             optimize_instructions: false,
+            linter_enabled: false,
             print_segment_map: false,
             print_rom_info: false,
             generate_symbols: None,
@@ -77,12 +94,18 @@ impl Compiler {
         self.optimize_instructions = true;
     }
 
+    pub fn set_linter_enabled(&mut self) {
+        self.linter_enabled = true;
+    }
+
     pub fn compile<T: FileReader + FileWriter>(&mut self, files: &mut T, entry: PathBuf) -> Result<String, (String, CompilerError)> {
         colored::control::set_override(!self.no_color);
         self.log(format!("{} \"{}\" ...", "   Compiling".bright_green(), entry.display()));
         let entry_lexer = self.parse(files, entry)?;
         let linker = self.link(files, entry_lexer)?;
-        self.generate(files, linker)?;
+        if !self.linter_enabled {
+            self.generate(files, linker)?;
+        }
         Ok(self.output.join("\n"))
     }
 }
@@ -94,10 +117,10 @@ impl Compiler {
         let include_lexer = Lexer::<IncludeStage>::from_file(io, &entry).map_err(|e| self.error("file inclusion", e))?;
         self.log(format!("  {} completed in {}ms.", "   File IO".bright_green(), start.elapsed().as_millis()));
         let start = Instant::now();
-        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| self.error("macro expansion", e))?;
-        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| self.error("value construction", e))?;
-        let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| self.error("expression construction", e))?;
-        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| self.error("entry construction", e))?;
+        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer, self.linter_enabled).map_err(|e| self.error("macro expansion", e))?;
+        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer, self.linter_enabled).map_err(|e| self.error("value construction", e))?;
+        let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer, self.linter_enabled).map_err(|e| self.error("expression construction", e))?;
+        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer, self.linter_enabled).map_err(|e| self.error("entry construction", e))?;
         self.log(format!("  {} completed in {}ms.", "   Parsing".bright_green(), start.elapsed().as_millis()));
         Ok(entry_lexer)
     }
@@ -108,15 +131,24 @@ impl Compiler {
             io,
             entry_lexer,
             self.strip_debug_code,
-            self.optimize_instructions
+            self.optimize_instructions,
+            self.linter_enabled
 
         ).map_err(|e| self.error("section linking", e))?;
+
+        // Report linter warnings only
+        if self.linter_enabled {
+            self.print_linter_warnings(linker.to_lint_list());
+            return Ok(linker);
+        }
+
         self.log(format!("  {} completed in {}ms.", "   Linking".bright_green(), start.elapsed().as_millis()));
 
         // Report Segment Usage
         if self.print_segment_map {
             self.print_segment_usage(linker.to_usage_list());
         }
+
 
         // Generate symbol file for BGB debugger
         if let Some(output_file) = self.generate_symbols.take() {
@@ -150,7 +182,7 @@ impl Compiler {
 
         // Apply checksum etc.
         generator.finalize_rom();
-        self.log(format!("{} ROM in {}ms.", "   Validated".bright_green(), start.elapsed().as_millis()));
+        self.log(format!("{} ROM verified in {}ms.", "   Validated".bright_green(), start.elapsed().as_millis()));
 
         let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
@@ -237,10 +269,17 @@ impl Compiler {
         self.output.pop();
     }
 
+    fn print_linter_warnings(&mut self, lints: Vec<Lint>) {
+        self.info("Linter Report");
+        for lint in lints {
+            self.warning(format!("{}", lint.error));
+        }
+        self.output.push("".to_string());
+    }
 
     // Helpers ----------------------------------------------------------------
     fn log<S: Into<String>>(&mut self, s: S) {
-        if !self.silent {
+        if !self.silent && !self.linter_enabled {
             self.output.push(s.into());
         }
     }
@@ -344,6 +383,16 @@ mod test {
         (re.replace_all(err.0.as_str(), "XXms").to_string(), err.1.to_string())
     }
 
+    fn compiler_lint<S: Into<String>>(mut compiler: Compiler, s: S) -> String {
+        compiler.set_no_color();
+        compiler.set_linter_enabled();
+        let mut reader = MockFileReader::default();
+        reader.add_file("main.gb.s", s.into().as_str());
+        let re = Regex::new(r"([0-9]+)ms").unwrap();
+        let output = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
+        re.replace_all(output.as_str(), "XXms").to_string()
+    }
+
     // STDOUT -----------------------------------------------------------------
     #[test]
     fn test_silent() {
@@ -355,7 +404,7 @@ mod test {
     #[test]
     fn test_empty_input() {
         let c = Compiler::new();
-        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.");
+        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM verified in XXms.");
     }
 
     #[test]
@@ -400,7 +449,7 @@ mod test {
 
              $ff80..=$ffff   ======    128 bytes  (Vars)
 
-   Validated ROM in XXms."#
+   Validated ROM verified in XXms."#
         );
     }
 
@@ -412,7 +461,7 @@ mod test {
         let (output, mut writer) = compiler_writer(c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
         assert_eq!(file, "00:0150 global\n00:0151 global.local");
-        assert_eq!(output, "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM in XXms.\n     Written ROM to \"rom.gb\".");
+        assert_eq!(output, "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
     // Debug Stripping --------------------------------------------------------
@@ -460,7 +509,7 @@ mod test {
     fn test_rom_info_defaults() {
         let mut c = Compiler::new();
         c.set_print_rom_info();
-        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
+        assert_eq!(compiler(c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM verified in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
     }
 
     #[test]
@@ -487,7 +536,7 @@ mod test {
      File IO completed in XXms.
      Parsing completed in XXms.
      Linking completed in XXms.
-   Validated ROM in XXms.
+   Validated ROM verified in XXms.
         Info ROM Title: ABCDEFGHIJK
         Info ROM Version: 0
         Info ROM Checksum: $43 / $1A2D
@@ -518,6 +567,53 @@ mod test {
             "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.".to_string(),
             "       Error Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
         ));
+    }
+
+    // Lints ------------------------------------------------------------------
+    #[test]
+    fn test_linting_unused_constant_direct() {
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(c, "SECTION ROM0\nUNUSED EQU 2\nUSED EQU 1\nDB USED"),
+            "        Info Linter Report\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 1\n".to_string()
+        );
+    }
+
+    #[test]
+    fn test_linting_unused_constant_indirect() {
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(c, "SECTION ROM0\nUNUSED EQU INDIRECT_UNUSED\nINDIRECT_UNUSED EQU 2\nINDIRECT_USED EQU 1\nUSED EQU INDIRECT_USED\nDB USED"),
+            "        Info Linter Report\n     Warning Constant \"INDIRECT_UNUSED\" is never used, declared in file \"main.gb.s\" on line 3, column 1\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 1\n".to_string()
+        );
+    }
+
+    #[test]
+    fn test_linting_unused_label_direct() {
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(c, "SECTION ROM0\nused_label:\nunused_label:\njp used_label"),
+            "        Info Linter Report\n     Warning Label \"unused_label\" is never referenced, declared in file \"main.gb.s\" on line 3, column 1\n".to_string()
+        );
+    }
+
+    #[test]
+    fn test_linting_replace_fixed_value_with_constant() {
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(c, "SECTION ROM0\nUSED EQU 2048\nDW USED\nDW 2048"),
+            "        Info Linter Report\n     Warning Fixed integer value ($0800) could be replaced with the constant \"USED\" that shares the same value in file \"main.gb.s\" on line 4, column 4\n".to_string()
+        );
+        // TODO test multiple files
+    }
+
+    #[test]
+    fn test_linting_constant_global_not_used_globally() {
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(c, "SECTION ROM0\nGLOBAL USED EQU 2048\nDW USED"),
+            "        Info Linter Report\n     Warning Constant \"USED\" should be made non-global or default, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 8\n".to_string()
+        );
     }
 
 }

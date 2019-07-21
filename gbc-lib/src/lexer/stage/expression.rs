@@ -46,7 +46,7 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
 });
 
 impl ExpressionToken {
-    fn try_from(token: ValueToken) -> Result<ExpressionToken, SourceError> {
+    fn try_from(token: ValueToken, linter_enabled: bool) -> Result<ExpressionToken, SourceError> {
         match token {
             ValueToken::Segment(inner) => Ok(ExpressionToken::Segment(inner)),
             ValueToken::Reserved(inner) => Ok(ExpressionToken::Reserved(inner)),
@@ -70,7 +70,7 @@ impl ExpressionToken {
                 let mut expr_branches = Vec::with_capacity(branches.len());
                 for branch in branches {
                     expr_branches.push(branch.into_other(|tokens| {
-                        ExpressionStage::parse_expression(tokens, false)
+                        ExpressionStage::parse_expression(tokens, false, linter_enabled)
                     })?);
                 }
                 Ok(ExpressionToken::IfStatement(
@@ -88,15 +88,15 @@ impl ExpressionToken {
 
                 Ok(ExpressionToken::ForStatement(inner, ForStatement {
                     binding,
-                    from: ExpressionStage::parse_expression(for_statement.from, false)?,
-                    to: ExpressionStage::parse_expression(for_statement.to, false)?,
-                    body: ExpressionStage::parse_expression(for_statement.body, false)?
+                    from: ExpressionStage::parse_expression(for_statement.from, false, linter_enabled)?,
+                    to: ExpressionStage::parse_expression(for_statement.to, false, linter_enabled)?,
+                    body: ExpressionStage::parse_expression(for_statement.body, false, linter_enabled)?
                 }))
             },
             ValueToken::BlockStatement(inner, block) => {
                 Ok(ExpressionToken::BlockStatement(inner, match block {
-                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, false)?),
-                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, false)?)
+                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, false, linter_enabled)?),
+                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, false, linter_enabled)?)
                 }))
             },
             token => Err(token.error(
@@ -118,10 +118,11 @@ impl LexerStage for ExpressionStage {
     fn from_tokens(
         tokens: Vec<<Self::Input as LexerStage>::Output>,
         _macro_calls: &mut Vec<MacroCall>,
-        _data: &mut Vec<Self::Data>
+        _data: &mut Vec<Self::Data>,
+        linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let parsed_tokens = Self::parse_expression(tokens, false)?;
+        let parsed_tokens = Self::parse_expression(tokens, false, linter_enabled)?;
         Ok(parsed_tokens)
     }
 
@@ -129,7 +130,12 @@ impl LexerStage for ExpressionStage {
 
 impl ExpressionStage {
 
-    fn parse_expression(tokens: Vec<ValueToken>, is_argument: bool) -> Result<Vec<ExpressionToken>, SourceError> {
+    fn parse_expression(
+        tokens: Vec<ValueToken>,
+        is_argument: bool,
+        linter_enabled: bool
+
+    ) -> Result<Vec<ExpressionToken>, SourceError> {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
@@ -145,7 +151,7 @@ impl ExpressionStage {
                 expression_tokens.push(c);
 
             } else {
-                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument)?);
+                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument, linter_enabled)?);
             }
         }
         Ok(expression_tokens)
@@ -178,7 +184,8 @@ impl ExpressionStage {
     fn parse_expression_tokens(
         tokens: &mut TokenIterator<ValueToken>,
         token: ValueToken,
-        is_argument: bool
+        is_argument: bool,
+        linter_enabled: bool
 
     ) -> Result<ExpressionToken, SourceError> {
         // Check for start of expression
@@ -214,7 +221,7 @@ impl ExpressionStage {
             }
 
             // Try to build an expression tree from the tokens
-            let expr = ExpressionParser::parse_tokens(value_tokens)?;
+            let expr = ExpressionParser::parse_tokens(value_tokens, linter_enabled)?;
             if expr.is_constant() {
                 Ok(ExpressionToken::ConstExpression(inner, expr))
 
@@ -224,7 +231,7 @@ impl ExpressionStage {
 
         } else if !is_argument {
             // Forward all non-expression tokens
-            ExpressionToken::try_from(token)
+            ExpressionToken::try_from(token, linter_enabled)
 
         } else {
             Err(token.error(
@@ -233,8 +240,8 @@ impl ExpressionStage {
         }
     }
 
-    fn parse_expression_argument(tokens: Vec<ValueToken>) -> Result<Expression, SourceError> {
-        let mut expression_tokens = Self::parse_expression(tokens, true)?;
+    fn parse_expression_argument(tokens: Vec<ValueToken>, linter_enabled: bool) -> Result<Expression, SourceError> {
+        let mut expression_tokens = Self::parse_expression(tokens, true, linter_enabled)?;
         if expression_tokens.len() > 1 {
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
         }
@@ -254,23 +261,25 @@ struct ExpressionParser {
     token: Option<ValueToken>,
     tokens: TokenIterator<ValueToken>,
     last_file_index: usize,
-    last_index: usize
+    last_index: usize,
+    linter_support: bool
 }
 
 impl ExpressionParser {
 
-    fn parse_tokens(tokens: Vec<ValueToken>) -> Result<Expression, SourceError> {
-        ExpressionParser::new(tokens)?.parse_binary(0)
+    fn parse_tokens(tokens: Vec<ValueToken>, linter_support: bool) -> Result<Expression, SourceError> {
+        ExpressionParser::new(tokens, linter_support)?.parse_binary(0)
     }
 
-    fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, SourceError> {
+    fn new(tokens: Vec<ValueToken>, linter_support: bool) -> Result<ExpressionParser, SourceError> {
         let mut tokens = TokenIterator::new(tokens);
         let first = tokens.next();
         let mut parser = Self {
             token: None,
             tokens,
             last_file_index: 0,
-            last_index: 0
+            last_index: 0,
+            linter_support
         };
         parser.update(first);
         Ok(parser)
@@ -374,8 +383,13 @@ impl ExpressionParser {
                 Some(ValueToken::Float { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::Float(value)),
                 ),
-                Some(ValueToken::Integer { value, .. }) => Ok(
-                    Expression::Value(ExpressionValue::Integer(value)),
+                Some(ValueToken::Integer { inner, value }) => Ok(
+                    if self.linter_support {
+                        Expression::Value(ExpressionValue::LintInteger(inner, value))
+
+                    } else {
+                        Expression::Value(ExpressionValue::Integer(value))
+                    }
                 ),
                 Some(ValueToken::String { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::String(value)),
@@ -389,7 +403,7 @@ impl ExpressionParser {
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
-                        args.push(ExpressionStage::parse_expression_argument(tokens)?);
+                        args.push(ExpressionStage::parse_expression_argument(tokens, self.linter_support)?);
                     }
                     Ok(Expression::BuiltinCall {
                         name: inner.value.clone(),
@@ -479,12 +493,12 @@ mod test {
     use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch, ForStatement, BlockStatement};
 
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
-        Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")
+        Lexer::<ExpressionStage>::from_lexer(value_lex(s), false).expect("ExpressionLexer failed")
     }
 
     fn expr_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        Lexer::<ExpressionStage>::from_lexer(value_lex(s)).err().unwrap().to_string()
+        Lexer::<ExpressionStage>::from_lexer(value_lex(s), false).err().unwrap().to_string()
     }
 
     fn tfe<S: Into<String>>(s: S) -> Vec<ExpressionToken> {

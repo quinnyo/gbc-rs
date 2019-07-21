@@ -224,7 +224,8 @@ impl LexerStage for MacroStage {
     fn from_tokens(
         tokens: Vec<<Self::Input as LexerStage>::Output>,
         macro_calls: &mut Vec<MacroCall>,
-        data: &mut Vec<Self::Data>
+        data: &mut Vec<Self::Data>,
+        _linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
         let (mut macro_defs, tokens) = Self::parse_tokens(tokens, macro_calls)?;
@@ -949,7 +950,7 @@ mod test {
 
     fn macro_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        Lexer::<MacroStage>::from_lexer(include_lex(s)).err().unwrap().to_string()
+        Lexer::<MacroStage>::from_lexer(include_lex(s), false).err().unwrap().to_string()
     }
 
     fn macro_lexer_error_child<S: Into<String>>(s: S, c: S) -> String {

@@ -235,11 +235,11 @@ impl<T: LexerStage> Lexer<T> {
         })
     }
 
-    pub fn from_lexer(lexer: Lexer<T::Input>) -> Result<Self, SourceError> {
+    pub fn from_lexer(lexer: Lexer<T::Input>, linter_enabled: bool) -> Result<Self, SourceError> {
         let files = lexer.files;
         let mut data = Vec::new();
         let mut macro_calls = lexer.macro_calls;
-        let tokens = T::from_tokens(lexer.tokens, &mut macro_calls, &mut data).map_err(|err| {
+        let tokens = T::from_tokens(lexer.tokens, &mut macro_calls, &mut data, linter_enabled).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?;
         Ok(Self {

@@ -211,44 +211,6 @@ fn optimize_instructions(
                 debug_only: false
             }]))
         },
-        /*
-        // TODO combine adjacent b/c c/b d/e e/d h/l l/h loads into a single ld bc etc.
-        // ld b,$XX
-        // ld c,$XX
-        // ->
-        // ld bc,$XXXX
-        //
-        // -> save 1 byte and 4 T-states
-        (0x06, Some((0x0E, _, _, _)), _) => {
-            // TODO 0x01
-            println!("opti bc");
-            None
-        },
-
-        // ld d,$XX
-        // ld e,$XX
-        // ->
-        // ld de,$XXXX
-        //
-        // -> save 1 byte and 4 T-states
-        (0x16, Some((0x1E, _, _, _)), _) => {
-            // TODO 0x11
-            println!("opti de");
-            None
-        },
-
-        // ld h,$XX
-        // ld l,$XX
-        // ->
-        // ld hl,$XXXX
-        //
-        // -> save 1 byte and 4 T-states
-        (0x26, Some((0x2E, _, _, _)), _) => {
-            // TODO 0x21
-            println!("opti hl");
-            None
-        },
-        */
 
         // srl a
         // srl a

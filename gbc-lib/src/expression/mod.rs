@@ -76,6 +76,7 @@ impl Expression {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ExpressionValue {
     ConstantValue(InnerToken, Symbol),
+    LintInteger(InnerToken, i32),
     Integer(i32),
     Float(OrderedFloat<f32>),
     String(String),
@@ -88,7 +89,7 @@ impl ExpressionValue {
 
     fn is_constant(&self) -> bool {
         match self {
-            ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
+            ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::LintInteger(_, _) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
             ExpressionValue::OffsetAddress(_, _) | ExpressionValue::ParentLabelAddress(_, _) | ExpressionValue::ChildLabelAddress(_, _) => false
         }
     }

@@ -83,7 +83,8 @@ impl LexerStage for ValueStage {
     fn from_tokens(
         tokens: Vec<<Self::Input as LexerStage>::Output>,
         _macro_calls: &mut Vec<MacroCall>,
-        _data: &mut Vec<Self::Data>
+        _data: &mut Vec<Self::Data>,
+        _linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
         let mut parent_labels: HashMap<ParentLabelIndex, (InnerToken, usize)> = HashMap::new();
@@ -483,20 +484,20 @@ mod test {
     use super::{ValueStage, ValueToken, InnerToken, Operator, Register, Flag, IfStatementBranch, ForStatement, BlockStatement};
 
     fn value_lexer<S: Into<String>>(s: S) -> Lexer<ValueStage> {
-        Lexer::<ValueStage>::from_lexer(macro_lex(s)).expect("ValueLexer failed")
+        Lexer::<ValueStage>::from_lexer(macro_lex(s), false).expect("ValueLexer failed")
     }
 
     fn value_lexer_child<S: Into<String>>(s: S, c: S) -> Lexer<ValueStage> {
-        Lexer::<ValueStage>::from_lexer(macro_lex_child(s, c)).expect("ValueLexer failed")
+        Lexer::<ValueStage>::from_lexer(macro_lex_child(s, c), false).expect("ValueLexer failed")
     }
 
     fn value_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        Lexer::<ValueStage>::from_lexer(macro_lex(s)).err().unwrap().to_string()
+        Lexer::<ValueStage>::from_lexer(macro_lex(s), false).err().unwrap().to_string()
     }
 
     fn value_lexer_child_error<S: Into<String>>(s: S, c: S) -> String {
-        Lexer::<ValueStage>::from_lexer(macro_lex_child(s, c)).err().unwrap().to_string()
+        Lexer::<ValueStage>::from_lexer(macro_lex_child(s, c), false).err().unwrap().to_string()
     }
 
     fn tfv<S: Into<String>>(s: S) -> Vec<ValueToken> {

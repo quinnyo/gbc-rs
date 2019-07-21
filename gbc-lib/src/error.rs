@@ -62,6 +62,24 @@ impl SourceError {
         self.extend(files, None)
     }
 
+    pub fn extend_with_basic_location(self, files: &[LexerFile]) -> SourceError {
+        let location = Self::format_location(
+            files,
+            self.file_index,
+            self.index,
+            self.message,
+            true,
+            false
+        );
+        SourceError {
+            file_index: self.file_index,
+            index: self.index,
+            macro_call_id: self.macro_call_id,
+            message: location,
+            reference: None
+        }
+    }
+
     fn extend(self, files: &[LexerFile], macro_calls: Option<&[MacroCall]>) -> SourceError {
 
         // Add file include stacktrace
@@ -98,7 +116,7 @@ impl SourceError {
 
         // Add reference location
         let reference = if let Some((file_index, index, reference)) = self.reference {
-            format!("\n\n{}", Self::format_location(files, file_index, index, reference, true))
+            format!("\n\n{}", Self::format_location(files, file_index, index, reference, true, true))
 
         } else {
             "".to_string()
@@ -109,7 +127,8 @@ impl SourceError {
             self.file_index,
             self.index,
             self.message,
-            false
+            false,
+            true
         );
 
         SourceError {
@@ -128,26 +147,39 @@ impl SourceError {
 
     }
 
-    fn format_location(files: &[LexerFile], file_index: usize, index: usize, message: String, prefix_message: bool) -> String {
+    fn format_location(
+        files: &[LexerFile],
+        file_index: usize,
+        index: usize,
+        message: String,
+        prefix_message: bool,
+        show_source: bool
+
+    ) -> String {
         if let Some(file) = files.get(file_index) {
             let (line, col) = file.get_line_and_col(index);
             let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
             let col_pointer = str::repeat(" ", col);
             if prefix_message {
                 let location = format!(
-                    "{} in file \"{}\" on line {}, column {}:",
+                    "{} in file \"{}\" on line {}, column {}",
                     message,
                     error_path(file),
                     line + 1,
                     col + 1,
                 );
-                format!(
-                    "{}\n\n{}\n{}{}",
-                    location.bright_red(),
-                    line_source,
-                    col_pointer,
-                    "^--- Here".bright_red()
-                )
+                if show_source {
+                    format!(
+                        "{}:\n\n{}\n{}{}",
+                        location.bright_red(),
+                        line_source,
+                        col_pointer,
+                        "^--- Here".bright_red()
+                    )
+
+                } else {
+                    location
+                }
 
             } else {
                 let location = format!(

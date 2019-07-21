@@ -1,6 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 
 // External Dependencies ------------------------------------------------------
@@ -25,25 +25,117 @@ struct EvaluatorConstant {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub struct UsageInformation {
+    constants: HashMap<ConstantIndex, HashSet<usize>>,
+    labels: HashSet<usize>,
+    magic_numbers: Vec<(ConstantIndex, InnerToken, i32)>
+}
+
+impl UsageInformation {
+    pub fn new() -> Self {
+        Self {
+            constants: HashMap::new(),
+            labels: HashSet::new(),
+            magic_numbers: Vec::new()
+        }
+    }
+
+    fn use_constant(&mut self, index: ConstantIndex, from_file_index: usize) {
+        let entry = self.constants.entry(index).or_insert_with(HashSet::new);
+        entry.insert(from_file_index);
+    }
+
+    fn use_label(&mut self, label: usize) {
+        self.labels.insert(label);
+    }
+
+    fn merge(&mut self, other: &UsageInformation) {
+        for (index, files) in &other.constants {
+            let entry = self.constants.entry(index.clone()).or_insert_with(HashSet::new);
+            for f in files {
+                entry.insert(*f);
+            }
+        }
+        for l in &other.labels {
+            self.labels.insert(*l);
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct EvaluatorContext {
-    constants: HashMap<ConstantIndex, ExpressionResult>,
+    constants: HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
     raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,
     label_addresses: HashMap<usize, usize>,
-    raw_labels: HashMap<Symbol, InnerToken>,
-    relative_address_offset: i32
+    raw_labels: HashMap<(Symbol, usize), InnerToken>,
+    relative_address_offset: i32,
+    linter_enabled: bool
 }
 
 impl EvaluatorContext {
 
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new(linter_enabled: bool) -> Self {
         Self {
             constants: HashMap::new(),
             raw_constants: HashMap::new(),
             label_addresses: HashMap::new(),
             raw_labels: HashMap::new(),
-            relative_address_offset: 0
+            relative_address_offset: 0,
+            linter_enabled
         }
+    }
+
+    pub fn find_unused(&self, usage: &UsageInformation) -> Vec<(usize, Symbol, SourceError)> {
+        let mut locations = Vec::new();
+        for (index, c) in &self.raw_constants {
+            if let Some(files) = usage.constants.get(index) {
+                // Warn when non-default, global constants are only used in their file of
+                // declaration
+                if !c.is_default && index.1.is_none() && files.len() == 1 {
+                    if files.get(&c.inner.file_index).is_some() {
+                        locations.push((
+                            3,
+                            c.inner.value.clone(),
+                            c.inner.error(format!("Constant \"{}\" should be made non-global or default, since it is never used outside its declaration", c.inner.value))
+                        ));
+                    }
+                }
+
+            } else {
+                locations.push((
+                    0,
+                    c.inner.value.clone(),
+                    c.inner.error(format!("Constant \"{}\" is never used, declared", c.inner.value))
+                ));
+            }
+        }
+        for ((_, index), l) in &self.raw_labels {
+            if !usage.labels.contains(index) {
+                locations.push((
+                    1,
+                    l.value.clone(),
+                    l.error(format!("Label \"{}\" is never referenced, declared", l.value))
+                ));
+            }
+        }
+        locations
+    }
+
+    pub fn find_magic_numbers(&self, usage: &UsageInformation) -> Vec<(usize, Symbol, SourceError)> {
+        let mut locations = Vec::new();
+        for (constant_index,  integer_token, value) in &usage.magic_numbers {
+            locations.push((
+                2,
+                integer_token.value.clone(),
+                integer_token.error(format!(
+                    "Fixed integer value (${:0>4x}) could be replaced with the constant \"{}\" that shares the same value",
+                    value,
+                    constant_index.0
+                ))
+            ));
+        }
+        locations
     }
 
     pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, is_private: bool, value: DataExpression) {
@@ -57,14 +149,13 @@ impl EvaluatorContext {
 
         let existing_default = self.raw_constants.get(&index).map(|c| c.is_default);
         let set = match (is_default, existing_default) {
-            // Constant does not yet exist at all, set eith default or actual value
+            // Constant does not yet exist at all, set either the default or actual value
             (_, None) => true,
             // Constant already exists as a default, override with it with the actual value
             (false, Some(true)) => true,
             // Don't override existing actual value with a later declared default
             (true, Some(false)) => false,
-            // Should not happen due to expression and entry stage filtering this case
-            // out
+            // Should not happen due to expression and entry stages filtering this case out
             _ => {
                 unreachable!("Invalid constant declaration order: {} {:?}", is_default, existing_default)
             }
@@ -78,8 +169,8 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn declare_label(&mut self, inner: &InnerToken) {
-        self.raw_labels.insert(inner.value.clone(), inner.clone());
+    pub fn declare_label(&mut self, inner: &InnerToken, index: usize) {
+        self.raw_labels.insert((inner.value.clone(), index), inner.clone());
     }
 
     pub fn update_label_address(&mut self, label_id: usize, address: usize) {
@@ -92,15 +183,19 @@ impl EvaluatorContext {
         names.sort_by(|a, b| {
             a.0.as_str().cmp(&b.0.as_str())
         });
+
         for name in names {
+            // Keep track of other constants used in the current constant's expression
+            let mut usage = UsageInformation::new();
             let constant = self.raw_constants[&name].clone();
             let stack = vec![&name.0];
             let c = self.inner_const_resolve(
                 &stack[..],
                 &constant.expression,
+                &mut usage,
                 constant.inner.file_index
             )?;
-            self.constants.insert(name, c);
+            self.constants.insert(name, (c, usage));
         }
         Ok(())
     }
@@ -108,22 +203,24 @@ impl EvaluatorContext {
     pub fn resolve_const_expression(
         &mut self,
         expression: &DataExpression,
+        usage: &mut UsageInformation,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::new();
-        self.inner_const_resolve(&stack, expression, from_file_index)
+        self.inner_const_resolve(&stack, expression, usage, from_file_index)
     }
 
     pub fn resolve_opt_const_expression(
         &mut self,
         expression: &OptionalDataExpression,
+        usage: &mut UsageInformation,
         from_file_index: usize
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
             let stack = Vec::new();
-            Ok(Some(self.inner_const_resolve(&stack, expr, from_file_index)?))
+            Ok(Some(self.inner_const_resolve(&stack, expr, usage, from_file_index)?))
 
         } else {
             Ok(None)
@@ -134,22 +231,24 @@ impl EvaluatorContext {
     pub fn resolve_dyn_expression(
         &self,
         expression: &DataExpression,
+        usage: &mut UsageInformation,
         address_offset: Option<i32>,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
-        self.inner_dyn_resolve(expression, address_offset, from_file_index)
+        self.inner_dyn_resolve(expression, usage, address_offset, from_file_index)
     }
 
     pub fn resolve_opt_dyn_expression(
         &self,
         expression: &OptionalDataExpression,
+        usage: &mut UsageInformation,
         address_offset: Option<i32>,
         from_file_index: usize
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            Ok(Some(self.inner_dyn_resolve(expr, address_offset, from_file_index)?))
+            Ok(Some(self.inner_dyn_resolve(expr, usage, address_offset, from_file_index)?))
 
         } else {
             Ok(None)
@@ -159,36 +258,53 @@ impl EvaluatorContext {
     fn inner_dyn_resolve(
         &self,
         expression: &Expression,
+        usage: &mut UsageInformation,
         address_offset: Option<i32>,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_dyn_resolve(left, address_offset, from_file_index)?;
-                let right = self.inner_dyn_resolve(right, address_offset, from_file_index)?;
+                let left = self.inner_dyn_resolve(left, usage, address_offset, from_file_index)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, from_file_index)?;
                 Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
-                let right = self.inner_dyn_resolve(right, address_offset, from_file_index)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, from_file_index)?;
                 Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
                 Ok(match value {
                     ExpressionValue::ConstantValue(inner, name) => {
+
+                        let global_index = (name.clone(), None);
+                        let local_index = (name.clone(), Some(from_file_index));
+
                         // Local Lookup
-                        if let Some(value) = self.constants.get(&(name.clone(), Some(from_file_index))) {
-                            value.clone()
+                        if let Some(value) = self.constants.get(&local_index) {
+                            if self.linter_enabled {
+                                usage.merge(&value.1);
+                                usage.use_constant(local_index, from_file_index);
+                            }
+                            value.0.clone()
 
                         // Global Lookup
-                        } else if let Some(value) = self.constants.get(&(name.clone(), None)) {
-                            value.clone()
+                        } else if let Some(value) = self.constants.get(&global_index) {
+                            if self.linter_enabled {
+                                usage.merge(&value.1);
+                                usage.use_constant(global_index, from_file_index);
+                            }
+                            value.0.clone()
 
                         } else {
                             return Err(self.undeclared_const_error(inner, name));
                         }
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
+                    ExpressionValue::LintInteger(inner, i) => {
+                        self.lint_integer(usage, inner, *i);
+                        ExpressionResult::Integer(*i)
+                    },
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
                     ExpressionValue::String(s) => ExpressionResult::String(s.to_string()),
                     ExpressionValue::OffsetAddress(_, offset) => {
@@ -196,10 +312,16 @@ impl EvaluatorContext {
                         ExpressionResult::Integer(relative_address_offset + offset)
                     },
                     ExpressionValue::ParentLabelAddress(_, id) => {
-                        ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
+                        if self.linter_enabled {
+                            usage.use_label(*id);
+                        }
+                        ExpressionResult::Integer(*self.label_addresses.get(id).expect("Invalid label ID!") as i32)
                     },
                     ExpressionValue::ChildLabelAddress(_, id) => {
-                        ExpressionResult::Integer(*self.label_addresses.get(&id).expect("Invalid label ID!") as i32)
+                        if self.linter_enabled {
+                            usage.use_label(*id);
+                        }
+                        ExpressionResult::Integer(*self.label_addresses.get(id).expect("Invalid label ID!") as i32)
                     }
                 })
             },
@@ -208,6 +330,7 @@ impl EvaluatorContext {
                 for arg in args {
                     arguments.push(self.inner_dyn_resolve(
                         arg,
+                        usage,
                         address_offset,
                         from_file_index
                     )?);
@@ -221,17 +344,18 @@ impl EvaluatorContext {
         &mut self,
         constant_stack: &[&Symbol],
         expression: &Expression,
+        usage: &mut UsageInformation,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_const_resolve(constant_stack, left, from_file_index)?;
-                let right = self.inner_const_resolve(constant_stack, right, from_file_index)?;
+                let left = self.inner_const_resolve(constant_stack, left, usage, from_file_index)?;
+                let right = self.inner_const_resolve(constant_stack, right, usage, from_file_index)?;
                 Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
-                let right = self.inner_const_resolve(constant_stack, right, from_file_index)?;
+                let right = self.inner_const_resolve(constant_stack, right, usage, from_file_index)?;
                 Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
@@ -243,11 +367,19 @@ impl EvaluatorContext {
 
                         // Local Lookup
                         if let Some(result) = self.constants.get(&local_index) {
-                            result.clone()
+                            if self.linter_enabled {
+                                usage.merge(&result.1);
+                                usage.use_constant(local_index, from_file_index);
+                            }
+                            result.0.clone()
 
                         // Global Lookup
                         } else if let Some(result) = self.constants.get(&global_index) {
-                            result.clone()
+                            if self.linter_enabled {
+                                usage.merge(&result.1);
+                                usage.use_constant(global_index, from_file_index);
+                            }
+                            result.0.clone()
 
                         // Local Declaration
                         } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&local_index).cloned() {
@@ -257,6 +389,7 @@ impl EvaluatorContext {
                                 inner,
                                 name,
                                 expression,
+                                usage,
                                 from_file_index,
                                 local_index
                             )?
@@ -269,6 +402,7 @@ impl EvaluatorContext {
                                 inner,
                                 name,
                                 expression,
+                                usage,
                                 from_file_index,
                                 global_index
                             )?
@@ -278,6 +412,10 @@ impl EvaluatorContext {
                         }
                     },
                     ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
+                    ExpressionValue::LintInteger(inner, i) => {
+                        self.lint_integer(usage, inner, *i);
+                        ExpressionResult::Integer(*i)
+                    },
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
                     ExpressionValue::String(s) => ExpressionResult::String(s.to_string()),
                     ExpressionValue::OffsetAddress(_, _) => {
@@ -297,10 +435,25 @@ impl EvaluatorContext {
                     arguments.push(self.inner_const_resolve(
                         constant_stack,
                         arg,
+                        usage,
                         from_file_index
                     )?);
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
+            }
+        }
+    }
+
+    fn lint_integer(&self, usage: &mut UsageInformation, inner: &InnerToken, i: i32) {
+        for (index, (result, _)) in &self.constants {
+            if let ExpressionResult::Integer(v) = result {
+                if i == *v && i > 255 {
+                    usage.magic_numbers.push((
+                        index.clone(),
+                        inner.clone(),
+                        *v
+                    ));
+                }
             }
         }
     }
@@ -313,13 +466,12 @@ impl EvaluatorContext {
                 return error.with_reference(&constant.inner, "A non-global constant with the same name is defined");
             }
         }
-
-        if let Some(inner) = self.raw_labels.get(&name) {
-            error.with_reference(inner, "A non-global label with the same name is defined")
-
-        } else {
-            error
+        for ((symbol, _), inner) in self.raw_labels.iter() {
+            if symbol == name {
+                return error.with_reference(inner, "A non-global label with the same name is defined");
+            }
         }
+        error
     }
 
     fn declare_constant_inline(
@@ -329,6 +481,7 @@ impl EvaluatorContext {
         inner: &InnerToken,
         name: &Symbol,
         expression: &Expression,
+        usage: &mut UsageInformation,
         from_file_index: usize,
         declare_index: (Symbol, Option<usize>)
 
@@ -340,15 +493,24 @@ impl EvaluatorContext {
             ).with_reference(inner, "Initial declaration was"))
 
         } else {
+
+            // Keep track of other constants used in the current constant's expression
+            let mut constant_usage = UsageInformation::new();
+
             // Resolve constants that are not yet evaluated
             let mut child_stack = constant_stack.to_vec();
             child_stack.push(name);
             let value = self.inner_const_resolve(
                 &child_stack,
                 expression,
+                &mut constant_usage,
                 from_file_index
             )?;
-            self.constants.insert(declare_index, value.clone());
+            if self.linter_enabled {
+                usage.merge(&constant_usage);
+                usage.use_constant(declare_index.clone(), from_file_index);
+            }
+            self.constants.insert(declare_index, (value.clone(), constant_usage));
             Ok(value)
         }
     }
@@ -816,7 +978,7 @@ mod test {
     use crate::mocks::expr_lex;
     use crate::error::SourceError;
     use crate::lexer::ExpressionToken;
-    use super::{EvaluatorContext, ExpressionResult};
+    use super::{EvaluatorContext, ExpressionResult, UsageInformation};
 
     fn const_expression<S: Into<String>>(s: S) -> ExpressionResult {
         const_expression_result(s).expect("Evaluator failed")
@@ -829,9 +991,10 @@ mod test {
     fn const_expression_result<S: Into<String>>(s: S) -> Result<ExpressionResult, SourceError> {
         let token = &expr_lex(s).tokens[0];
         if let ExpressionToken::ConstExpression(_, ref expr) = token {
-            let mut context = EvaluatorContext::new();
+            let mut context = EvaluatorContext::new(false);
+            let mut usage = UsageInformation::new();
             let stack = Vec::new();
-            context.inner_const_resolve(&stack, expr, 0)
+            context.inner_const_resolve(&stack, expr, &mut usage, 0)
 
         } else {
             panic!("Not a constant expression");

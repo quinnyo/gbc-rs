@@ -115,48 +115,48 @@ pub fn include_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<IncludeStage> {
 
 pub fn macro_lex<S: Into<String>>(s: S) -> Lexer<MacroStage> {
     let lexer = include_lex(s);
-    Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed")
+    Lexer::<MacroStage>::from_lexer(lexer, false).expect("MacroStage failed")
 }
 
 pub fn macro_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<MacroStage> {
     let lexer = include_lex_child(s, c);
     assert_eq!(lexer.files.len(), 2);
-    Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed")
+    Lexer::<MacroStage>::from_lexer(lexer, false).expect("MacroStage failed")
 }
 
 pub fn macro_lex_child_error<S: Into<String>>(s: S, c: S) -> String {
     let lexer = include_lex_child(s, c);
     assert_eq!(lexer.files.len(), 2);
-    Lexer::<MacroStage>::from_lexer(lexer).err().expect("Expected a SourceError").to_string()
+    Lexer::<MacroStage>::from_lexer(lexer, false).err().expect("Expected a SourceError").to_string()
 }
 
 pub fn value_lex<S: Into<String>>(s: S) -> Lexer<ValueStage> {
     let lexer = macro_lex(s);
-    Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed")
+    Lexer::<ValueStage>::from_lexer(lexer, false).expect("ValueStage failed")
 }
 
 pub fn expr_lex<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
     let lexer = value_lex(s);
-    Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
+    Lexer::<ExpressionStage>::from_lexer(lexer, false).expect("ExpressionStage failed")
 }
 
 pub fn entry_lex<S: Into<String>>(s: S) -> Lexer<EntryStage> {
     let lexer = expr_lex(s);
-    Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
+    Lexer::<EntryStage>::from_lexer(lexer, false).expect("EntryStage failed")
 }
 
 pub fn entry_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<EntryStage> {
     let lexer = macro_lex_child(s, c);
-    let lexer = Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed");
-    let lexer = Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed");
-    Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
+    let lexer = Lexer::<ValueStage>::from_lexer(lexer, false).expect("ValueStage failed");
+    let lexer = Lexer::<ExpressionStage>::from_lexer(lexer, false).expect("ExpressionStage failed");
+    Lexer::<EntryStage>::from_lexer(lexer, false).expect("EntryStage failed")
 }
 
 pub fn entry_lex_child_error<S: Into<String>>(s: S, c: S) -> String {
     let lexer = macro_lex_child(s, c);
-    let lexer = Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed");
-    let lexer = Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed");
-    Lexer::<EntryStage>::from_lexer(lexer).err().expect("Expected a SourceError").to_string()
+    let lexer = Lexer::<ValueStage>::from_lexer(lexer, false).expect("ValueStage failed");
+    let lexer = Lexer::<ExpressionStage>::from_lexer(lexer, false).expect("ExpressionStage failed");
+    Lexer::<EntryStage>::from_lexer(lexer, false).err().expect("Expected a SourceError").to_string()
 }
 
 pub fn expr_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<ExpressionStage> {
@@ -164,13 +164,13 @@ pub fn expr_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<ExpressionSta
     reader.add_file("main.gb.s", s.into().as_str());
     reader.add_binary_file("child.bin", b);
     let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
-    let lexer = Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed");
-    let lexer = Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed");
-    Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")
+    let lexer = Lexer::<MacroStage>::from_lexer(lexer, false).expect("MacroStage failed");
+    let lexer = Lexer::<ValueStage>::from_lexer(lexer, false).expect("ValueStage failed");
+    Lexer::<ExpressionStage>::from_lexer(lexer, false).expect("ExpressionStage failed")
 }
 
 pub fn entry_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<EntryStage> {
     let lexer = expr_lex_binary(s, b);
-    Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
+    Lexer::<EntryStage>::from_lexer(lexer, false).expect("EntryStage failed")
 }
 

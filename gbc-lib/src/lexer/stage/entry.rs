@@ -136,7 +136,8 @@ impl LexerStage for EntryStage {
     fn from_tokens(
         tokens: Vec<<Self::Input as LexerStage>::Output>,
         _macro_calls: &mut Vec<MacroCall>,
-        _data: &mut Vec<Self::Data>
+        _data: &mut Vec<Self::Data>,
+        _linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
         let mut layouts: InstructionLayouts = HashMap::new();
@@ -826,7 +827,7 @@ impl EntryStage {
         let reg = Self::parse_meta_byte_register(tokens)?;
         tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction arguments")?;
         let expr = tokens.get("Unexpected end of input while parsing instruction arguments.")?;
-        if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::Integer(i))) = expr {
+        if let ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::Integer(i))) | ExpressionToken::ConstExpression(_, Expression::Value(ExpressionValue::LintInteger(_, i))) = expr {
             if i > 0 && (i as u32).is_power_of_two() && i <= 128 {
 
                 let shifts = match i {
@@ -1573,17 +1574,17 @@ mod test {
     use crate::expression::{Expression, ExpressionValue, Operator};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
-        Lexer::<EntryStage>::from_lexer(expr_lex(s)).expect("EntryStage failed")
+        Lexer::<EntryStage>::from_lexer(expr_lex(s), false).expect("EntryStage failed")
     }
 
     fn entry_lexer_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<EntryStage> {
         let lexer = expr_lex_binary(s, b);
-        Lexer::<EntryStage>::from_lexer(lexer).expect("EntryStage failed")
+        Lexer::<EntryStage>::from_lexer(lexer, false).expect("EntryStage failed")
     }
 
     fn entry_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        Lexer::<EntryStage>::from_lexer(expr_lex(s)).err().expect("Expected a SourceError").to_string()
+        Lexer::<EntryStage>::from_lexer(expr_lex(s), false).err().expect("Expected a SourceError").to_string()
     }
 
     fn tfe<S: Into<String>>(s: S) -> Vec<EntryToken> {
