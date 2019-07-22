@@ -162,6 +162,8 @@ pub enum Symbol {
     Decx,
     Retx,
     Vsync,
+    Pushx,
+    Popx,
 
     Raw(String)
 }
@@ -326,6 +328,8 @@ impl Symbol {
             Symbol::Decx     => "decx",
             Symbol::Retx     => "retx",
             Symbol::Vsync    => "vsync",
+            Symbol::Pushx    => "pushx",
+            Symbol::Popx     => "popx",
 
             Symbol::Raw(s) => s.as_str()
         }
@@ -503,6 +507,8 @@ impl From<String> for Symbol {
             "decx"      =>  Symbol::Decx,
             "retx"      =>  Symbol::Retx,
             "vsync"     =>  Symbol::Vsync,
+            "pushx"     =>  Symbol::Pushx,
+            "popx"      =>  Symbol::Popx,
 
             // Variables
             _           => Symbol::Raw(s)

@@ -46,7 +46,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     ChildLabelDef((usize)),
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
     IfStatement((Vec<IfStatementBranch>)),
-    // FOR [Sring] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
+    // FOR [String] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
     ForStatement((ForStatement)),
     UsingStatement((String, Vec<EntryToken>)),
     VolatileStatement((Vec<EntryToken>))
@@ -735,6 +735,32 @@ impl EntryStage {
                         ]
                     }
                 }
+            },
+
+            // Stack Shorthands
+            Symbol::Pushx => {
+                vec![
+                    // push af
+                    EntryToken::Instruction(inner.clone(), 0xF5),
+                    // push bc
+                    EntryToken::Instruction(inner.clone(), 0xC5),
+                    // push de
+                    EntryToken::Instruction(inner.clone(), 0xD5),
+                    // push hl
+                    EntryToken::Instruction(inner.clone(), 0xE5)
+                ]
+            },
+            Symbol::Popx => {
+                vec![
+                    // pop hl
+                    EntryToken::Instruction(inner.clone(), 0xE1),
+                    // pop de
+                    EntryToken::Instruction(inner.clone(), 0xD1),
+                    // pop bc
+                    EntryToken::Instruction(inner.clone(), 0xC1),
+                    // pop af
+                    EntryToken::Instruction(inner.clone(), 0xF1)
+                ]
             },
 
             // VBlank Wait Shorthand
@@ -2853,6 +2879,26 @@ mod test {
             EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xF0, Expression::Value(ExpressionValue::Integer(0x41))),
             EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0xE6, Expression::Value(ExpressionValue::Integer(0b0000_0010))),
             EntryToken::InstructionWithArg(itk!(0, 5, "vsync"), 0x20, Expression::Value(ExpressionValue::OffsetAddress(itk!(0, 5, "vsync"), -6))),
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_pushx() {
+        assert_eq!(tfe("pushx"), vec![
+            EntryToken::Instruction(itk!(0, 5, "pushx"), 0xF5),
+            EntryToken::Instruction(itk!(0, 5, "pushx"), 0xC5),
+            EntryToken::Instruction(itk!(0, 5, "pushx"), 0xD5),
+            EntryToken::Instruction(itk!(0, 5, "pushx"), 0xE5)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_popx() {
+        assert_eq!(tfe("popx"), vec![
+            EntryToken::Instruction(itk!(0, 4, "popx"), 0xE1),
+            EntryToken::Instruction(itk!(0, 4, "popx"), 0xD1),
+            EntryToken::Instruction(itk!(0, 4, "popx"), 0xC1),
+            EntryToken::Instruction(itk!(0, 4, "popx"), 0xF1)
         ]);
     }
 

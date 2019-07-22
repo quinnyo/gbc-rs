@@ -311,6 +311,30 @@ Extended decrement of a memory address, using the `Accumulator` as an intermedia
 decx [$0000]
 ```
 
+#### **pushx**
+
+Shorthand for pushing all registers onto the stack:
+
+```asm
+; push af
+; push bc
+; push de
+; push hl
+pushx
+```
+
+#### **popx**
+
+Shorthand for popping all registers from the stack:
+
+```asm
+; pop hl
+; pop de
+; pop bc
+; pop af
+popx
+```
+
 #### **ldxa**
 
 Extended memory loads using the `Accumulator` as an intermediate register (destroying its contents):
