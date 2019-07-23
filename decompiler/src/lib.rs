@@ -20,7 +20,7 @@ struct AddressEntry {
     calls_from: HashSet<usize>,
     jumps_to: Option<usize>,
     calls_to: Option<usize>,
-    returns_to: HashSet<usize>
+    returns_from: Option<usize>
 }
 
 impl AddressEntry {
@@ -34,7 +34,7 @@ impl AddressEntry {
             calls_from: HashSet::new(),
             jumps_to: None,
             calls_to: None,
-            returns_to: HashSet::new()
+            returns_from: None
         }
     }
 
@@ -64,8 +64,8 @@ impl AddressEntry {
         self.calls_to = Some(address);
     }
 
-    fn record_return_to(&mut self, address: usize) {
-        self.returns_to.insert(address);
+    fn record_return_from(&mut self, address: usize) {
+        self.returns_from = Some(address);
     }
 
     fn set_label(&mut self, label: String) {
@@ -114,14 +114,21 @@ impl AddressEntry {
             } else {
                 "".to_string()
             },
-            // TODO Show return targets
-            if self.returns_to.is_empty() {
-                "".to_string()
+            if let Some(parent) = self.returns_from {
+                format!("; {} -> {}", Self::address_label(entries, parent), if let Some(parent) = entries.get(&parent) {
+                    parent.calls_from.iter().map(|caller| {
+                        Self::address_label(entries, *caller)
+
+                    }).collect::<Vec<String>>().join(", ")
+
+                } else {
+                    "???".to_string()
+                })
 
             } else {
-                format!("; returns\n")
+                "".to_string()
             }
-    )
+        )
     }
 
     fn address_label(entries: &HashMap<usize, AddressEntry>, address: usize) -> String {
@@ -182,9 +189,9 @@ impl Decompiler {
 
         let rom_buffer = self.read_rom_file(io, &file).map_err(|e| self.error("instruction parsing", e))?;
         self.analyze_from(&rom_buffer, vec![
-            (0x0100, None),
-            (0x0040, None),
-            (0x0050, None),
+            (0x0100, None, Some(0x0100)),
+            (0x0040, None, Some(0x0040)),
+            (0x0050, None, Some(0x0050)),
 
         ]).map_err(|e| self.error("instruction parsing", e))?;
         for adr in self.range_to_string(0x0, 0x4000) {
@@ -203,53 +210,59 @@ impl Decompiler {
     fn analyze_from(
         &mut self,
         rom_buffer: &[u8],
-        mut call_stack: Vec<(usize, Option<usize>)>,
+        mut call_stack: Vec<(usize, Option<usize>, Option<usize>)>,
 
     ) -> Result<(), RomError> {
-        let mut count = 0;
-        while let Some((mut address, caller_address)) = call_stack.pop() {
+        while let Some((mut address, caller_address, callee_address)) = call_stack.pop() {
+
 
             // Ignore addresses outside of ROM space
-            // TODO handle bank mapping
             if address > rom_buffer.len() - 1 {
+                // TODO handle bank mapping
                 continue;
             }
 
             while let Some(instr) = Instruction::decode(&rom_buffer[address..], &self.instructions, false) {
-
                 let size = instr.byte_size();
                 let flow_stopped = match instr.name {
                     "jr" => {
                         let target = (address as i32 + signed_byte(instr.value.unwrap_or(0) as i32)) as usize + size;
                         self.address_entry(target).record_jump_from(address);
                         self.address_entry(address).record_jump_to(target);
+                        let stopped = instr.layout.len() == 1;
                         if !self.address_visited(target) {
-                            call_stack.push((target, caller_address));
+                            call_stack.push((target, caller_address, callee_address ));
                         }
-                        instr.layout.len() == 1
+                        stopped
                     },
                     "jp" => {
                         let target = instr.value.unwrap_or(0) as usize;
                         self.address_entry(target).record_jump_from(address);
                         self.address_entry(address).record_jump_to(target);
+
+                        let stopped = instr.layout.len() == 1;
                         if !self.address_visited(target) {
-                            call_stack.push((target, caller_address));
+                            call_stack.push((target, caller_address, callee_address ));
                         }
-                        instr.layout.len() == 1
+                        stopped
                     },
                     "call" => {
                         let target = instr.value.unwrap_or(0) as usize;
                         self.address_entry(target).record_call_from(address);
                         self.address_entry(address).record_call_to(target);
-                        if !self.address_visited(target) {
-                            call_stack.push((target, Some(address)));
-                        }
+
+                        //if !self.address_visited(target) {
+                            // TODO do we need to run multiple times or should we try and work
+                            // call / return address issues in another way
+                            call_stack.push((target, Some(address), Some(target)));
+                        //}
                         false
                     },
                     "ret" => {
-                        // TODO does this work?
                         if let Some(caller) = caller_address {
-                            self.address_entry(address).record_return_to(caller);
+                            if let Some(callee) = callee_address {
+                                self.address_entry(address).record_return_from(callee);
+                            }
                         }
                         true
                     },
@@ -263,11 +276,8 @@ impl Decompiler {
                     break;
                 }
             }
-            count += 1;
-            if count > 500 {
-                break;
-            }
         }
+
         Ok(())
 
     }
