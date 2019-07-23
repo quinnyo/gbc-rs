@@ -9,11 +9,9 @@ use std::io::{Error as IOError, Read, Write};
 
 // External Dependencies ------------------------------------------------------
 use clap::{Arg, App};
-
-
-// Internal Dependencies ------------------------------------------------------
+use decompiler::Decompiler;
+use file_io::{FileError, FileReader, FileWriter};
 use compiler::compiler::Compiler;
-use compiler::traits::{FileError, FileReader, FileWriter};
 
 
 // CLI Interface --------------------------------------------------------------
@@ -71,6 +69,11 @@ fn main() {
             .short("D")
             .help("Enable debug instructions for BGB debugger")
         )
+        .arg(Arg::with_name("decompile")
+            .long("decompile")
+            .short("d")
+            .help("Decompile the input file instead")
+        )
         .get_matches();
 
     if let Some(file) = matches.value_of("SOURCE_FILE") {
@@ -81,42 +84,65 @@ fn main() {
         let mut reader = ProjectReader::new(main.clone());
         let main_file = PathBuf::from(main.file_name().unwrap());
 
-        let mut compiler = Compiler::new();
+        // Decompile
+        if matches.occurrences_of("decompile") > 0 {
+            let mut decompiler = Decompiler::new();
+            if matches.occurrences_of("silent") > 0 {
+                decompiler.set_silent();
+            }
 
-        if matches.occurrences_of("segments") > 0 {
-            compiler.set_print_segment_map();
-        }
+            match decompiler.decompile_file(&mut reader, main_file) {
+                Ok(output) => println!("{}", output),
+                Err((output, err)) => {
+                    println!("{}", output);
+                    eprintln!("{}", err);
+                    process::exit(1)
+                }
+            }
 
-        if matches.occurrences_of("lint") > 0 {
-            compiler.set_linter_enabled();
-        }
+        // Compile
+        } else {
+            let mut compiler = Compiler::new();
 
-        if matches.occurrences_of("debug") == 0 {
-            compiler.set_strip_debug_code();
-        }
+            if matches.occurrences_of("segments") > 0 {
+                compiler.set_print_segment_map();
+            }
 
-        if matches.occurrences_of("no-optimize") == 0 {
-            compiler.set_optimize_instructions();
-        }
+            if matches.occurrences_of("silent") > 0 {
+                compiler.set_silent();
+            }
 
-        if matches.occurrences_of("info") > 0 {
-            compiler.set_print_rom_info();
-        }
+            if matches.occurrences_of("lint") > 0 {
+                compiler.set_linter_enabled();
+            }
 
-        if let Some(rom) = matches.value_of("ROM_FILE") {
-            compiler.set_generate_rom(PathBuf::from(rom));
-        }
+            if matches.occurrences_of("debug") == 0 {
+                compiler.set_strip_debug_code();
+            }
 
-        if let Some(map) = matches.value_of("MAP_FILE") {
-            compiler.set_generate_symbols(PathBuf::from(map));
-        }
+            if matches.occurrences_of("no-optimize") == 0 {
+                compiler.set_optimize_instructions();
+            }
 
-        match compiler.compile(&mut reader, main_file) {
-            Ok(output) => println!("{}", output),
-            Err((output, err)) => {
-                println!("{}", output);
-                eprintln!("{}", err);
-                process::exit(1)
+            if matches.occurrences_of("info") > 0 {
+                compiler.set_print_rom_info();
+            }
+
+            if let Some(rom) = matches.value_of("ROM_FILE") {
+                compiler.set_generate_rom(PathBuf::from(rom));
+            }
+
+            if let Some(map) = matches.value_of("MAP_FILE") {
+                compiler.set_generate_symbols(PathBuf::from(map));
+            }
+
+            match compiler.compile(&mut reader, main_file) {
+                Ok(output) => println!("{}", output),
+                Err((output, err)) => {
+                    println!("{}", output);
+                    eprintln!("{}", err);
+                    process::exit(1)
+                }
             }
         }
 

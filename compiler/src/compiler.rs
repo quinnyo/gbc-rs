@@ -6,6 +6,7 @@ use std::time::Instant;
 
 // External Dependencies ------------------------------------------------------
 use colored::Colorize;
+use file_io::{FileReader, FileWriter};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -13,7 +14,6 @@ use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
 use crate::linker::{Linker, SegmentUsage};
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
-use crate::traits::{FileReader, FileWriter};
 
 
 // Structs --------------------------------------------------------------------
@@ -98,13 +98,13 @@ impl Compiler {
         self.linter_enabled = true;
     }
 
-    pub fn compile<T: FileReader + FileWriter>(&mut self, files: &mut T, entry: PathBuf) -> Result<String, (String, CompilerError)> {
+    pub fn compile<T: FileReader + FileWriter>(&mut self, io: &mut T, file: PathBuf) -> Result<String, (String, CompilationError)> {
         colored::control::set_override(!self.no_color);
-        self.log(format!("{} \"{}\" ...", "   Compiling".bright_green(), entry.display()));
-        let entry_lexer = self.parse(files, entry)?;
-        let linker = self.link(files, entry_lexer)?;
+        self.log(format!("{} \"{}\" ...", "   Compiling".bright_green(), file.display()));
+        let entry_lexer = self.parse(io, file)?;
+        let linker = self.link(io, entry_lexer)?;
         if !self.linter_enabled {
-            self.generate(files, linker)?;
+            self.generate(io, linker)?;
         }
         Ok(self.output.join("\n"))
     }
@@ -112,9 +112,9 @@ impl Compiler {
 
 impl Compiler {
 
-    fn parse<T: FileReader>(&mut self, io: &T, entry: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilerError)> {
+    fn parse<T: FileReader>(&mut self, io: &T, file: PathBuf) -> Result<Lexer<EntryStage>, (String, CompilationError)> {
         let start = Instant::now();
-        let include_lexer = Lexer::<IncludeStage>::from_file(io, &entry).map_err(|e| self.error("file inclusion", e))?;
+        let include_lexer = Lexer::<IncludeStage>::from_file(io, &file).map_err(|e| self.error("file inclusion", e))?;
         self.log(format!("  {} completed in {}ms.", "   File IO".bright_green(), start.elapsed().as_millis()));
         let start = Instant::now();
         let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer, self.linter_enabled).map_err(|e| self.error("macro expansion", e))?;
@@ -125,7 +125,7 @@ impl Compiler {
         Ok(entry_lexer)
     }
 
-    fn link<T: FileReader + FileWriter>(&mut self, io: &mut T, entry_lexer: Lexer<EntryStage>) -> Result<Linker, (String, CompilerError)> {
+    fn link<T: FileReader + FileWriter>(&mut self, io: &mut T, entry_lexer: Lexer<EntryStage>) -> Result<Linker, (String, CompilationError)> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
             io,
@@ -157,7 +157,7 @@ impl Compiler {
 
             }).collect::<Vec<String>>().join("\n");
             io.write_file(&output_file, symbols).map_err(|err| {
-                (self.output.join("\n"), CompilerError::from_string(
+                (self.output.join("\n"), CompilationError::from_string(
                     format!("Failed to write symbol map to file \"{}\"", err.path.display())
                 ))
             })?;
@@ -166,7 +166,7 @@ impl Compiler {
         Ok(linker)
     }
 
-    fn generate<T: FileWriter>(&mut self, io: &mut T, linker: Linker) -> Result<(), (String, CompilerError)> {
+    fn generate<T: FileWriter>(&mut self, io: &mut T, linker: Linker) -> Result<(), (String, CompilationError)> {
         let start = Instant::now();
         let mut generator = Generator::from_linker(linker);
 
@@ -177,7 +177,7 @@ impl Compiler {
                     self.warning(w);
                 }
             },
-            Err(err) => return Err((self.output.join("\n"), CompilerError::from_string(err)))
+            Err(err) => return Err((self.output.join("\n"), CompilationError::from_string(err)))
         }
 
         // Apply checksum etc.
@@ -187,7 +187,7 @@ impl Compiler {
         let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
             io.write_binary_file(&output_file, generator.buffer).map_err(|err| {
-                (self.output.join("\n"), CompilerError::from_string(
+                (self.output.join("\n"), CompilationError::from_string(
                     format!("Failed to write ROM to file \"{}\"", err.path.display())
                 ))
             })?;
@@ -296,8 +296,8 @@ impl Compiler {
         }
     }
 
-    fn error(&self, stage: &str, error: SourceError) -> (String, CompilerError) {
-        (self.output.join("\n"), CompilerError::new(stage, error))
+    fn error(&self, stage: &str, error: SourceError) -> (String, CompilationError) {
+        (self.output.join("\n"), CompilationError::new(stage, error))
     }
 
 }
@@ -305,13 +305,13 @@ impl Compiler {
 
 // Compiler Error Abstraction -------------------------------------------------
 #[derive(Debug)]
-pub struct CompilerError {
+pub struct CompilationError {
     stage: String,
     source: Option<SourceError>,
     message: Option<String>
 }
 
-impl CompilerError {
+impl CompilationError {
 
     fn new(stage: &str, source: SourceError) -> Self {
         Self {
@@ -331,7 +331,7 @@ impl CompilerError {
 
 }
 
-impl fmt::Display for CompilerError {
+impl fmt::Display for CompilationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(source) = self.source.as_ref() {
             write!(f, "       {} Compilation failed during {} phase!\n\n{}", "Error".bright_red(), self.stage, source)
@@ -379,7 +379,7 @@ mod test {
         let mut reader = MockFileReader::default();
         reader.add_file("main.gb.s", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
-        let err = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).err().expect("Expected a CompilerError");
+        let err = compiler.compile(&mut reader, PathBuf::from("main.gb.s")).err().expect("Expected a CompilationError");
         (re.replace_all(err.0.as_str(), "XXms").to_string(), err.1.to_string())
     }
 

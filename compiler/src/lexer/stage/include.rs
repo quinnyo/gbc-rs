@@ -2,8 +2,11 @@
 use std::path::PathBuf;
 
 
+// External Dependencies ------------------------------------------------------
+use file_io::FileReader;
+
+
 // Internal Dependencies ------------------------------------------------------
-use crate::traits::FileReader;
 use crate::error::SourceError;
 use super::super::LexerStage;
 use super::super::token::{TokenGenerator, TokenIterator, TokenChar};

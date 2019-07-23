@@ -191,6 +191,10 @@ macro_rules! lexer_token {
 }
 
 
+// External Dependencies ------------------------------------------------------
+use file_io::FileReader;
+
+
 // Modules --------------------------------------------------------------------
 mod file;
 pub mod stage;
@@ -209,7 +213,6 @@ use self::stage::macros::MacroCall;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::traits::FileReader;
 
 
 // Lexer Abstraction ----------------------------------------------------------

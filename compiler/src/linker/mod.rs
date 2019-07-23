@@ -9,13 +9,16 @@ mod section;
 mod util;
 
 
+// External Dependencies ------------------------------------------------------
+use file_io::FileReader;
+
+
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::compiler::Lint;
 use crate::lexer::{Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
-use crate::traits::FileReader;
 use self::section::Section;
 
 

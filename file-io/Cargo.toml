@@ -1,0 +1,9 @@
+[package]
+name = "file-io"
+version = "0.5.0"
+authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
+edition = "2018"
+
+[dependencies]
+colored = "1.7"
+

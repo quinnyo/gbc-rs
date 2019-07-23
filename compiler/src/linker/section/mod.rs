@@ -8,7 +8,7 @@ use std::collections::HashMap;
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
 use gb_cpu::{self, Argument, Instruction};
-
+use file_io::FileReader;
 
 // Modules --------------------------------------------------------------------
 pub mod entry;
@@ -20,7 +20,6 @@ use crate::lexer::{InnerToken, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
-use crate::traits::FileReader;
 use self::entry::{EntryData, SectionEntry};
 use super::util::{self, instruction};
 

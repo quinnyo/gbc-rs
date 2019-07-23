@@ -1,9 +1,9 @@
-// STD Dependencies -------------------------------------------------------
+// STD Dependencies -----------------------------------------------------------
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::io::{Error as IOError, ErrorKind};
 
-// Internal Dependencies --------------------------------------------------
+// Internal Dependencies ------------------------------------------------------
 use crate::traits::{FileReader, FileWriter, FileError};
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 

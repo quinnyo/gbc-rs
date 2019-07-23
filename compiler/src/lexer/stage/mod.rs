@@ -1,6 +1,9 @@
 // STD Dependencies -----------------------------------------------------------
 use std::path::PathBuf;
 
+// External Dependencies ------------------------------------------------------
+use file_io::FileReader;
+
 
 // Modules --------------------------------------------------------------------
 pub mod entry;
@@ -11,7 +14,6 @@ pub mod value;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::traits::FileReader;
 use crate::error::SourceError;
 use super::{LexerFile, LexerToken};
 use macros::MacroCall;
