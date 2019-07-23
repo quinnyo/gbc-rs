@@ -52,7 +52,18 @@ impl fmt::Debug for Flag {
     }
 }
 
-#[derive(Eq, PartialEq)]
+impl fmt::Display for Flag {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", match self {
+            Flag::Zero => "z",
+            Flag::NoZero => "nz",
+            Flag::Carry => "c",
+            Flag::NoCarry => "nc",
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub enum FlagModifier {
     Keep,
     Set,
@@ -82,7 +93,7 @@ impl fmt::Debug for FlagModifier {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FlagState {
     pub z: FlagModifier,
     pub n: FlagModifier,
@@ -233,11 +244,33 @@ impl fmt::Debug for Register {
     }
 }
 
+impl fmt::Display for Register {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", match self {
+            Register::Accumulator => "a",
+            Register::B => "b",
+            Register::C => "c",
+            Register::D => "d",
+            Register::E => "e",
+            Register::H => "h",
+            Register::L => "l",
+            Register::AF => "af",
+            Register::BC => "bc",
+            Register::DE => "de",
+            Register::HL => "hl",
+            Register::HLIncrement => "hli",
+            Register::HLDecrement => "hld",
+            Register::SP => "sp"
+        })
+    }
+}
+
 
 // Instructions ---------------------------------------------------------------
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Instruction {
     pub code: u16,
+    pub value: Option<u16>,
     pub prefix: Option<usize>,
     pub name: &'static str,
     pub size: usize,
@@ -250,6 +283,7 @@ pub struct Instruction {
 }
 
 impl Instruction {
+
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.code == 16 {
             // Pad STOP with a NOP
@@ -262,6 +296,56 @@ impl Instruction {
             vec![self.code as u8]
         }
     }
+
+    pub fn byte_size(&self) -> usize {
+        if self.code > 255 {
+            1 + self.size
+
+        } else {
+            self.size
+        }
+    }
+
+    pub fn decode(
+        buffer: &[u8],
+        instructions: &[Instruction],
+        extended: bool
+
+    ) -> Option<Instruction> {
+        match buffer[0] {
+            0xCB => Self::decode(&buffer[1..], instructions, true),
+            op => if extended {
+                instructions[256 + op as usize].clone().with_argument(&buffer[1..])
+
+            } else {
+                instructions[op as usize].clone().with_argument(&buffer[1..])
+            }
+        }
+    }
+
+    fn with_argument(mut self, buffer: &[u8]) -> Option<Self> {
+        if buffer.len() < self.size - 1 {
+            Some(self)
+
+        } else if self.size == 2 {
+            self.value = Some(buffer[0] as u16);
+            Some(self)
+
+        } else {
+            self.value = Some(buffer[0] as u16 | (buffer[1] as u16) << 8);
+            Some(self)
+        }
+    }
+
+}
+
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{: <4} {}", self.name, self.layout.iter().map(|l| {
+            l.to_string(self.value)
+
+        }).collect::<Vec<String>>().join(","))
+    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone)]
@@ -273,7 +357,7 @@ pub enum LexerArgument {
     Flag(Flag)
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone)]
 pub enum Argument {
     MemoryLookupByteValue,
     MemoryLookupWordValue,
@@ -284,6 +368,27 @@ pub enum Argument {
     ConstantValue(usize),
     Register(Register),
     Flag(Flag)
+}
+
+impl Argument {
+    fn to_string(&self, value: Option<u16>) -> String {
+        match self {
+            Argument::MemoryLookupByteValue => format!("[${:0>2X}]", value.unwrap_or(0)),
+            Argument::MemoryLookupWordValue => format!("[${:0>4X}]", value.unwrap_or(0)),
+            Argument::MemoryLookupRegister(r) => format!("[{}]", r),
+            Argument::ByteValue => format!("${:0>2X}", value.unwrap_or(0)),
+            Argument::SignedByteValue => format!("{}", signed_byte(value.unwrap_or(0) as i32)),
+            Argument::WordValue => format!("${:0>4X}", value.unwrap_or(0)),
+            Argument::ConstantValue(c) => if *c < 16 {
+                format!("{}", c)
+
+            } else {
+                format!("${:0>2X}", c)
+            },
+            Argument::Register(r) => format!("{}", r),
+            Argument::Flag(f) => format!("{}", f)
+        }
+    }
 }
 
 impl Into<LexerArgument> for Argument {
@@ -360,6 +465,15 @@ impl Argument {
             "cb" => None,
             a => panic!("Unknown argument type: {}", a)
         }
+    }
+}
+
+fn signed_byte(byte: i32) -> i32 {
+    if byte > 127 {
+        byte - 254
+
+    } else {
+        byte
     }
 }
 
