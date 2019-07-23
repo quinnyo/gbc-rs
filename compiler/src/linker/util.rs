@@ -1,6 +1,6 @@
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
-use gbc_cpu::Instruction;
+use gb_cpu::Instruction;
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -10,7 +10,7 @@ use crate::expression::ExpressionResult;
 
 // Statics --------------------------------------------------------------------
 lazy_static! {
-    static ref INSTRUCTIONS: Vec<Instruction> = gbc_cpu::instruction_list();
+    static ref INSTRUCTIONS: Vec<Instruction> = gb_cpu::instruction_list();
 }
 
 // Linker and Section Helpers -------------------------------------------------
@@ -178,7 +178,7 @@ fn to_twos_word(i: i32) -> u16 {
 // Helpers --------------------------------------------------------------------
 pub mod instruction {
     use super::INSTRUCTIONS;
-    use gbc_cpu::Argument;
+    use gb_cpu::Argument;
 
     pub fn jump_address(end_of_instruction: usize, bytes: &[u8]) -> Option<usize> {
         match bytes[0] {

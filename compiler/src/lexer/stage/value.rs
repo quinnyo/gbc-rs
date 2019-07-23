@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gbc_cpu::{Flag, Register};
+use gb_cpu::{Flag, Register};
 use ordered_float::OrderedFloat;
 
 

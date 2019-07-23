@@ -12,8 +12,8 @@ use clap::{Arg, App};
 
 
 // Internal Dependencies ------------------------------------------------------
-use gbc_lib::compiler::Compiler;
-use gbc_lib::traits::{FileError, FileReader, FileWriter};
+use compiler::compiler::Compiler;
+use compiler::traits::{FileError, FileReader, FileWriter};
 
 
 // CLI Interface --------------------------------------------------------------

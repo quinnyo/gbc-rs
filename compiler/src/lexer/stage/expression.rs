@@ -3,7 +3,7 @@ use std::mem;
 
 
 // External Dependencies ------------------------------------------------------
-use gbc_cpu::{Flag, Register};
+use gb_cpu::{Flag, Register};
 
 
 // Internal Dependencies ------------------------------------------------------

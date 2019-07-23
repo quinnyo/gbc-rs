@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gbc_cpu::{Register, Flag, LexerArgument, self};
+use gb_cpu::{Register, Flag, LexerArgument, self};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -141,7 +141,7 @@ impl LexerStage for EntryStage {
 
     ) -> Result<Vec<Self::Output>, SourceError> {
         let mut layouts: InstructionLayouts = HashMap::new();
-        for (index, instr) in gbc_cpu::instruction_list().into_iter().enumerate() {
+        for (index, instr) in gb_cpu::instruction_list().into_iter().enumerate() {
             let layout = instr.layout.into_iter().map(Into::into).collect();
             let key: (Symbol, Vec<LexerArgument>) = (Symbol::from(instr.name.to_string()), layout);
             layouts.entry(key).or_insert(index as u16);
@@ -448,7 +448,7 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
 
-        let max_arg_count = gbc_cpu::instruction_max_arg_count(&inner.value.as_str());
+        let max_arg_count = gb_cpu::instruction_max_arg_count(&inner.value.as_str());
         let mut expression: OptionalDataExpression = None;
 
         let mut layout = Vec::with_capacity(8);
@@ -467,7 +467,7 @@ impl EntryStage {
 
                     // Special casing for conditional instructions where "c" is the carry flag
                     // instead of a register if infront of the comma
-                    if !past_comma && gbc_cpu::instruction_is_conditional(&inner.value.as_str()) && name == Register::C{
+                    if !past_comma && gb_cpu::instruction_is_conditional(&inner.value.as_str()) && name == Register::C{
                         layout.push(LexerArgument::Flag(Flag::Carry));
 
                     } else {
