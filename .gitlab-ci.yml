@@ -8,7 +8,7 @@ test:
   stage: test
   script:
   - rustc --version && cargo --version
-  - cd gbc-lib
+  - cd compiler
   - cargo test --all --verbose
   - cd ../gbt
   - cargo test --all --verbose
