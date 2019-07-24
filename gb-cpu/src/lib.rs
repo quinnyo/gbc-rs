@@ -297,15 +297,6 @@ impl Instruction {
         }
     }
 
-    pub fn byte_size(&self) -> usize {
-        if self.code > 255 {
-            1 + self.size
-
-        } else {
-            self.size
-        }
-    }
-
     pub fn decode(
         buffer: &[u8],
         instructions: &[Instruction],
