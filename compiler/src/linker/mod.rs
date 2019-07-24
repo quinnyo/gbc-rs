@@ -432,7 +432,7 @@ mod test {
     use super::section::entry::EntryData;
     use crate::expression::data::{DataAlignment, DataEndianess};
     use crate::mocks::{entry_lex, entry_lex_binary, MockFileReader, entry_lex_child};
-    use crate::traits::FileReader;
+    use file_io::FileReader;
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();

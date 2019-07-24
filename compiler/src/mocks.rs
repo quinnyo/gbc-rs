@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{Error as IOError, ErrorKind};
 
 // Internal Dependencies ------------------------------------------------------
-use crate::traits::{FileReader, FileWriter, FileError};
+use file_io::{FileReader, FileWriter, FileError};
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 
 #[derive(Default)]
