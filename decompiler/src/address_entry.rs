@@ -12,6 +12,8 @@ pub struct AddressEntry {
     offset: usize,
     instruction: Option<Instruction>,
     label: Option<String>,
+    global_label: bool,
+    function_id: Option<usize>,
     jumps_from: HashSet<usize>,
     calls_from: HashSet<usize>,
     jumps_to: Option<usize>,
@@ -26,6 +28,8 @@ impl AddressEntry {
             offset,
             instruction: None,
             label: None,
+            function_id: None,
+            global_label: true,
             jumps_from: HashSet::new(),
             calls_from: HashSet::new(),
             jumps_to: None,
@@ -34,12 +38,35 @@ impl AddressEntry {
         }
     }
 
+    pub fn set_function_id(&mut self, uid: usize) {
+        self.function_id = Some(uid);
+    }
+
+    pub fn set_local_label(&mut self) {
+        self.global_label = false;
+    }
+
+    pub fn is_potential_function(&self) -> bool {
+        !self.calls_from.is_empty() || (!self.jumps_from.is_empty() && self.global_label)
+    }
+
+    pub fn is_called(&self) -> bool {
+        !self.calls_from.is_empty()
+    }
+
+    pub fn instruction(&self) -> Option<&Instruction> {
+        self.instruction.as_ref()
+    }
+
     pub fn set_instruction(&mut self, instr: Instruction) {
         self.instruction = Some(instr);
     }
 
-    pub fn record_jump_from(&mut self, address: usize) {
+    pub fn record_jump_from(&mut self, address: usize, always: bool) {
         self.jumps_from.insert(address);
+        if !always {
+            self.global_label = false;
+        }
         if self.label.is_none() {
             self.generate_label();
         }
@@ -47,6 +74,7 @@ impl AddressEntry {
 
     pub fn record_call_from(&mut self, address: usize) {
         self.calls_from.insert(address);
+        self.global_label = true;
         if self.label.is_none() {
             self.generate_label();
         }
@@ -75,17 +103,28 @@ impl AddressEntry {
     pub fn to_string(&self, entries: &HashMap<usize, AddressEntry>) -> String {
         let callers = Self::callers(entries, self.offset);
         format!(
-            "{}0x{:0>4X}{}{}",
-
+            "{}{}0x{:0>4X}{}{}",
             // Show Label
-            if let Some(label) = self.label.as_ref() {
-                // Show callers
-                if callers.is_empty() {
-                    format!("\n{}:\n    ", label)
+            if self.label.is_some() {
+                let label = Self::address_label(entries, self.offset);
+                let function = if self.global_label && self.function_id.is_some() {
+                    "fn "
 
                 } else {
-                    format!("\n; Callers: {}\n{}:\n    ", callers, label)
+                    ""
+                };
+                if callers.is_empty() {
+                    format!("\n{}{}:\n", function, label)
+
+                } else {
+                    format!("\n; Callers: {}\n{}{}:\n", callers, function, label)
                 }
+
+            } else {
+                "".to_string()
+            },
+            if self.function_id.is_some() {
+                " |  ".to_string()
 
             } else {
                 "    ".to_string()
@@ -133,7 +172,12 @@ impl AddressEntry {
     fn address_label(entries: &HashMap<usize, AddressEntry>, address: usize) -> String {
         if let Some(entry) = entries.get(&address) {
             if let Some(label) = entry.label.as_ref() {
-                label.to_string()
+                if entry.global_label {
+                    label.to_string()
+
+                } else {
+                    format!(".{}", label)
+                }
 
             } else {
                 format!("0x{:0>4X}", address)
