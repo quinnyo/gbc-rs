@@ -276,9 +276,9 @@ pub struct Instruction {
     pub size: usize,
     pub cycles: usize,
     pub cycles_min: Option<usize>,
-    pub layout: Vec<Argument>,
+    pub layout: [Argument; 2],
     pub argument: Option<Argument>,
-    pub offsets: Option<Vec<(usize, u16)>>,
+    pub offsets: Option<[(usize, u16); 8]>,
     pub flags: FlagState
 }
 
@@ -297,21 +297,118 @@ impl Instruction {
         }
     }
 
+    pub fn to_raw_bytes(&self) -> Vec<u8> {
+        if self.code > 255 {
+            vec![0xCB, (self.code % 256) as u8]
+
+        } else if self.size == 1 {
+            vec![self.code as u8]
+
+        } else if self.size == 2 {
+            vec![self.code as u8, self.value.unwrap_or(0) as u8]
+
+        } else {
+            let value = self.value.unwrap_or(0);
+            vec![self.code as u8, value as u8, (value >> 8) as u8]
+        }
+    }
+
+    pub fn is_jump(&self) -> bool {
+        self.is_absolute_jump() || self.is_relative_jump()
+    }
+
+    pub fn is_relative_jump(&self) -> bool {
+        self.name == "jr"
+    }
+
+    pub fn is_absolute_jump(&self) -> bool {
+        self.name == "jp"
+    }
+
+    pub fn is_call(&self) -> bool {
+        self.name == "call"
+    }
+
+    pub fn is_return(&self) -> bool {
+        self.name == "ret" || self.name == "reti"
+    }
+
+    pub fn target(&self, origin: usize) -> usize {
+        self.address_argument(origin as u16).unwrap_or(0) as usize
+    }
+
+    pub fn memory_argument(&self) -> Option<u16> {
+        if let Argument::MemoryLookupWordValue = self.layout[0] {
+            Some(self.value.unwrap_or(0))
+
+        } else if let Argument::MemoryLookupWordValue = self.layout[1] {
+            Some(self.value.unwrap_or(0))
+
+        } else if let Argument::MemoryLookupByteValue = self.layout[0] {
+            Some(0xFF00 + self.value.unwrap_or(0))
+
+        } else if let Argument::MemoryLookupByteValue = self.layout[1] {
+            Some(0xFF00 + self.value.unwrap_or(0))
+
+        } else {
+            None
+        }
+    }
+
+    pub fn address_argument(&self, origin: u16) -> Option<u16> {
+        if self.is_relative_jump() {
+            Some((origin as i32 + signed_jump(self.value.unwrap_or(0) as i32)) as u16)
+
+        } else if self.is_absolute_jump() {
+            Some(self.value.unwrap_or(0))
+
+        } else if self.is_call() {
+            Some(self.value.unwrap_or(0))
+
+        } else {
+            None
+        }
+    }
+
+    pub fn is_conditional(&self) -> bool {
+        if self.is_jump() || self.is_call() {
+            self.layout[1] != Argument::Unused
+
+        } else if self.is_return() {
+            self.layout[0] != Argument::Unused
+
+        } else {
+            false
+        }
+    }
+
     pub fn decode(
         buffer: &[u8],
         instructions: &[Instruction],
         extended: bool
 
     ) -> Option<Instruction> {
-        match buffer[0] {
-            0xCB => Self::decode(&buffer[1..], instructions, true),
-            op => if extended {
-                instructions[256 + op as usize].clone().with_argument(&buffer[1..])
+        if buffer.is_empty() {
+            None
 
-            } else {
-                instructions[op as usize].clone().with_argument(&buffer[1..])
+        } else {
+            match buffer[0] {
+                0xCB => Self::decode(&buffer[1..], instructions, true),
+                op => if extended {
+                    instructions[256 + op as usize].clone().with_argument(&buffer[1..])
+
+                } else {
+                    instructions[op as usize].clone().with_argument(&buffer[1..])
+                }
             }
         }
+    }
+
+    pub fn to_string(&self, label: Option<&String>) -> String {
+        format!("{: <8} {}", self.name, self.layout.iter().filter(|arg| *arg != &Argument::Unused).map(|arg| {
+            arg.to_string(self.value, label)
+
+        }).collect::<Vec<String>>().join(", "))
     }
 
     fn with_argument(mut self, buffer: &[u8]) -> Option<Self> {
@@ -322,21 +419,15 @@ impl Instruction {
             self.value = Some(buffer[0] as u16);
             Some(self)
 
-        } else {
+        } else if self.size == 3 {
             self.value = Some(buffer[0] as u16 | (buffer[1] as u16) << 8);
+            Some(self)
+
+        } else {
             Some(self)
         }
     }
 
-}
-
-impl fmt::Display for Instruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{: <4} {}", self.name, self.layout.iter().map(|l| {
-            l.to_string(self.value)
-
-        }).collect::<Vec<String>>().join(","))
-    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone)]
@@ -358,18 +449,47 @@ pub enum Argument {
     WordValue,
     ConstantValue(usize),
     Register(Register),
-    Flag(Flag)
+    Flag(Flag),
+    Unused
 }
 
 impl Argument {
-    fn to_string(&self, value: Option<u16>) -> String {
+    fn to_string(&self, value: Option<u16>, label: Option<&String>) -> String {
         match self {
-            Argument::MemoryLookupByteValue => format!("[${:0>2X}]", value.unwrap_or(0)),
-            Argument::MemoryLookupWordValue => format!("[${:0>4X}]", value.unwrap_or(0)),
+            Argument::MemoryLookupByteValue => {
+                if let Some(label) = label {
+                    format!("[{}]", label)
+
+                } else {
+                    format!("[${:0>2X}]", value.unwrap_or(0))
+                }
+            },
+            Argument::MemoryLookupWordValue => {
+                if let Some(label) = label {
+                    format!("[{}]", label)
+
+                } else {
+                    format!("[${:0>4X}]", value.unwrap_or(0))
+                }
+            },
+            Argument::SignedByteValue => {
+                if let Some(label) = label {
+                    format!("{}", label)
+
+                } else {
+                    format!("{}", signed_byte(value.unwrap_or(0) as i32))
+                }
+            },
             Argument::MemoryLookupRegister(r) => format!("[{}]", r),
             Argument::ByteValue => format!("${:0>2X}", value.unwrap_or(0)),
-            Argument::SignedByteValue => format!("{}", signed_byte(value.unwrap_or(0) as i32)),
-            Argument::WordValue => format!("${:0>4X}", value.unwrap_or(0)),
+            Argument::WordValue => {
+                if let Some(label) = label {
+                    format!("{}", label)
+
+                } else {
+                    format!("${:0>4X}", value.unwrap_or(0))
+                }
+            },
             Argument::ConstantValue(c) => if *c < 16 {
                 format!("{}", c)
 
@@ -377,7 +497,8 @@ impl Argument {
                 format!("${:0>2X}", c)
             },
             Argument::Register(r) => format!("{}", r),
-            Argument::Flag(f) => format!("{}", f)
+            Argument::Flag(f) => format!("{}", f),
+            Argument::Unused => "".to_string()
         }
     }
 }
@@ -394,6 +515,7 @@ impl Into<LexerArgument> for Argument {
             Argument::ConstantValue(_) => LexerArgument::Value,
             Argument::Register(r) => LexerArgument::Register(r.clone()),
             Argument::Flag(f) => LexerArgument::Flag(f.clone()),
+            Argument::Unused => LexerArgument::Value
         }
     }
 }
@@ -409,7 +531,8 @@ impl fmt::Debug for Argument {
             Argument::WordValue => write!(f, "Argument::WordValue"),
             Argument::ConstantValue(v) => write!(f, "Argument::ConstantValue({})", v),
             Argument::Register(r) => write!(f, "Argument::Register({:?})", r),
-            Argument::Flag(r) => write!(f, "Argument::Flag({:?})", r)
+            Argument::Flag(r) => write!(f, "Argument::Flag({:?})", r),
+            Argument::Unused => write!(f, "Argument::Unused")
         }
     }
 }
@@ -456,6 +579,15 @@ impl Argument {
             "cb" => None,
             a => panic!("Unknown argument type: {}", a)
         }
+    }
+}
+
+fn signed_jump(byte: i32) -> i32 {
+    if byte > 127 {
+        byte - 254
+
+    } else {
+        byte + 2
     }
 }
 

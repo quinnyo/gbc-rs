@@ -49,47 +49,42 @@ impl Decompiler {
 
     ) -> Result<String, (String, DecompilationError)> {
 
-        self.address_entry(0x0040).set_label("IE_VBLANK".to_string());
-        self.address_entry(0x0050).set_label("IE_TIMER".to_string());
-        self.address_entry(0x0058).set_label("IE_SERIAL".to_string());
+        self.address_entry(0x0040).set_label("IV_VBLANK".to_string());
+        self.address_entry(0x0040).record_call_from(0xFFFF);
+        self.address_entry(0x0050).set_label("IV_TIMER".to_string());
+        self.address_entry(0x0050).record_call_from(0xFFFF);
+        self.address_entry(0x0058).set_label("IV_SERIAL".to_string());
         self.address_entry(0x0100).set_label("BOOT_ROM_EXIT".to_string());
 
         let (rom_buffer, symbols) = self.read_rom_file(io, &file).map_err(|e| self.error("instruction parsing", e))?;
-        // TODO return symbols locations in tuple format to pass in below
-        self.parse_symbols(symbols);
 
-        // self.address_entry(0x0100).record_call_from(0x00);
-
-        self.analyze_from(&rom_buffer, vec![
-            (0x0100, None, Some(0x0100)),
-            (0x0040, None, None),
-            (0x0050, None, None),
-            (0x0058, None, None),
+        let mut known_addresses = vec![
+            (0x0100, Some(0x0100)),
+            (0x0040, None),
+            (0x0050, None),
+            (0x0058, None),
             // TODO include known parent labels for cases where they are never called directly
             // (0x1B64, None, Some(0x1B64)),
+        ];
 
-        ]).map_err(|e| self.error("instruction parsing", e))?;
+        // TODO differentiate betweeen functions and data locations
+        // TODO tweak the symbol file?
+        known_addresses.append(&mut self.parse_symbols(symbols));
 
-        // TODO record all callees in a hashset
+        self.analyze_from(&rom_buffer, known_addresses).map_err(|e| self.error("instruction parsing", e))?;
 
-        // TODO process and detect "functions"
-            // TODO go through all callees
-            // TODO assign a UID
-            // TODO go forward until we reach another callee
-                // TODO remember the largest address of any ret
-                // TODO remember if the last token was jp without any conditions
+        // TODO detect data blocks
+        // TODO handle msg / brk instructions in instruction decoder
+        // TODO display known argument labels inline
 
-            // TODO assign all addresses up until the largest ret the UID
-            // TODO if the last token was a jp XX then assign the UID up until that and treat it as
-            // a tail call
-
-        for adr in self.range_to_string(0x0000, 0x400) {
+        for adr in self.range_to_string(0x0000, 0x4000) {
             self.log(adr);
         }
         Ok(self.output.join("\n"))
     }
 
-    fn parse_symbols(&mut self, symbols: Vec<String>) {
+    fn parse_symbols(&mut self, symbols: Vec<String>) -> Vec<(usize, Option<usize>)> {
+        let mut addresses = Vec::new();
         for s in symbols {
             let mut line = s.split(' ');
             if let (Some(location), Some(name)) = (line.next(), line.next()) {
@@ -97,21 +92,24 @@ impl Decompiler {
                 if let (Some(bank), Some(address)) = (location.next(), location.next()) {
                     if let Ok(bank) = u16::from_str_radix(bank, 16) {
                         if let Ok(addr) = u16::from_str_radix(address, 16) {
-                            self.address_entry(addr as usize + bank as usize * 0x4000).set_label(name.to_string());
+                            let addr = addr as usize + bank as usize * 0x4000;
+                            self.address_entry(addr).set_label(name.to_string());
+                            addresses.push((addr, None));
                         }
                     }
                 }
             }
         }
+        addresses
     }
 
     fn analyze_from(
         &mut self,
         rom_buffer: &[u8],
-        mut call_stack: Vec<(usize, Option<usize>, Option<usize>)>,
+        mut call_stack: Vec<(usize, Option<usize>)>,
 
     ) -> Result<(), RomError> {
-        while let Some((mut address, caller_address, callee_address)) = call_stack.pop() {
+        while let Some((mut address, callee_address)) = call_stack.pop() {
 
             // Ignore addresses outside of ROM space
             if address > rom_buffer.len() - 1 {
@@ -122,81 +120,67 @@ impl Decompiler {
             while let Some(instr) = Instruction::decode(&rom_buffer[address..], &self.instructions, false) {
 
                 // TODO detect debug messages and breakpoints
+                let branching = if instr.is_relative_jump() {
+                    let target = instr.target(address);
 
-                let flow_stopped = match instr.name {
-                    "jr" => {
-                        let always = instr.layout.len() == 1;
-                        let target = (address as i32 + signed_byte(instr.value.unwrap_or(0) as i32)) as usize;
+                    // Backwards jumps are considered to be always taken
+                    self.address_entry(target).record_jump_from(address, !instr.is_conditional() || target <= address);
+                    self.address_entry(address).record_jump_to(target);
+                    if !self.address_visited(target) {
+                        call_stack.push((target, callee_address));
+                    }
+                    instr.is_conditional()
 
-                        // Backwards jumps are considered to be always taken
-                        // TODO does this always work?
-                        self.address_entry(target).record_jump_from(address, always || target <= address);
-                        self.address_entry(address).record_jump_to(target);
+                // TODO check for obvious jump tables in case of jp [hl] and parse their addresses
+                } else if instr.is_absolute_jump() {
+                    let target = instr.target(address);
+                    self.address_entry(target).record_jump_from(address, !instr.is_conditional());
+                    self.address_entry(address).record_jump_to(target);
+                    if !self.address_visited(target) {
+                        call_stack.push((target, callee_address ));
+                    }
+                    instr.is_conditional()
 
-                        if !self.address_visited(target) {
-                            call_stack.push((target, caller_address, callee_address));
-                        }
+                } else if instr.is_call() {
+                    let target = instr.target(address);
+                    self.address_entry(target).record_call_from(address);
+                    self.address_entry(address).record_call_to(target);
+                    call_stack.push((target, Some(target)));
+                    true
 
-                        always
-                    },
-                    // TODO check for obvious jump tables in case of jp [hl] and parse their
-                    // addresses
-                    "jp" => {
-                        let always = instr.layout.len() == 1;
-                        let target = instr.value.unwrap_or(0) as usize;
-                        self.address_entry(target).record_jump_from(address, always);
-                        self.address_entry(address).record_jump_to(target);
+                } else if instr.is_return() {
+                    if let Some(callee) = callee_address {
+                        self.address_entry(address).record_return_from(callee);
+                    }
+                    instr.is_conditional()
 
-                        if !self.address_visited(target) {
-                            call_stack.push((target, caller_address, callee_address ));
-                        }
-                        always
-                    },
-                    "call" => {
-                        let target = instr.value.unwrap_or(0) as usize;
-                        self.address_entry(target).record_call_from(address);
-                        self.address_entry(address).record_call_to(target);
-
-                        // if !self.address_visited(target) {
-                            // TODO do we need to run multiple times or should we try and work
-                            // call / return address issues in another way
-                            call_stack.push((target, Some(address), Some(target)));
-                        // }
-                        false
-                    },
-                    "ret" | "reti" => {
-                        if let Some(callee) = callee_address {
-                            self.address_entry(address).record_return_from(callee);
-                        }
-                        instr.layout.len() == 0
-                    },
-                    _ => false
+                } else {
+                    true
                 };
 
                 let size = instr.size;
                 self.address_entry(address).set_instruction(instr);
                 address += size;
 
-                if flow_stopped {
+                if !branching {
                     break;
                 }
             }
         }
 
         // Find function bodies
-        let mut fid = 0;
+        let mut id = 0;
         for address in self.function_addresses() {
             let addresses = self.find_function_body_addresses(address);
             for (index, address) in addresses.into_iter().enumerate() {
                 let entry = self.address_entry(address);
-                entry.set_function_id(fid);
-
-                // Mark all inner labels as local
+                entry.set_function_id(id);
                 if index > 0 {
-                    entry.set_local_label();
+                    // Mark all inner labels as local
+                    entry.make_local_label();
                 }
             }
-            fid += 1;
+            id += 1;
         }
 
         Ok(())
@@ -208,22 +192,25 @@ impl Decompiler {
         let mut locations = vec![address];
         let mut addresses = Vec::new();
         while let Some(mut address) = locations.pop() {
-
             if visited.contains(&address) {
                 continue;
+
+            } else {
+                visited.insert(address);
             }
-            visited.insert(address);
 
             loop {
                 if let Some(entry) = self.addresses.get(&address) {
                     if let Some(instr) = entry.instruction() {
 
                         // Avoid merging fallthough functions
-                        if entry.is_called() && !addresses.is_empty() {
+                        if entry.has_callers() && !addresses.is_empty() {
                             break;
                         }
 
                         addresses.push(address);
+
+                        // Detect and of function body
                         let len = instr.layout.len();
                         if instr.name == "ret" && len == 0 {
                             break;
@@ -231,16 +218,16 @@ impl Decompiler {
                         } else if instr.name == "reti" {
                             break;
 
-                        } else if (instr.name == "jr" || instr.name == "jp") && len == 1 {
+                        } else if instr.is_jump() && len == 1 {
                             break;
 
+                        // Follow conditional jumps to other parts of the function body
                         } else {
-                            // Follow conditional jumps to other parts of the function
-                            if instr.name == "jr" {
+                            if instr.is_relative_jump() {
                                 let target = (address as i32 + signed_byte(instr.value.unwrap_or(0) as i32)) as usize;
                                 locations.push(target);
 
-                            } else if instr.name == "jp" {
+                            } else if instr.is_absolute_jump() {
                                 let target = instr.value.unwrap_or(0) as usize;
                                 locations.push(target);
                             }

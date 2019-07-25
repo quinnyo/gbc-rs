@@ -23,7 +23,7 @@ fn main() {
 }
 
 fn instr_to_string(instr: Instruction) -> String {
-    format!("        {:?},", instr).replace("layout: [", "layout: vec![").replace("Some([", "Some(vec![").replace("\", size", "\".to_string(), size")
+    format!("        {:?},", instr).replace("layout: [", "layout: [").replace("Some([", "Some([").replace("\", size", "\".to_string(), size")
 }
 
 fn layout_to_assert(index: usize, layout: String) -> String {
@@ -127,8 +127,16 @@ fn convert_html_dump(sources: &[(&str, Option<usize>)], target: &str) {
 
     for (key, values) in mappings {
         let base_index = *layouts.get(&key).unwrap();
-        println!("{}: {:?}", base_index, values);
-        instructions[base_index].offsets = Some(values);
+        instructions[base_index].offsets = Some([
+            values[0],
+            values[1],
+            values[2],
+            values[3],
+            values[4],
+            values[5],
+            values[6],
+            values[7]
+        ])
     }
 
     let mut counts: Vec<(String, usize)> = max_arg_count.into_iter().collect();
@@ -180,7 +188,7 @@ fn parse_instructions_from_string(
             let layout = iter.next().unwrap().1;
             let next = iter.next().unwrap().1;
             let (layout, cycles, flags) = if next.name == "td" {
-                ("invalid".to_string(), "0 0".to_string(), "- - - -".to_string())
+                ("invalid".to_string(), "1 0".to_string(), "- - - -".to_string())
 
             } else {
                 let cycles = iter.next().unwrap().1;
@@ -287,11 +295,15 @@ fn parse_instruction(
     Instruction {
         code: index,
         prefix,
+        value: None,
         name: mnemonic.clone(),
         size: cycles[0].parse().unwrap(),
         cycles: cycles[1].parse().unwrap(),
         cycles_min: if cycles.len() > 2 { cycles[2].parse().ok() } else { None  },
-        layout: args,
+        layout: [
+            args.get(0).unwrap_or(&Argument::Unused).clone(),
+            args.get(1).unwrap_or(&Argument::Unused).clone()
+        ],
         argument,
         offsets: None,
         flags: FlagState {
@@ -446,12 +458,13 @@ pub struct Instruction {
     pub code: usize,
     pub prefix: Option<usize>,
     pub name: String,
+    pub value: Option<u16>,
     pub size: usize,
     pub cycles: usize,
     pub cycles_min: Option<usize>,
-    pub layout: Vec<Argument>,
+    pub layout: [Argument; 2],
     pub argument: Option<Argument>,
-    pub offsets: Option<Vec<(usize, usize)>>,
+    pub offsets: Option<[(usize, usize); 8]>,
     pub flags: FlagState
 }
 
@@ -474,7 +487,8 @@ pub enum Argument {
     WordValue,
     ConstantValue(usize),
     Register(Register),
-    Flag(Flag)
+    Flag(Flag),
+    Unused
 }
 
 impl Argument {
@@ -488,7 +502,8 @@ impl Argument {
             Argument::WordValue => true,
             Argument::ConstantValue(_) => true,
             Argument::Register(_) => false,
-            Argument::Flag(_) => false
+            Argument::Flag(_) => false,
+            Argument::Unused => false
         }
     }
 }
@@ -505,6 +520,7 @@ impl Into<LexerArgument> for Argument {
             Argument::ConstantValue(_) => LexerArgument::Value,
             Argument::Register(r) => LexerArgument::Register(r.clone()),
             Argument::Flag(f) => LexerArgument::Flag(f.clone()),
+            Argument::Unused => LexerArgument::Value
         }
     }
 }
@@ -520,7 +536,8 @@ impl fmt::Debug for Argument {
             Argument::WordValue => write!(f, "Argument::WordValue"),
             Argument::ConstantValue(v) => write!(f, "Argument::ConstantValue({})", v),
             Argument::Register(r) => write!(f, "Argument::Register({:?})", r),
-            Argument::Flag(r) => write!(f, "Argument::Flag({:?})", r)
+            Argument::Flag(r) => write!(f, "Argument::Flag({:?})", r),
+            Argument::Unused => write!(f, "Argument::Unused")
         }
     }
 }

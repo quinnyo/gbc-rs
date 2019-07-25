@@ -202,7 +202,7 @@ pub mod instruction {
         INSTRUCTIONS[op_code as usize].to_bytes()
     }
 
-    pub fn offsets(op_code: u16) -> Option<&'static Vec<(usize, u16)>> {
+    pub fn offsets(op_code: u16) -> Option<&'static [(usize, u16); 8]> {
         INSTRUCTIONS[op_code as usize].offsets.as_ref()
     }
 

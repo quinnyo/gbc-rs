@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gb_cpu::{Register, Flag, LexerArgument, self};
+use gb_cpu::{Register, Flag, Argument, LexerArgument, self};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -142,7 +142,7 @@ impl LexerStage for EntryStage {
     ) -> Result<Vec<Self::Output>, SourceError> {
         let mut layouts: InstructionLayouts = HashMap::new();
         for (index, instr) in gb_cpu::instruction_list().into_iter().enumerate() {
-            let layout = instr.layout.into_iter().map(Into::into).collect();
+            let layout = instr.layout.iter().filter(|arg| *arg != &Argument::Unused).map(|arg| arg.clone().into()).collect();
             let key: (Symbol, Vec<LexerArgument>) = (Symbol::from(instr.name.to_string()), layout);
             layouts.entry(key).or_insert(index as u16);
         }
