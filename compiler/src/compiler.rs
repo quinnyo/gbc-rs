@@ -608,11 +608,20 @@ mod test {
     }
 
     #[test]
-    fn test_linting_constant_global_not_used_globally() {
+    fn test_linting_constant_global_only_used_in_declaration_file() {
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(c, "SECTION ROM0\nGLOBAL USED EQU 2048\nDW USED\nGLOBAL SHARED EQU 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
+            compiler_lint(c, "SECTION ROM0\nGLOBAL USED EQU 2048\nDW USED\nDW SHARED\nGLOBAL SHARED EQU 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
             "        Info Linter Report\n     Warning Constant \"USED\" should be made non-global or default, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 8\n".to_string()
+        );
+    }
+
+    #[test]
+    fn test_linting_constant_global_only_used_in_one_other_file() {
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(c, "SECTION ROM0\nGLOBAL SHARED EQU 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
+            "        Info Linter Report\n     Warning Constant \"SHARED\" should be moved to another file, since it is never used at its declaration in file \"main.gb.s\" on line 2, column 8. Constant is only used in file \"child.gb.s\".\n".to_string()
         );
     }
 

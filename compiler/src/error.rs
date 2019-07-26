@@ -50,7 +50,12 @@ impl SourceError {
     }
 
     pub fn with_reference<S: Into<String>>(mut self, token: &InnerToken, message: S) -> Self {
-        self.reference =Some((token.file_index, token.start_index, message.into()));
+        self.reference = Some((token.file_index, token.start_index, message.into()));
+        self
+    }
+
+    pub fn with_file<S: Into<String>>(mut self, file_index: usize, message: S) -> Self {
+        self.reference = Some((file_index, 0, message.into()));
         self
     }
 
@@ -69,13 +74,21 @@ impl SourceError {
             self.index,
             self.message,
             true,
-            false
+            false,
+            true
         );
+        let reference = if let Some((file_index, index, reference)) = self.reference {
+            format!(". {}", Self::format_location(files, file_index, index, reference, true, false, false))
+
+        } else {
+            "".to_string()
+        };
+
         SourceError {
             file_index: self.file_index,
             index: self.index,
             macro_call_id: self.macro_call_id,
-            message: location,
+            message: format!("{}{}", location, reference),
             reference: None
         }
     }
@@ -116,7 +129,7 @@ impl SourceError {
 
         // Add reference location
         let reference = if let Some((file_index, index, reference)) = self.reference {
-            format!("\n\n{}", Self::format_location(files, file_index, index, reference, true, true))
+            format!("\n\n{}", Self::format_location(files, file_index, index, reference, true, true, true))
 
         } else {
             "".to_string()
@@ -128,6 +141,7 @@ impl SourceError {
             self.index,
             self.message,
             false,
+            true,
             true
         );
 
@@ -153,7 +167,8 @@ impl SourceError {
         index: usize,
         message: String,
         prefix_message: bool,
-        show_source: bool
+        show_source: bool,
+        show_line: bool
 
     ) -> String {
         if let Some(file) = files.get(file_index) {
@@ -161,13 +176,17 @@ impl SourceError {
             let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
             let col_pointer = str::repeat(" ", col);
             if prefix_message {
-                let location = format!(
-                    "{} in file \"{}\" on line {}, column {}",
-                    message,
-                    error_path(file),
-                    line + 1,
-                    col + 1,
-                );
+                let location = if show_line {
+                    format!(
+                        "{} in file \"{}\" on line {}, column {}",
+                        message,
+                        error_path(file),
+                        line + 1,
+                        col + 1,
+                    )
+                } else {
+                    format!("{} in file \"{}\".", message, error_path(file))
+                };
                 if show_source {
                     format!(
                         "{}:\n\n{}\n{}{}",

@@ -92,12 +92,25 @@ impl EvaluatorContext {
             if let Some(files) = usage.constants.get(index) {
                 // Warn when non-default, global constants are only used in their file of
                 // declaration
+                // TODO must check if ANY reference is default instead of only this one
                 if !c.is_default && index.1.is_none() && files.len() == 1 {
                     if files.get(&c.inner.file_index).is_some() {
                         locations.push((
                             3,
                             c.inner.value.clone(),
-                            c.inner.error(format!("Constant \"{}\" should be made non-global or default, since it is never used outside its declaration", c.inner.value))
+                            c.inner.error(
+                                format!("Constant \"{}\" should be made non-global or default, since it is never used outside its declaration", c.inner.value)
+                            )
+                        ));
+
+                    } else if let Some(file) = files.iter().nth(0) {
+                        locations.push((
+                            4,
+                            c.inner.value.clone(),
+                            c.inner.error(
+                                format!("Constant \"{}\" should be moved to another file, since it is never used at its declaration", c.inner.value)
+
+                            ).with_file(*file, "Constant is only used")
                         ));
                     }
                 }
@@ -106,7 +119,9 @@ impl EvaluatorContext {
                 locations.push((
                     0,
                     c.inner.value.clone(),
-                    c.inner.error(format!("Constant \"{}\" is never used, declared", c.inner.value))
+                    c.inner.error(
+                        format!("Constant \"{}\" is never used, declared", c.inner.value)
+                    )
                 ));
             }
         }
