@@ -4,29 +4,32 @@
 
 **gbc** is a [Rust](https://rust-lang.org) based compiler for Gameboy z80 assembly code.
 
+Pre-compiled binaries:
+
+- [Linux](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/target/x86_64-unknown-linux-musl/release/gbc?job=linux-musl)
+- [Windows](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/target/x86_64-pc-windows-gnu/release/gbc.exe?job=windows-mingw)
+
+
 ## Main Goals
 
 - No further external programs required to build a ROM
-- Good error messages
-- High test coverages
+- Nice error messages
+- High test coverage
 - Quality of life improvements via syntactic sugar
 
-## Games made via GBC
+## Stuff made with GBC
 
-- [Vectroid](https://gitlab.com/BonsaiDen/vectroid.gb)
+- [Vectroid](https://gitlab.com/BonsaiDen/vectroid.gb) an "Asteroids" Game
+- [Examples and Libraries](https://gitlab.com/BonsaiDen/gb-lib/tree/master/examples) for getting started with GameBoy development
 
 
-## Support Tools and Libraries
+## Supported Tools and Libraries
 
 - [gbt](https://gitlab.com/BonsaiDen/gbc-rs/tree/master/gbt) data conversion tool
 - [gb-lib](https://gitlab.com/BonsaiDen/gb-lib) assembly code libraries for use with `gbt`
 
+
 ## Usage
-
-Binaries:
-
-- [Linux](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/target/x86_64-unknown-linux-musl/release/gbc?job=linux-musl)
-- [Windows](https://gitlab.com/BonsaiDen/gbc-rs/-/jobs/artifacts/master/raw/target/x86_64-pc-windows-gnu/release/gbc.exe?job=windows-mingw)
 
 ```
 USAGE:
