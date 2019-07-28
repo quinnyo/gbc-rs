@@ -68,6 +68,7 @@ pub struct EvaluatorContext {
     raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,
     label_addresses: HashMap<usize, usize>,
     raw_labels: HashMap<(Symbol, usize), InnerToken>,
+    inactive_labels: HashMap<usize, InnerToken>,
     relative_address_offset: i32,
     linter_enabled: bool
 }
@@ -81,6 +82,7 @@ impl EvaluatorContext {
             raw_constants: HashMap::new(),
             label_addresses: HashMap::new(),
             raw_labels: HashMap::new(),
+            inactive_labels: HashMap::new(),
             relative_address_offset: 0,
             linter_enabled
         }
@@ -126,6 +128,7 @@ impl EvaluatorContext {
             }
         }
         for ((_, index), l) in &self.raw_labels {
+            // TODO warn about labels that are never referenced from other files
             if !usage.labels.contains(index) {
                 locations.push((
                     1,
@@ -184,8 +187,12 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn declare_label(&mut self, inner: &InnerToken, index: usize) {
+    pub fn declare_label(&mut self, inner: &InnerToken, index: usize, active: bool) {
         self.raw_labels.insert((inner.value.clone(), index), inner.clone());
+        // Record labels which exists but are in branches which are not active
+        if !active {
+            self.inactive_labels.insert(index, inner.clone());
+        }
     }
 
     pub fn update_label_address(&mut self, label_id: usize, address: usize) {
@@ -326,17 +333,22 @@ impl EvaluatorContext {
                         let relative_address_offset = address_offset.expect("Address offset without supplied base address");
                         ExpressionResult::Integer(relative_address_offset + offset)
                     },
-                    ExpressionValue::ParentLabelAddress(_, id) => {
+                    ExpressionValue::ParentLabelAddress(outer, id) | ExpressionValue::ChildLabelAddress(outer, id) => {
                         if self.linter_enabled {
                             usage.use_label(*id);
                         }
-                        ExpressionResult::Integer(*self.label_addresses.get(id).expect("Invalid label ID!") as i32)
-                    },
-                    ExpressionValue::ChildLabelAddress(_, id) => {
-                        if self.linter_enabled {
-                            usage.use_label(*id);
+                        if let Some(addr) = self.label_addresses.get(id) {
+                            ExpressionResult::Integer(*addr as i32)
+
+                        } else if let Some(inner) = self.inactive_labels.get(id) {
+                            return Err(outer.error(
+                                "Reference to unreachable label".to_string()
+
+                            ).with_reference(inner, "Label is declared inside currently inactive IF branch".to_string()));
+
+                        } else {
+                            panic!("Invalid label ID when resolving expression!");
                         }
-                        ExpressionResult::Integer(*self.label_addresses.get(id).expect("Invalid label ID!") as i32)
                     }
                 })
             },

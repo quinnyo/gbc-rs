@@ -73,7 +73,7 @@ impl Linker {
         let mut context = EvaluatorContext::new(linter_enabled);
         let mut usage = UsageInformation::new();
         let mut entry_tokens = Vec::with_capacity(tokens.len());
-        Self::parse_entries(&mut context, &mut usage, tokens, true, false, &mut entry_tokens)?;
+        Self::parse_entries(&mut context, &mut usage, tokens, true, false, &mut entry_tokens, false)?;
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
@@ -233,29 +233,38 @@ impl Linker {
         tokens: Vec<EntryToken>,
         allow_constant_declaration: bool,
         volatile_instructions: bool,
-        remaining_tokens: &mut Vec<(bool, EntryToken)>
+        remaining_tokens: &mut Vec<(bool, EntryToken)>,
+        inactive_labels_only: bool
 
     ) -> Result<(), SourceError> {
         for token in tokens {
             // Record constants
             if let EntryToken::Constant { inner, is_default, is_private, value } = token {
-                if allow_constant_declaration {
-                    context.declare_constant(inner, is_default, is_private, value);
+                if !inactive_labels_only {
+                    if allow_constant_declaration {
+                        context.declare_constant(inner, is_default, is_private, value);
 
-                } else {
-                    return Err(inner.error(
-                        "Constant declaration is not allowed inside of a FOR statement body.".to_string()
-                    ));
+                    } else {
+                        return Err(inner.error(
+                            "Constant declaration is not allowed inside of a FOR statement body.".to_string()
+                        ));
+                    }
                 }
 
             // Note label definitions for error messages
             } else if let EntryToken::ParentLabelDef(ref inner, index) = token {
-                context.declare_label(inner, index);
-                remaining_tokens.push((volatile_instructions, token));
+                if inactive_labels_only {
+                    context.declare_label(inner, index, false);
+
+                } else {
+                    context.declare_label(inner, index, true);
+                    remaining_tokens.push((volatile_instructions, token));
+                }
 
             // Evaluate if conditions and insert the corresponding branch into
             // the output tokens
             } else if let EntryToken::IfStatement(inner, branches) = token {
+                let mut first_taken = false;
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
                         context.resolve_const_expression(&condition, usage, inner.file_index)?
@@ -263,9 +272,14 @@ impl Linker {
                     } else {
                         ExpressionResult::Integer(1)
                     };
-                    if result.is_truthy() {
-                        Self::parse_entries(context, usage, branch.body, true, false, remaining_tokens)?;
-                        break;
+
+                    // Only parse tokens in first branch that is taken
+                    if result.is_truthy() && first_taken == false {
+                        first_taken = true;
+                        Self::parse_entries(context, usage, branch.body, true, false, remaining_tokens, inactive_labels_only)?;
+
+                    } else {
+                        Self::parse_entries(context, usage, branch.body, true, false, remaining_tokens, true)?;
                     }
                 }
 
@@ -297,7 +311,7 @@ impl Linker {
                             token
 
                         }).collect();
-                        Self::parse_entries(context, usage, body_tokens, false, false, remaining_tokens)?;
+                        Self::parse_entries(context, usage, body_tokens, false, false, remaining_tokens, inactive_labels_only)?;
                     }
                 }
 
@@ -305,7 +319,7 @@ impl Linker {
             } else if let EntryToken::UsingStatement(inner, cmd, tokens) = token {
 
                 let mut data_tokens = Vec::new();
-                Self::parse_entries(context, usage, tokens, true, false, &mut data_tokens)?;
+                Self::parse_entries(context, usage, tokens, true, false, &mut data_tokens, inactive_labels_only)?;
 
                 let mut body_tokens = Vec::new();
                 for (_, token) in data_tokens {
@@ -329,9 +343,9 @@ impl Linker {
 
             // Expand and set instructions to volatile inside volatile statements
             } else if let EntryToken::VolatileStatement(_, tokens) = token {
-                Self::parse_entries(context, usage, tokens, true, true, remaining_tokens)?;
+                Self::parse_entries(context, usage, tokens, true, true, remaining_tokens, inactive_labels_only)?;
 
-            } else {
+            } else if !inactive_labels_only {
                 remaining_tokens.push((volatile_instructions, token));
             }
         }
@@ -849,6 +863,10 @@ mod test {
                 })
             ]
         ]);
+        let l = linker("SECTION ROM0\nIF 0 THEN\nIF 1 THEN DB 1\nENDIF\nENDIF");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
     }
 
     #[test]
@@ -918,6 +936,14 @@ mod test {
                 })
             ]
         ]);
+    }
+
+    #[test]
+    fn test_if_statement_unreachable_label() {
+        assert_eq!(
+            linker_error("SECTION ROM0\ncall global_label\nIF 0 THEN\nglobal_label:\nENDIF"),
+            "In file \"main.gb.s\" on line 2, column 6: Reference to unreachable label\n\ncall global_label\n     ^--- Here\n\nLabel is declared inside currently inactive IF branch in file \"main.gb.s\" on line 4, column 1:\n\nglobal_label:\n^--- Here"
+        );
     }
 
     // FOR Statements ---------------------------------------------------------
