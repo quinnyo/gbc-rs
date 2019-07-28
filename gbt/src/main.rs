@@ -13,6 +13,7 @@ mod animation;
 mod compress;
 mod lz4;
 mod mmp;
+mod sgb;
 mod tiles;
 mod util;
 
@@ -57,6 +58,42 @@ fn main() {
                 .takes_value(true)
                 .default_value("000000,404040,808080,ffffff")
                 .help("palette used for mapping colors to GameBoy palette indicies")
+            )
+        )
+        .subcommand(SubCommand::with_name("sgb")
+            .about("converts image files into the Super GameBoy border data")
+            .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
+            .version("0.1")
+            .arg(Arg::with_name("IMAGE_FILE")
+                .help("Input image file")
+                .required(true)
+                .index(1)
+            )
+            .arg(Arg::with_name("OUTPUT_FILE")
+                .long("out-file")
+                .short("o")
+                .takes_value(true)
+                .help("GameBoy data file to generate")
+            )
+            .arg(Arg::with_name("COLOR_PALETTE")
+                .long("color-palette")
+                .short("p")
+                .min_values(4)
+                .max_values(16)
+                .use_delimiter(true)
+                .validator(is_hex_color)
+                .takes_value(true)
+                .default_value("000000,404040,808080,ffffff")
+                .help("palette used for mapping colors to a Super GameBoy 5-bit palette")
+            )
+            .arg(Arg::with_name("DATA_TYPE")
+                .long("data-type")
+                .required(true)
+                .short("d")
+                .possible_values(&["map", "tiles", "palette"])
+                .takes_value(true)
+                .default_value("palette")
+                .help("the type of Super GameBoy data to generate")
             )
         )
         .subcommand(SubCommand::with_name("animation")
@@ -127,6 +164,16 @@ fn main() {
             matches.values_of("COLOR_PALETTE").unwrap().collect(),
             matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
 
+        ) {
+            eprintln!("       {} {}", "Error".bright_red(), err);
+            process::exit(1)
+        }
+
+    } else if let Some(matches) = matches.subcommand_matches("sgb") {
+        if let Err(err) = sgb::convert_border(
+            PathBuf::from(matches.value_of("IMAGE_FILE").unwrap()),
+            matches.values_of("COLOR_PALETTE").unwrap().collect(),
+            matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
         ) {
             eprintln!("       {} {}", "Error".bright_red(), err);
             process::exit(1)

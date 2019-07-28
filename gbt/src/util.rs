@@ -18,7 +18,28 @@ pub struct Indicies {
 
 
 // Helpers --------------------------------------------------------------------
+
 pub fn indicies_to_tiles(indicies: Indicies) -> Vec<[u8; 16]> {
+    // See: http://www.huderlem.com/demos/gameboy2bpp.html
+    //
+    //   Tile:                                     Image:
+    //
+    //   .33333..                     .33333.. -> 01111100 -> $7C
+    //   22...22.                                 01111100 -> $7C
+    //   11...11.                     22...22. -> 00000000 -> $00
+    //   2222222. <-- digits                      11000110 -> $C6
+    //   33...33.     represent       11...11. -> 11000110 -> $C6
+    //   22...22.     color                       00000000 -> $00
+    //   11...11.     numbers         2222222. -> 00000000 -> $00
+    //   ........                                 11111110 -> $FE
+    //                                33...33. -> 11000110 -> $C6
+    //                                            11000110 -> $C6
+    //                                22...22. -> 00000000 -> $00
+    //                                            11000110 -> $C6
+    //                                11...11. -> 11000110 -> $C6
+    //                                            00000000 -> $00
+    //                                ........ -> 00000000 -> $00
+    //                                            00000000 -> $00
     let (w, h) = (indicies.width, indicies.height);
     let mut tiles: Vec<[u8; 16]> = Vec::with_capacity(w / 8 * h / 8);
     for ty in 0..h / 8 {
@@ -33,7 +54,7 @@ pub fn indicies_to_tiles(indicies: Indicies) -> Vec<[u8; 16]> {
                         bytes[y * 2] |= 1 << (7 - x);
                     }
                     if i & 2 == 2 {
-                        bytes[y * 2 +1] |= 1 << (7 - x);
+                        bytes[y * 2 + 1] |= 1 << (7 - x);
                     }
                 }
             }
@@ -41,6 +62,79 @@ pub fn indicies_to_tiles(indicies: Indicies) -> Vec<[u8; 16]> {
         }
     }
     tiles
+}
+
+pub fn mirror_tile_vertical(tile: &[u8; 16]) -> [u8; 16] {
+    // We invert the order of the 8 byte pairs
+    [
+        tile[14],
+        tile[15],
+
+        tile[13],
+        tile[12],
+
+        tile[10],
+        tile[11],
+
+        tile[8],
+        tile[9],
+
+        tile[6],
+        tile[7],
+
+        tile[4],
+        tile[5],
+
+        tile[2],
+        tile[3],
+
+        tile[0],
+        tile[1]
+    ]
+}
+
+pub fn mirror_tile_horizontal(tile: &[u8; 16]) -> [u8; 16] {
+    // We invert the order of the bits in reach byte
+    [
+        reverse_bits(tile[0]),
+        reverse_bits(tile[1]),
+        reverse_bits(tile[2]),
+        reverse_bits(tile[3]),
+        reverse_bits(tile[4]),
+        reverse_bits(tile[5]),
+        reverse_bits(tile[6]),
+        reverse_bits(tile[7]),
+        reverse_bits(tile[8]),
+        reverse_bits(tile[9]),
+        reverse_bits(tile[10]),
+        reverse_bits(tile[11]),
+        reverse_bits(tile[12]),
+        reverse_bits(tile[13]),
+        reverse_bits(tile[14]),
+        reverse_bits(tile[15]),
+    ]
+}
+
+fn reverse_bits(mut b: u8) -> u8 {
+   b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+   b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+   b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+   b
+}
+
+pub fn split_indicies(indicies: Indicies) -> (Indicies, Indicies) {
+    (
+        Indicies {
+            width: indicies.width,
+            height: indicies.height,
+            pixels: indicies.pixels.iter().map(|p| *p & 3).collect()
+
+        }, Indicies {
+            width: indicies.width,
+            height: indicies.height,
+            pixels: indicies.pixels.iter().map(|p| (*p & 12) >> 2).collect()
+        }
+    )
 }
 
 pub fn image_to_indicies(buffer: RgbaImage, color_palette: &[[u8; 4]]) -> Result<Indicies, String> {
