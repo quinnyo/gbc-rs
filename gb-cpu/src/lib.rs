@@ -439,6 +439,18 @@ pub enum LexerArgument {
     Flag(Flag)
 }
 
+impl fmt::Display for LexerArgument {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", match self {
+            LexerArgument::MemoryLookupValue => "[<value>]".to_string(),
+            LexerArgument::MemoryLookupRegister(r) => format!("[{}]", r),
+            LexerArgument::Value => "<value>".to_string(),
+            LexerArgument::Register(r) => r.to_string(),
+            LexerArgument::Flag(f) => f.to_string()
+        })
+    }
+}
+
 #[derive(Eq, PartialEq, Clone)]
 pub enum Argument {
     MemoryLookupByteValue,

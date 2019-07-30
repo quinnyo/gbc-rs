@@ -547,12 +547,13 @@ impl EntryStage {
             }
         }
 
+        let key = (inner.value.clone(), layout);
         if let Some(comma) = trailing_comma {
             Err(comma.error(
-                format!("Unexpected trailing comma in \"{}\" instruction.", inner.value)
+                format!("Unexpected trailing comma after \"{}\" instruction.", inner.value)
             ))
 
-        } else if let Some(op_code) = layouts.get(&(inner.value.clone(), layout)).cloned() {
+        } else if let Some(op_code) = layouts.get(&key).cloned() {
             if let Some(expression) = expression {
                 Ok(EntryToken::InstructionWithArg(inner, op_code, expression))
 
@@ -561,8 +562,9 @@ impl EntryStage {
             }
 
         } else {
+            let args = key.1.into_iter().map(|arg| arg.to_string()).collect::<Vec<String>>().join(" ");
             Err(inner.error(
-                format!("Unknown or invalid instruction \"{}\".", inner.value)
+                format!("Invalid operand(s) \"{}\" for instruction \"{}\".", args, inner.value)
             ))
         }
 
@@ -2373,7 +2375,7 @@ mod test {
         assert_op!(230, "and $20", 32);
         assert_op!(199, "rst $20", 0x20);
         assert_op!(232, "add sp,$20", 32);
-        assert_op!(233, "jp [hl]");
+        assert_op!(233, "jp hl");
         assert_op!(234, "ld [$1234],a", 4660);
         // assert_op!(235, "invalid");
         // assert_op!(236, "invalid");
@@ -2685,11 +2687,13 @@ mod test {
 
     #[test]
     fn test_error_instructions() {
-        assert_eq!(entry_lexer_error("ld"), "In file \"main.gb.s\" on line 1, column 1: Unknown or invalid instruction \"ld\".\n\nld\n^--- Here");
+        assert_eq!(entry_lexer_error("ld [hl]"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"[hl]\" for instruction \"ld\".\n\nld [hl]\n^--- Here");
         assert_eq!(entry_lexer_error("ld 4,["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction memory argument, expected a \"Expression\" token instead.\n\nld 4,[\n     ^--- Here");
         assert_eq!(entry_lexer_error("ld 4,[3"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction memory argument, expected a \"CloseBracket\" token instead.\n\nld 4,[3\n      ^--- Here");
         assert_eq!(entry_lexer_error("stop 4"), "In file \"main.gb.s\" on line 1, column 6: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
-        assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma in \"ld\" instruction.\n\nld a,\n    ^--- Here");
+        assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma after \"ld\" instruction.\n\nld a,\n    ^--- Here");
+        assert_eq!(entry_lexer_error("ld a,af"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"a af\" for instruction \"ld\".\n\nld a,af\n^--- Here");
+        assert_eq!(entry_lexer_error("push a"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"a\" for instruction \"push\".\n\npush a\n^--- Here");
     }
 
     // Meta Instructions ------------------------------------------------------
