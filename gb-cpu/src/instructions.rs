@@ -1,6 +1,17 @@
-use crate::{FlagModifier, FlagState, Instruction, Register, Flag, Argument};
+use crate::{
+    FlagModifier,
+    FlagState,
+    Instruction,
+    Register,
+    Flag,
+    Argument
+};
+
+// Include parsed instructions from build script
+include!(concat!(env!("OUT_DIR"), "/instructions.rs"));
 
 // Auto generated Instruction Data
+/*
 pub fn instructions() -> Vec<Instruction> {
     vec![
         Instruction { code: 0, prefix: None, name: "nop", value: None, size: 1, cycles: 4, cycles_min: None, layout: [Argument::Unused, Argument::Unused], argument: None, offsets: None, flags: FlagState { z: FlagModifier::Keep, n: FlagModifier::Keep, c: FlagModifier::Keep, h: FlagModifier::Keep } },
@@ -568,3 +579,4 @@ pub fn instruction_max_arg_count(mnemonic: &str) -> usize {
         _ => 0
     }
 }
+*/
