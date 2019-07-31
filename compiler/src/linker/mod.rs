@@ -274,7 +274,7 @@ impl Linker {
                     };
 
                     // Only parse tokens in first branch that is taken
-                    if result.is_truthy() && first_taken == false {
+                    if result.is_truthy() && !first_taken {
                         first_taken = true;
                         Self::parse_entries(context, usage, branch.body, true, false, remaining_tokens, inactive_labels_only)?;
 

@@ -42,17 +42,17 @@ impl Argument {
             },
             Argument::SignedByteValue => {
                 if let Some(label) = label {
-                    format!("{}", label)
+                    label.to_string()
 
                 } else {
-                    format!("{}", signed_byte(value.unwrap_or(0) as i32))
+                    format!("{}", signed_byte(i32::from(value.unwrap_or(0))))
                 }
             },
             Argument::MemoryLookupRegister(r) => format!("[{}]", r),
             Argument::ByteValue => format!("${:0>2X}", value.unwrap_or(0)),
             Argument::WordValue => {
                 if let Some(label) = label {
-                    format!("{}", label)
+                    label.to_string()
 
                 } else {
                     format!("${:0>4X}", value.unwrap_or(0))

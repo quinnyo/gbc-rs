@@ -90,12 +90,9 @@ impl Instruction {
 
     pub fn address_argument(&self, origin: u16) -> Option<u16> {
         if self.is_relative_jump() {
-            Some((origin as i32 + signed_jump(self.value.unwrap_or(0) as i32)) as u16)
+            Some((i32::from(origin) + signed_jump(i32::from(self.value.unwrap_or(0)))) as u16)
 
-        } else if self.is_absolute_jump() {
-            Some(self.value.unwrap_or(0))
-
-        } else if self.is_call() {
+        } else if self.is_absolute_jump() || self.is_call() {
             Some(self.value.unwrap_or(0))
 
         } else {
@@ -149,11 +146,11 @@ impl Instruction {
             Some(self)
 
         } else if self.size == 2 {
-            self.value = Some(buffer[0] as u16);
+            self.value = Some(u16::from(buffer[0]));
             Some(self)
 
         } else if self.size == 3 {
-            self.value = Some(buffer[0] as u16 | (buffer[1] as u16) << 8);
+            self.value = Some(u16::from(buffer[0]) | (u16::from(buffer[1])) << 8);
             Some(self)
 
         } else {
