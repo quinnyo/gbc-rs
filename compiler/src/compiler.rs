@@ -557,7 +557,7 @@ mod test {
         let c = Compiler::new();
         assert_eq!(compiler_error(c, "@"), (
             "   Compiling \"main.gb.s\" ...".to_string(),
-            "       Error Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here".to_string()
+            "       Error Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here".to_string()
         ));
     }
 

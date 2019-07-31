@@ -9,7 +9,7 @@ use file_io::FileReader;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use super::super::LexerStage;
-use super::super::token::{TokenGenerator, TokenIterator, TokenChar};
+use super::super::token::{TokenGenerator, TokenChar};
 use super::super::{InnerToken, LexerFile, LexerToken, Symbol};
 
 
@@ -27,6 +27,7 @@ lexer_token!(IncludeToken, IncludeType, (Debug, Eq, PartialEq, Clone), {
     NumberLiteral(()),
     StringLiteral(()),
     TokenGroup((Vec<IncludeToken>)),
+    TokenGroupClose(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<IncludeToken>>)),
     Comma(()),
@@ -44,15 +45,10 @@ lexer_token!(IncludeToken, IncludeType, (Debug, Eq, PartialEq, Clone), {
 struct IncludeLexerState<'a, T: FileReader> {
     file_reader: &'a T,
     files: &'a mut Vec<LexerFile>,
-    parent_path: Option<&'a PathBuf>,
-    child_path: &'a PathBuf
-}
-
-impl<'a, T: FileReader> IncludeLexerState<'a, T> {
-    fn split_off_child(mut self, parent_path: &'a PathBuf) -> Self {
-        self.parent_path = Some(parent_path);
-        self
-    }
+    parent_path: Option<PathBuf>,
+    parent_file_index: usize,
+    source_index: usize,
+    file_path: &'a PathBuf
 }
 
 
@@ -66,335 +62,337 @@ impl LexerStage for IncludeStage {
 
     fn from_file<R: FileReader>(
         file_reader: &R,
-        child_path: &PathBuf,
+        file_path: &PathBuf,
         files: &mut Vec<LexerFile>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        Self::include_child(IncludeLexerState {
+        let mut tokens = Vec::with_capacity(512);
+        Self::include_file(IncludeLexerState {
             file_reader,
             files,
             parent_path: None,
-            child_path
+            parent_file_index: 0,
+            source_index: 0,
+            file_path
 
-        }, Vec::new(), 0, 0, None)
+        }, &mut tokens, Vec::new(), None)?;
+        Ok(tokens)
     }
 
 }
 
 impl IncludeStage {
 
-    fn include_child<T: FileReader>(
-        state: IncludeLexerState<T>,
+    fn include_file<T: FileReader>(
+        mut state: IncludeLexerState<T>,
+        tokens: &mut Vec<IncludeToken>,
         include_stack: Vec<InnerToken>,
-        file_index: usize,
-        index: usize,
         using: Option<String>
 
-    ) -> Result<Vec<IncludeToken>, SourceError>{
+    ) -> Result<(), SourceError> {
 
-        // Read in child file contents
-        let (child_path, mut contents) = state.file_reader.read_file(state.parent_path, state.child_path).map_err(|err| {
-            SourceError::new(file_index, index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
+        let (file_path, mut contents) = state.file_reader.read_file(state.parent_path.as_ref(), state.file_path).map_err(|err| {
+            SourceError::new(state.parent_file_index, state.source_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
         })?;
 
-        // Apply optional command to contents
         if let Some(using) = using {
-            contents = state.file_reader.execute_command(Some(child_path.clone()), using.as_str(), contents).map_err(|err| {
-                SourceError::new(file_index, index, err.to_string())
+            contents = state.file_reader.execute_command(Some(file_path.clone()), using.as_str(), contents).map_err(|err| {
+                SourceError::new(state.parent_file_index, state.source_index, err.to_string())
             })?;
         }
 
-        // Create new file abstraction
-        state.files.push(LexerFile::new(state.files.len(), contents, child_path.clone(), include_stack));
+        state.files.push(LexerFile::new(
+            state.files.len(),
+            contents,
+            file_path.clone(),
+            include_stack
+        ));
 
-        // Create new lexer state for child file
-        let mut state = state.split_off_child(&child_path);
-        let file = state.files.last().unwrap();
-
-        // Lex child tokens
-        let child_tokens = Self::tokenize(file, &file.contents)?;
-
-        // Resolve any includes in the tokenized file
-        Ok(Self::resolve_include_tokens(
-            file.index,
-            child_tokens,
-            &mut state,
-        )?)
+        state.parent_path = Some(file_path);
+        Self::tokenize(tokens, &mut state)
 
     }
 
-    fn resolve_include_tokens<T: FileReader>(
-        parent_file_index: usize,
-        tokens: Vec<IncludeToken>,
-        state: &mut IncludeLexerState<T>,
+    fn tokenize<T: FileReader>(
+        tokens: &mut Vec<IncludeToken>,
+        state: &mut IncludeLexerState<T>
 
-    ) -> Result<Vec<IncludeToken>, SourceError> {
-
-        let mut expanded = Vec::with_capacity(tokens.len());
-        let mut tokens = TokenIterator::new(tokens);
-        while let Some(token) = tokens.next() {
-            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::INCLUDE) {
-                match tokens.next() {
-                    Some(IncludeToken::StringLiteral(token)) => {
-                        let mut include_stack = state.files[parent_file_index].include_stack.clone();
-                        include_stack.push(token.clone());
-
-                        let child_state = IncludeLexerState {
-                            file_reader: state.file_reader,
-                            files: state.files,
-                            parent_path: state.parent_path,
-                            child_path: &PathBuf::from(token.value.to_string()),
-                        };
-
-                        let using = Self::using_directive(&mut tokens)?;
-                        expanded.append(&mut Self::include_directive(
-                            child_state,
-                            parent_file_index,
-                            token.start_index,
-                            include_stack,
-                            using
-                        )?);
+    ) -> Result<(), SourceError> {
+        let (mut gen, file_index) = {
+            let file = state.files.last().unwrap();
+            (TokenGenerator::new(&file, &file.contents), file.index)
+        };
+        while gen.peek().is_some() {
+            if let Some(token) = Self::match_token(&mut gen, false)? {
+                match token {
+                    ref t if t.is(IncludeType::Reserved) && t.is_symbol(Symbol::INCLUDE) => {
+                        Self::tokenize_include(&mut gen, tokens, state, file_index)?;
                     },
-                    Some(IncludeToken::Reserved(ref name)) if name.value == Symbol::BINARY => {
-                        match tokens.next() {
-                            Some(IncludeToken::StringLiteral(token)) => {
-                                let child_state = IncludeLexerState {
-                                    file_reader: state.file_reader,
-                                    files: state.files,
-                                    parent_path: state.parent_path,
-                                    child_path: &PathBuf::from(token.value.to_string())
-                                };
-                                let using = Self::using_directive(&mut tokens)?;
-                                expanded.push(Self::include_binary_directive(
-                                    child_state,
-                                    token,
-                                    using
-                                )?);
-                            },
-                            Some(other) => return Err(other.error("Expected a StringLiteral instead.".to_string())),
-                            None => return Err(token.error("Expected a StringLiteral to follow.".to_string()))
-                        }
-                    },
-                    Some(other) => return Err(other.error("Expected a StringLiteral or BINARY keyword instead.".to_string())),
-                    None => return Err(token.error("Expected a StringLiteral or BINARY keyword to follow.".to_string()))
+                    t => tokens.push(t)
                 }
-
-            } else {
-                expanded.push(token);
             }
         }
-
-        Ok(expanded)
-
+        Ok(())
     }
 
-    fn using_directive(tokens: &mut TokenIterator<IncludeToken>) -> Result<Option<String>, SourceError> {
-        if tokens.peek_is(IncludeType::Reserved, Some(Symbol::USING)) {
-            tokens.expect(IncludeType::Reserved, Some(Symbol::USING), "when parsing USING directive")?;
-            let command = tokens.expect(IncludeType::StringLiteral, None, "when parsing USING directive")?;
-            Ok(Some(command.into_inner().value.to_string()))
+    fn tokenize_include<T: FileReader>(
+        gen: &mut TokenGenerator,
+        tokens: &mut Vec<IncludeToken>,
+        state: &mut IncludeLexerState<T>,
+        parent_file_index: usize
 
-        } else {
-            Ok(None)
+    ) -> Result<(), SourceError> {
+        match Self::next_token(gen, "when parsing INCLUDE directive, expected a StringLiteral or BINARY keyword instead")? {
+            IncludeToken::StringLiteral(token) => {
+                let mut include_stack = state.files[parent_file_index].include_stack.clone();
+                include_stack.push(token.clone());
+
+                let using = Self::tokenize_using(gen)?;
+                Self::include_file(
+                    IncludeLexerState {
+                        file_reader: state.file_reader,
+                        files: state.files,
+                        parent_path: state.parent_path.clone(),
+                        parent_file_index,
+                        source_index: token.start_index,
+                        file_path: &PathBuf::from(token.value.to_string())
+                    },
+                    tokens,
+                    include_stack,
+                    using
+                )
+            },
+            IncludeToken::Reserved(ref name) if name.value == Symbol::BINARY => {
+                match Self::next_token(gen, "when parsing INCLUDE BINARY directive")? {
+                    IncludeToken::StringLiteral(token) => {
+
+                        // Parse optional command
+                        let using_command = Self::tokenize_using(gen)?;
+
+                        // Load binary
+                        let (binary_path, mut bytes) = state.file_reader.read_binary_file(
+                            state.parent_path.as_ref(),
+                            &PathBuf::from(token.value.to_string())
+
+                        ).map_err(|err| {
+                            SourceError::new(token.file_index, token.start_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
+                        })?;
+
+                        // Apply optional command to bytes
+                        if let Some(using) = using_command {
+                            bytes = state.file_reader.execute_binary_command(
+                                Some(binary_path),
+                                using.as_str(),
+                                &bytes
+
+                            ).map_err(|err| {
+                                SourceError::new(token.file_index, token.start_index, err.to_string())
+                            })?;
+                        }
+                        tokens.push(IncludeToken::BinaryFile(token, bytes));
+                        Ok(())
+                    },
+                    other => Err(other.error("Expected a StringLiteral instead.".to_string()))
+                }
+            },
+            other => Err(other.error("Expected a StringLiteral or BINARY keyword instead.".to_string()))
         }
     }
 
-    fn include_directive<T: FileReader>(
-        state: IncludeLexerState<T>,
-        file_index: usize,
-        index: usize,
-        include_stack: Vec<InnerToken>,
-        using: Option<String>
+    fn tokenize_using(gen: &mut TokenGenerator) -> Result<Option<String>, SourceError> {
+        let pre_state = gen.state();
+        if let Ok(using_token) = Self::next_token(gen, "") {
+            if using_token.is(IncludeType::Reserved) && using_token.is_symbol(Symbol::USING) {
+                let command_token = Self::next_token(gen, "when parsing USING directive, expected a StringLiteral instead.")?;
+                if command_token.is(IncludeType::StringLiteral) {
+                    return Ok(Some(command_token.into_inner().value.to_string()))
 
-    ) -> Result<Vec<IncludeToken>, SourceError> {
-        Self::include_child(state, include_stack, file_index, index, using)
+                } else {
+                    return Err(command_token.error("Expected a StringLiteral after USING keyword.".to_string()));
+                }
+            }
+        }
+        gen.set_state(pre_state);
+        Ok(None)
     }
 
-    fn include_binary_directive<T: FileReader>(
-        state: IncludeLexerState<T>,
-        token: InnerToken,
-        using: Option<String>
+    fn next_token(
+        gen: &mut TokenGenerator,
+        message: &str
 
     ) -> Result<IncludeToken, SourceError> {
-        let (binary_path, mut bytes) = state.file_reader.read_binary_file(state.parent_path, state.child_path).map_err(|err| {
-            SourceError::new(token.file_index, token.start_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
-        })?;
+        if gen.peek().is_some()  {
+            match Self::match_token(gen, false)? {
+                Some(token) => Ok(token),
+                None => Self::next_token(gen, message)
+            }
 
-        // Apply optional command to bytes
-        if let Some(using) = using {
-            bytes = state.file_reader.execute_binary_command(Some(binary_path), using.as_str(), &bytes).map_err(|err| {
-                SourceError::new( token.file_index, token.start_index, err.to_string())
-            })?;
+        } else {
+            Err(gen.end_of_input(message))
         }
-        Ok(IncludeToken::BinaryFile(token, bytes))
     }
 
-    fn tokenize(file: &LexerFile, text: &str) -> Result<Vec<IncludeToken>, SourceError> {
-        let mut iter = TokenGenerator::new(&file, text);
-        Self::collect_tokens(&mut iter, false)
-    }
+    fn match_token(gen: &mut TokenGenerator, inside_token_group: bool) -> Result<Option<IncludeToken>, SourceError> {
+        match gen.next() {
+            // Whitespace
+            ' ' | '\t' | '\n' | '\r' => Ok(None),
 
-    fn collect_tokens(iter: &mut TokenGenerator, inside_token_group: bool) -> Result<Vec<IncludeToken>, SourceError> {
-        let mut tokens = Vec::with_capacity(8);
-        while iter.peek().is_some() {
-            let token = match iter.next() {
-                // Whitespace
-                ' ' | '\t' => continue, // Ignore whitespace,
-                '\n' | '\r' => continue, // Ignore newlines
-                // Names
-                'a'...'z' | 'A'...'Z' | '_' => {
-                    let name = Self::collect_inner_name(iter, true)?;
-                    match name.value {
-                        // Split into Reserved Words
-                        Symbol::DB | Symbol::DW | Symbol::BW | Symbol::DS | Symbol::IF | Symbol::TO | Symbol::IN |
-                        Symbol::DS8 | Symbol::EQU | Symbol::FOR |
-                        Symbol::DS16 | Symbol::BANK |
-                        Symbol::THEN | Symbol::ELSE | Symbol::ENDIF |
-                        Symbol::MACRO | Symbol::USING | Symbol::BLOCK |
-                        Symbol::ENDFOR | Symbol::REPEAT | Symbol::BINARY | Symbol::DEFAULT | Symbol::SECTION | Symbol::GLOBAL |
-                        Symbol::INCLUDE | Symbol::VOLATILE |
-                        Symbol::ENDMACRO | Symbol::ENDBLOCK => {
-                            Some(IncludeToken::Reserved(name))
-                        },
-                        // ROM Segments
-                        Symbol::ROM0 | Symbol::ROMX | Symbol::WRAM0 | Symbol::WRAMX | Symbol::HRAM | Symbol::RAM | Symbol::RAMX => {
-                            Some(IncludeToken::Segment(name))
-                        },
-                        // Registers (c is later also treated as a flag)
-                        Symbol::AF | Symbol::BC | Symbol::DE | Symbol::HL |
-                        Symbol::A | Symbol::B | Symbol::C | Symbol::D | Symbol::E | Symbol::H | Symbol::L |
-                        Symbol::HLD | Symbol::HLI | Symbol::SP => {
-                            Some(IncludeToken::Register(name))
-                        },
-                        // Flags
-                        Symbol::Z | Symbol::NZ | Symbol::NC => {
-                            Some(IncludeToken::Flag(name))
-                        },
-                        // LR35902 Instructions
-                        Symbol::Cp | Symbol::Di | Symbol::Ei | Symbol::Jp | Symbol::Jr | Symbol::Or | Symbol::Rl | Symbol::Rr | Symbol::Ld |
-                        Symbol::Adc | Symbol::Add | Symbol::And | Symbol::Bit | Symbol::Ccf | Symbol::Cpl | Symbol::Daa | Symbol::Dec | Symbol::Inc |
-                        Symbol::Ldh | Symbol::Nop | Symbol::Pop | Symbol::Res | Symbol::Ret | Symbol::Rla | Symbol::Rlc | Symbol::Rra | Symbol::Rrc |
-                        Symbol::Rst | Symbol::Sbc | Symbol::Scf | Symbol::Set | Symbol::Sla | Symbol::Sra | Symbol::Srl | Symbol::Sub | Symbol::Xor |
-                        Symbol::Halt | Symbol::Push | Symbol::Call | Symbol::Reti | Symbol::Rlca | Symbol::Rrca | Symbol::Stop | Symbol::Swap | Symbol::Ldsp => {
-                            Some(IncludeToken::Instruction(name))
-                        },
-                        // gbasm "meta" Instructions
-                        Symbol::Msg | Symbol::Brk | Symbol::Mul | Symbol::Div | Symbol::Incx | Symbol::Decx | Symbol::Addw | Symbol::Subw | Symbol::Ldxa |
-                        Symbol::Retx | Symbol::Vsync | Symbol::Pushx | Symbol::Popx => {
-                            Some(IncludeToken::MetaInstruction(name))
-                        },
-                        // All other names
-                        _ => Some(IncludeToken::Name(name))
-                    }
+            // Names
+            'a'...'z' | 'A'...'Z' | '_' => {
+                let name = Self::collect_inner_name(gen, true)?;
+                match name.value {
+                    // Split into Reserved Words
+                    Symbol::DB | Symbol::DW | Symbol::BW | Symbol::DS | Symbol::IF | Symbol::TO | Symbol::IN |
+                    Symbol::DS8 | Symbol::EQU | Symbol::FOR |
+                    Symbol::DS16 | Symbol::BANK |
+                    Symbol::THEN | Symbol::ELSE | Symbol::ENDIF |
+                    Symbol::MACRO | Symbol::USING | Symbol::BLOCK |
+                    Symbol::ENDFOR | Symbol::REPEAT | Symbol::BINARY | Symbol::DEFAULT | Symbol::SECTION | Symbol::GLOBAL |
+                    Symbol::INCLUDE | Symbol::VOLATILE |
+                    Symbol::ENDMACRO | Symbol::ENDBLOCK => {
+                        Ok(Some(IncludeToken::Reserved(name)))
+                    },
+                    // ROM Segments
+                    Symbol::ROM0 | Symbol::ROMX | Symbol::WRAM0 | Symbol::WRAMX | Symbol::HRAM | Symbol::RAM | Symbol::RAMX => {
+                        Ok(Some(IncludeToken::Segment(name)))
+                    },
+                    // Registers (c is later also treated as a flag)
+                    Symbol::AF | Symbol::BC | Symbol::DE | Symbol::HL |
+                    Symbol::A | Symbol::B | Symbol::C | Symbol::D | Symbol::E | Symbol::H | Symbol::L |
+                    Symbol::HLD | Symbol::HLI | Symbol::SP => {
+                        Ok(Some(IncludeToken::Register(name)))
+                    },
+                    // Flags
+                    Symbol::Z | Symbol::NZ | Symbol::NC => {
+                        Ok(Some(IncludeToken::Flag(name)))
+                    },
+                    // LR35902 Instructions
+                    Symbol::Cp | Symbol::Di | Symbol::Ei | Symbol::Jp | Symbol::Jr | Symbol::Or | Symbol::Rl | Symbol::Rr | Symbol::Ld |
+                    Symbol::Adc | Symbol::Add | Symbol::And | Symbol::Bit | Symbol::Ccf | Symbol::Cpl | Symbol::Daa | Symbol::Dec | Symbol::Inc |
+                    Symbol::Ldh | Symbol::Nop | Symbol::Pop | Symbol::Res | Symbol::Ret | Symbol::Rla | Symbol::Rlc | Symbol::Rra | Symbol::Rrc |
+                    Symbol::Rst | Symbol::Sbc | Symbol::Scf | Symbol::Set | Symbol::Sla | Symbol::Sra | Symbol::Srl | Symbol::Sub | Symbol::Xor |
+                    Symbol::Halt | Symbol::Push | Symbol::Call | Symbol::Reti | Symbol::Rlca | Symbol::Rrca | Symbol::Stop | Symbol::Swap | Symbol::Ldsp => {
+                        Ok(Some(IncludeToken::Instruction(name)))
+                    },
+                    // gbasm "meta" Instructions
+                    Symbol::Msg | Symbol::Brk | Symbol::Mul | Symbol::Div | Symbol::Incx | Symbol::Decx | Symbol::Addw | Symbol::Subw | Symbol::Ldxa |
+                    Symbol::Retx | Symbol::Vsync | Symbol::Pushx | Symbol::Popx => {
+                        Ok(Some(IncludeToken::MetaInstruction(name)))
+                    },
+                    // All other names
+                    _ => Ok(Some(IncludeToken::Name(name)))
+                }
 
-                },
-                // Parameter / Offset
-                '@' => {
-                    if let Some('+') | Some('-') = iter.peek() {
-                        Some(IncludeToken::Offset(iter.collect(false, |c, _| {
-                            if let '_' = c {
-                                TokenChar::Ignore
+            },
+            // Parameter / Offset
+            '@' => {
+                if let Some('+') | Some('-') = gen.peek() {
+                    Ok(Some(IncludeToken::Offset(gen.collect(false, |c, _| {
+                        if let '_' = c {
+                            TokenChar::Ignore
 
-                            } else if let '0'...'9' | '+' | '-' = c {
-                                TokenChar::Valid(c)
+                        } else if let '0'...'9' | '+' | '-' = c {
+                            TokenChar::Valid(c)
 
-                            } else {
-                                TokenChar::Invalid
-                            }
-                        })?))
+                        } else {
+                            TokenChar::Invalid
+                        }
+                    })?)))
 
-                    } else if let Some('a'...'z') | Some('A'...'Z') = iter.peek() {
-                        Some(IncludeToken::Parameter(Self::collect_inner_name(iter, false)?))
+                } else if let Some('a'...'z') | Some('A'...'Z') = gen.peek() {
+                    Ok(Some(IncludeToken::Parameter(Self::collect_inner_name(gen, false)?)))
+
+                } else {
+                    Err(gen.error("Expected a valid jump offset value"))
+                }
+            },
+            // NumberLiteral
+            '0'...'9' => Ok(Some(Self::collect_number_literal(gen)?)),
+            '$' => if let Some('0'...'9') | Some('a'...'f') | Some('A'...'F') = gen.peek() {
+                Ok(Some(IncludeToken::NumberLiteral(gen.collect(true, |c, _| {
+                    if let '_' = c {
+                        TokenChar::Ignore
+
+                    } else if let '0'...'9' | 'a'...'f' | 'A'...'F' = c {
+                        TokenChar::Valid(c)
 
                     } else {
-                        None
+                        TokenChar::Invalid
                     }
-                },
-                // NumberLiteral
-                '0'...'9' => Some(Self::collect_number_literal(iter)?),
-                '$' => if let Some('0'...'9') | Some('a'...'f') | Some('A'...'F') = iter.peek() {
-                    Some(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
-                        if let '_' = c {
-                            TokenChar::Ignore
-
-                        } else if let '0'...'9' | 'a'...'f' | 'A'...'F' = c {
-                            TokenChar::Valid(c)
-
-                        } else {
-                            TokenChar::Invalid
-                        }
-                    })?))
-
-                } else {
-                    None
-                },
-                '%' => if let Some('0'...'1') = iter.peek() {
-                    Some(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
-                        if let '_' = c {
-                            TokenChar::Ignore
-
-                        } else if let '0'...'1' = c {
-                            TokenChar::Valid(c)
-
-                        } else {
-                            TokenChar::Invalid
-                        }
-                    })?))
-
-                } else {
-                    Some(IncludeToken::Operator(iter.collect_single()))
-                },
-                // StringLiteral
-                '"' => {
-                    Some(IncludeToken::StringLiteral(Self::collect_inner_string(iter, '"')?))
-                },
-                '\'' => {
-                    Some(IncludeToken::StringLiteral(Self::collect_inner_string(iter, '\'')?))
-                },
-                // Token Groups
-                '`' => if inside_token_group{
-                    return Ok(tokens);
-
-                } else {
-                    let index_token = iter.collect_single();
-                    let group_start = iter.index();
-                    let tokens = Self::collect_tokens(iter, true)?;
-                    iter.assert_char('`', "Unclosed token group.".to_string())?;
-                    iter.assert_index_changed(group_start, "Unclosed token group.".to_string())?;
-                    Some(IncludeToken::TokenGroup(index_token, tokens))
-                },
-                // Operator
-                '-' | '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
-                    Some(IncludeToken::Operator(iter.collect_single()))
-                },
-                // Punctation
-                ';' => {
-                    iter.skip_with(|c| {
-                        c == '\n' || c == '\r'
-                    });
-                    continue;
-                },
-                ':' => Some(IncludeToken::Colon(iter.collect_single())),
-                '.' => Some(IncludeToken::Point(iter.collect_single())),
-                ',' => Some(IncludeToken::Comma(iter.collect_single())),
-                '(' => Some(IncludeToken::OpenParen(iter.collect_single())),
-                ')' => Some(IncludeToken::CloseParen(iter.collect_single())),
-                '[' => Some(IncludeToken::OpenBracket(iter.collect_single())),
-                ']' => Some(IncludeToken::CloseBracket(iter.collect_single())),
-                _ => None
-            };
-            if let Some(token) = token {
-                tokens.push(token);
+                })?)))
 
             } else {
-                return Err(iter.error());
-            }
+                Err(gen.error("Expected a valid hexadecimal digit"))
+            },
+            '%' => if let Some('0'...'1') = gen.peek() {
+                Ok(Some(IncludeToken::NumberLiteral(gen.collect(true, |c, _| {
+                    if let '_' = c {
+                        TokenChar::Ignore
+
+                    } else if let '0'...'1' = c {
+                        TokenChar::Valid(c)
+
+                    } else {
+                        TokenChar::Invalid
+                    }
+                })?)))
+
+            } else {
+                Ok(Some(IncludeToken::Operator(gen.collect_single())))
+            },
+            // StringLiteral
+            '"' => {
+                Ok(Some(IncludeToken::StringLiteral(Self::collect_inner_string(gen, '"')?)))
+            },
+            '\'' => {
+                Ok(Some(IncludeToken::StringLiteral(Self::collect_inner_string(gen, '\'')?)))
+            },
+            // Token Groups
+            '`' => if inside_token_group {
+                return Ok(Some(IncludeToken::TokenGroupClose(gen.collect_single())));
+
+            } else {
+                let index_token = gen.collect_single();
+                let group_start = gen.index();
+                let mut tokens = Vec::new();
+                while gen.peek().is_some() {
+                    match Self::match_token(gen, true)? {
+                        Some(IncludeToken::TokenGroupClose(_)) => break,
+                        Some(token) => tokens.push(token),
+                        None => {}
+                    }
+                }
+                gen.assert_char('`', "Unclosed token group.".to_string())?;
+                gen.assert_index_changed(group_start, "Unclosed token group.".to_string())?;
+                Ok(Some(IncludeToken::TokenGroup(index_token, tokens)))
+            },
+            // Operator
+            '-' | '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
+                Ok(Some(IncludeToken::Operator(gen.collect_single())))
+            },
+            // Comments
+            ';' => {
+                gen.skip_with(|c| {
+                    c == '\n' || c == '\r'
+                });
+                Ok(None)
+            },
+            // Punctation
+            ':' => Ok(Some(IncludeToken::Colon(gen.collect_single()))),
+            '.' => Ok(Some(IncludeToken::Point(gen.collect_single()))),
+            ',' => Ok(Some(IncludeToken::Comma(gen.collect_single()))),
+            '(' => Ok(Some(IncludeToken::OpenParen(gen.collect_single()))),
+            ')' => Ok(Some(IncludeToken::CloseParen(gen.collect_single()))),
+            '[' => Ok(Some(IncludeToken::OpenBracket(gen.collect_single()))),
+            ']' => Ok(Some(IncludeToken::CloseBracket(gen.collect_single()))),
+
+            // Unexpected character
+            _ => Err(gen.error("Unexpected character"))
         }
-        Ok(tokens)
     }
 
-    fn collect_inner_string(iter: &mut TokenGenerator, delimeter: char) -> Result<InnerToken, SourceError> {
-        let t = iter.collect(false, |c, p| {
+    fn collect_inner_string(gen: &mut TokenGenerator, delimeter: char) -> Result<InnerToken, SourceError> {
+        let t = gen.collect(false, |c, p| {
             // Ignore escape slashes
             if c == '\\' && p != '\\' {
                 TokenChar::Ignore
@@ -420,12 +418,12 @@ impl IncludeStage {
                 TokenChar::Valid(c)
             }
         })?;
-        iter.assert_char(delimeter, "Unclosed string literal.".to_string())?;
+        gen.assert_char(delimeter, "Unclosed string literal.".to_string())?;
         Ok(t)
     }
 
-    fn collect_inner_name(iter: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, SourceError> {
-        Ok(iter.collect(inclusive, |c, _| {
+    fn collect_inner_name(gen: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, SourceError> {
+        Ok(gen.collect(inclusive, |c, _| {
             if let 'a'...'z' | 'A'...'Z' | '_' | '0'...'9' = c {
                 TokenChar::Valid(c)
 
@@ -435,9 +433,9 @@ impl IncludeStage {
         })?)
     }
 
-    fn collect_number_literal(iter: &mut TokenGenerator) -> Result<IncludeToken, SourceError> {
+    fn collect_number_literal(gen: &mut TokenGenerator) -> Result<IncludeToken, SourceError> {
         let mut float = false;
-        Ok(IncludeToken::NumberLiteral(iter.collect(true, |c, _| {
+        Ok(IncludeToken::NumberLiteral(gen.collect(true, |c, _| {
             if let '_' = c {
                 TokenChar::Ignore
 
@@ -663,7 +661,7 @@ mod test {
         reader.add_file("src/three.gb.s", "@");
 
         let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/three.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9");
+        assert_eq!(err.to_string(), "In file \"src/three.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9")
 
     }
 
@@ -676,20 +674,20 @@ mod test {
         reader.add_file("src/one.gb.s", "@");
 
         let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/one.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
+        assert_eq!(err.to_string(), "In file \"src/one.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
 
     }
 
     #[test]
     fn test_resolve_include_incomplete() {
         assert_eq!(include_lexer_error("INCLUDE 4"), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE 4\n        ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral or BINARY keyword to follow.\n\nINCLUDE\n^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input when parsing INCLUDE directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE\n      ^--- Here");
     }
 
     #[test]
     fn test_resolve_include_using_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 21: Unexpected token \"NumberLiteral\" when parsing USING directive, expected a \"StringLiteral\" token instead.\n\nINCLUDE \'foo\' USING 4\n                    ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE 'foo' USING"), "In file \"main.gb.s\" on line 1, column 15: Unexpected end of input when parsing USING directive, expected a \"StringLiteral\" token instead.\n\nINCLUDE \'foo\' USING\n              ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 21: Expected a StringLiteral after USING keyword.\n\nINCLUDE \'foo\' USING 4\n                    ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 'foo' USING"), "In file \"main.gb.s\" on line 1, column 19: Unexpected end of input when parsing USING directive, expected a StringLiteral instead..\n\nINCLUDE \'foo\' USING\n                  ^--- Here");
     }
 
     #[test]
@@ -745,13 +743,13 @@ mod test {
     #[test]
     fn test_resolve_include_binary_incomplete() {
         assert_eq!(include_lexer_error("INCLUDE BINARY 4"), "In file \"main.gb.s\" on line 1, column 16: Expected a StringLiteral instead.\n\nINCLUDE BINARY 4\n               ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE BINARY"), "In file \"main.gb.s\" on line 1, column 1: Expected a StringLiteral to follow.\n\nINCLUDE BINARY\n^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input when parsing INCLUDE BINARY directive.\n\nINCLUDE BINARY\n             ^--- Here");
     }
 
     #[test]
     fn test_resolve_include_binary_using_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 28: Unexpected token \"NumberLiteral\" when parsing USING directive, expected a \"StringLiteral\" token instead.\n\nINCLUDE BINARY \'foo\' USING 4\n                           ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING"), "In file \"main.gb.s\" on line 1, column 22: Unexpected end of input when parsing USING directive, expected a \"StringLiteral\" token instead.\n\nINCLUDE BINARY \'foo\' USING\n                     ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 28: Expected a StringLiteral after USING keyword.\n\nINCLUDE BINARY \'foo\' USING 4\n                           ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING"), "In file \"main.gb.s\" on line 1, column 26: Unexpected end of input when parsing USING directive, expected a StringLiteral instead..\n\nINCLUDE BINARY \'foo\' USING\n                         ^--- Here");
     }
 
     #[test]
@@ -847,7 +845,7 @@ mod test {
 
     #[test]
     fn test_number_literal_hex_incomplete() {
-        assert_eq!(include_lexer_error("$"), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error("$"), "In file \"main.gb.s\" on line 1, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
     }
 
     #[test]
@@ -936,7 +934,7 @@ mod test {
 
     #[test]
     fn test_param_offset_incomplete() {
-        assert_eq!(include_lexer_error("@"), "In file \"main.gb.s\" on line 1, column 1: Unexpected character \"@\".\n\n@\n^--- Here");
+        assert_eq!(include_lexer_error("@"), "In file \"main.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here");
     }
 
     #[test]
@@ -985,9 +983,9 @@ mod test {
 
     #[test]
     fn test_error_location() {
-        assert_eq!(include_lexer_error(" $"), "In file \"main.gb.s\" on line 1, column 2: Unexpected character \"$\".\n\n $\n ^--- Here");
-        assert_eq!(include_lexer_error("\n$"), "In file \"main.gb.s\" on line 2, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
-        assert_eq!(include_lexer_error("\n\n$"), "In file \"main.gb.s\" on line 3, column 1: Unexpected character \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error(" $"), "In file \"main.gb.s\" on line 1, column 2: Expected a valid hexadecimal digit \"$\".\n\n $\n ^--- Here");
+        assert_eq!(include_lexer_error("\n$"), "In file \"main.gb.s\" on line 2, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error("\n\n$"), "In file \"main.gb.s\" on line 3, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
     }
 
 }
