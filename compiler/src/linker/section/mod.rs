@@ -322,7 +322,7 @@ impl Section {
 
             },
             EntryToken::UsingStatement(inner, command, entries) => {
-                let mut bytes = Vec::new();
+                let mut bytes = Vec::with_capacity(entries.len());
                 for entry in entries {
                     let entry_bytes = if let EntryToken::Data { inner, endianess, storage, is_constant, .. } = entry {
                         if is_constant {
@@ -740,7 +740,7 @@ impl Section {
         end_of_instruction: Option<i32>
 
     ) -> Result<Vec<u8>, SourceError> {
-        let mut data_bytes = Vec::new();
+        let mut data_bytes = Vec::with_capacity(16);
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(

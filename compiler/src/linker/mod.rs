@@ -81,7 +81,7 @@ impl Linker {
 
         // Map entries to sections
         let mut section_index = 0;
-        let mut sections: Vec<Section> = Vec::new();
+        let mut sections: Vec<Section> = Vec::with_capacity(16);
         for (volatile, token) in entry_tokens {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 

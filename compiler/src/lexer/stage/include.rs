@@ -354,7 +354,7 @@ impl IncludeStage {
             } else {
                 let index_token = gen.collect_single();
                 let group_start = gen.index();
-                let mut tokens = Vec::new();
+                let mut tokens = Vec::with_capacity(16);
                 while gen.peek().is_some() {
                     match Self::match_token(gen, true)? {
                         Some(IncludeToken::TokenGroupClose(_)) => break,

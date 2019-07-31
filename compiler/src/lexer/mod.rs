@@ -226,21 +226,21 @@ pub struct Lexer<T: LexerStage> {
 impl<T: LexerStage> Lexer<T> {
 
     pub fn from_file<R: FileReader>(file_reader: &R, child_path: &PathBuf) -> Result<Self, SourceError>{
-        let mut files = Vec::new();
+        let mut files = Vec::with_capacity(16);
         let tokens = T::from_file(file_reader, child_path, &mut files).map_err(|err| {
             err.extend_with_location(&files)
         })?;
         Ok(Self {
             files,
             tokens,
-            macro_calls: Vec::new(),
-            data: Vec::new()
+            macro_calls: Vec::with_capacity(128),
+            data: Vec::with_capacity(128)
         })
     }
 
     pub fn from_lexer(lexer: Lexer<T::Input>, linter_enabled: bool) -> Result<Self, SourceError> {
         let files = lexer.files;
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(128);
         let mut macro_calls = lexer.macro_calls;
         let tokens = T::from_tokens(lexer.tokens, &mut macro_calls, &mut data, linter_enabled).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)

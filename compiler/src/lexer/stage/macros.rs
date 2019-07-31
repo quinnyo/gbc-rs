@@ -362,7 +362,7 @@ impl MacroStage {
         }
 
         // Collect Body Tokens
-        let mut body_tokens = Vec::new();
+        let mut body_tokens = Vec::with_capacity(128);
         while !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDMACRO)) {
             let token = tokens.get("Unexpected end of input while parsing macro body.")?;
             if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::MACRO) {
@@ -404,7 +404,7 @@ impl MacroStage {
 
             } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::IF) {
                 let inner = token.inner().clone();
-                let mut branches: Vec<IfStatementBranch<MacroToken>> = Vec::new();
+                let mut branches: Vec<IfStatementBranch<MacroToken>> = Vec::with_capacity(2);
                 let mut condition_tokens = Some(Self::parse_if_condition(&mut tokens, token)?);
                 loop {
                     let (body_tokens, branch) = Self::parse_if_body(&mut tokens)?;
@@ -717,7 +717,7 @@ impl MacroStage {
 
     fn parse_macro_def_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<IncludeToken>, SourceError> {
 
-        let mut arguments = Vec::new();
+        let mut arguments = Vec::with_capacity(2);
         tokens.expect(IncludeType::OpenParen, None, "when parsing arguments list")?;
 
         while !tokens.peek_is(IncludeType::CloseParen, None) {
@@ -735,11 +735,11 @@ impl MacroStage {
 
     fn parse_macro_call_arguments(tokens: &mut TokenIterator<IncludeToken>) -> Result<Vec<Vec<IncludeToken>>, SourceError> {
 
-        let mut arguments = Vec::new();
+        let mut arguments = Vec::with_capacity(2);
         tokens.expect(IncludeType::OpenParen, None, "when parsing argument list")?;
 
         let mut paren_depth = 1;
-        let mut arg_tokens = Vec::new();
+        let mut arg_tokens = Vec::with_capacity(2);
         while !tokens.peek_is(IncludeType::CloseParen, None) || paren_depth > 1 {
 
             let next = tokens.get("Unexpected end of input while parsing macro arguments list.")?;
@@ -775,7 +775,7 @@ impl MacroStage {
 
     ) -> Result<Vec<MacroToken>, SourceError> {
 
-        let mut condition_tokens = Vec::new();
+        let mut condition_tokens = Vec::with_capacity(2);
         while !tokens.peek_is(IncludeType::Reserved, Some(Symbol::THEN)) {
             let token = tokens.get("Unexpected end of input while parsing IF statement condition.")?;
             if token.is(IncludeType::Reserved) {
@@ -799,7 +799,7 @@ impl MacroStage {
 
     ) -> Result<(Vec<MacroToken>, IfBranch), SourceError> {
 
-        let mut body_tokens = Vec::new();
+        let mut body_tokens = Vec::with_capacity(16);
         let mut if_depth = 0;
         while if_depth > 0 || !(tokens.peek_is(IncludeType::Reserved, Some(Symbol::ELSE)) || tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDIF))) {
 
@@ -843,7 +843,7 @@ impl MacroStage {
         delimiter: Symbol
 
     ) -> Result<Vec<MacroToken>, SourceError> {
-        let mut range_tokens = Vec::new();
+        let mut range_tokens = Vec::with_capacity(2);
         while !tokens.peek_is(IncludeType::Reserved, Some(delimiter.clone())) {
             let token = tokens.get("Unexpected end of input while parsing FOR statement range argument.")?;
             if token.is(IncludeType::Reserved) {
@@ -865,7 +865,7 @@ impl MacroStage {
         tokens: &mut TokenIterator<IncludeToken>
 
     ) -> Result<Vec<MacroToken>, SourceError> {
-        let mut body_tokens = Vec::new();
+        let mut body_tokens = Vec::with_capacity(16);
         let mut for_depth = 0;
         while for_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDFOR)) {
 
@@ -892,7 +892,7 @@ impl MacroStage {
         tokens: &mut TokenIterator<IncludeToken>
 
     ) -> Result<Vec<MacroToken>, SourceError> {
-        let mut body_tokens = Vec::new();
+        let mut body_tokens = Vec::with_capacity(16);
         let mut block_depth = 0;
         while block_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDBLOCK)) {
 
