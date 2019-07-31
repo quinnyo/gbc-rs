@@ -65,7 +65,12 @@ lazy_static! {
 }
 
 
-// Macro Specific Structs  ----------------------------------------------------
+// Parsing Structs  -----------------------------------------------------------
+struct MacroContext<'t> {
+    def: &'t MacroDefinition,
+    args: Vec<Vec<IncludeToken>>
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct IfStatementBranch<T: LexerToken> {
     pub condition: Option<Vec<T>>,
@@ -547,19 +552,20 @@ impl MacroStage {
 
                 // Expand user calls
                 } else {
-                    let mut expanded_macro_tokens = Vec::with_capacity(macro_def.body.len());
+                    let context = MacroContext {
+                        def: &macro_def,
+                        args: arg_tokens
+                    };
 
                     // Recursively expand all body tokens
+                    let mut expanded_macro_tokens = Vec::with_capacity(macro_def.body.len());
                     for token in macro_def.body.clone() {
-                        expanded_macro_tokens.append(&mut Self::expand_macro_token(
-                            &macro_def,
-                            &arg_tokens,
+                        Self::expand_macro_token(
+                            &context,
                             token,
                             macro_call_id,
-                            macro_calls,
-                            builtin_macro_defs,
-                            user_macro_defs
-                        )?);
+                            &mut expanded_macro_tokens
+                        )?
                     }
 
                     // Prevent stack overflow with deep recursive macros
@@ -635,69 +641,51 @@ impl MacroStage {
     }
 
     fn expand_macro_token(
-        macro_def: &MacroDefinition,
-        arg_tokens: &[Vec<IncludeToken>],
+        context: &MacroContext,
         mut token: IncludeToken,
         macro_call_id: &mut usize,
-        macro_calls: &mut Vec<MacroCall>,
-        builtin_macro_defs: &[MacroDefinition],
-        user_macro_defs: &[MacroDefinition],
+        expanding_tokens: &mut Vec<IncludeToken>
 
-    ) -> Result<Vec<IncludeToken>, SourceError> {
-        let mut expanded = Vec::new();
+    ) -> Result<(), SourceError> {
         token.inner_mut().set_macro_call_id(*macro_call_id);
         if token.is(IncludeType::Parameter) {
-            if let Some((index, _)) = Self::get_macro_def_param_by_name(&macro_def, token.symbol()) {
+            if let Some((index, _)) = Self::get_macro_def_param_by_name(context.def, token.symbol()) {
 
                 // Insert and expand the argument's tokens
-                let call_argument = arg_tokens[index].clone();
-                for mut token in call_argument {
-
+                for token in context.args[index].clone() {
                     if let IncludeToken::TokenGroup(_, group) = token {
-                        for mut token in group {
-                            token.inner_mut().set_macro_call_id(*macro_call_id);
-
-                            // Expand any inserted parameters or token groups
-                            expanded.append(&mut Self::expand_macro_token(
-                                &macro_def,
-                                &arg_tokens,
+                        for token in group {
+                            Self::expand_macro_token(
+                                context,
                                 token,
                                 macro_call_id,
-                                macro_calls,
-                                builtin_macro_defs,
-                                user_macro_defs
-                            )?);
+                                expanding_tokens
+                            )?;
                         }
 
                     } else {
-                        token.inner_mut().set_macro_call_id(*macro_call_id);
-
-                        // Expand any inserted parameters or token groups
-                        expanded.append(&mut Self::expand_macro_token(
-                            &macro_def,
-                            &arg_tokens,
+                        Self::expand_macro_token(
+                            context,
                             token,
                             macro_call_id,
-                            macro_calls,
-                            builtin_macro_defs,
-                            user_macro_defs
-                        )?);
+                            expanding_tokens
+                        )?;
                     }
                 }
 
             } else {
                 return Err(token.error(format!(
                     "Unknown parameter in expansion of macro \"{}\", parameter \"{}\" is not defined in list of macro parameters.",
-                    macro_def.name.value,
+                    context.def.name.value,
                     token.symbol()
                 )));
             }
 
         } else {
-            expanded.push(token);
+            expanding_tokens.push(token);
         }
+        Ok(())
 
-        Ok(expanded)
     }
 
     fn get_macro_def_param_by_name<'a>(def: &'a MacroDefinition, name: &Symbol) -> Option<(usize, &'a InnerToken)> {
