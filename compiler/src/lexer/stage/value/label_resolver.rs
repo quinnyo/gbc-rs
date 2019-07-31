@@ -220,7 +220,7 @@ impl LabelResolver {
                     if let Some(error) = Self::verify_child_label_refs_under_parent(parent_label.take(), child_label_refs) {
                         return Ok(Some(error));
                     }
-                    *parent_label = Some((index, Vec::new(), Vec::new()));
+                    *parent_label = Some((index, Vec::with_capacity(2), Vec::with_capacity(2)));
                 },
                 ValueToken::ChildLabelDef(inner, id, call_id) => {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
