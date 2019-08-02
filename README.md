@@ -220,6 +220,25 @@ to abstract and simplify often used code paths.
 These aim at increasing the readability of the source and reducing the potential
 for off-by-one errors.
 
+#### **brk**
+
+Inserts a debug breakpoint to be used with the BGB emulator's debugger
+
+```asm
+; ld b,b
+brk
+```
+
+#### **neg**
+
+A shorthand for negation of the accumulator:
+
+```asm
+; cpl
+; inc a
+neg
+```
+
 #### **addw**
 
 Adds a 8-bit operand to a 16-bit register using only the `Accumulator`:

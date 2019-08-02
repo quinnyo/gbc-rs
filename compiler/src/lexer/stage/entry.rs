@@ -636,6 +636,16 @@ impl EntryStage {
             Symbol::Mul => Self::parse_meta_div_mul(tokens, inner, true)?,
             Symbol::Div => Self::parse_meta_div_mul(tokens, inner, false)?,
 
+            // Negation
+            Symbol::Neg => {
+                vec![
+                    // cpl
+                    EntryToken::Instruction(inner.clone(), 0x2F),
+                    // inc a
+                    EntryToken::Instruction(inner, 0x3C)
+                ]
+            },
+
             // Increment Memory Address Shorthands
             Symbol::Incx => {
                 // decx [expr]
@@ -2730,6 +2740,14 @@ mod test {
     fn test_meta_instruction_brk() {
         assert_eq!(tfe("brk"), vec![
             EntryToken::DebugInstruction(itk!(0, 3, "brk"), 64)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_neg() {
+        assert_eq!(tfe("neg"), vec![
+            EntryToken::Instruction(itk!(0, 3, "neg"), 47),
+            EntryToken::Instruction(itk!(0, 3, "neg"), 60)
         ]);
     }
 

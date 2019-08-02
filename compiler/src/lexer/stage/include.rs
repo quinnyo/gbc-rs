@@ -275,7 +275,7 @@ impl IncludeStage {
                         Ok(Some(IncludeToken::Instruction(name)))
                     },
                     // gbasm "meta" Instructions
-                    Symbol::Msg | Symbol::Brk | Symbol::Mul | Symbol::Div | Symbol::Incx | Symbol::Decx | Symbol::Addw | Symbol::Subw | Symbol::Ldxa |
+                    Symbol::Msg | Symbol::Brk | Symbol::Mul | Symbol::Div | Symbol::Neg | Symbol::Incx | Symbol::Decx | Symbol::Addw | Symbol::Subw | Symbol::Ldxa |
                     Symbol::Retx | Symbol::Vsync | Symbol::Pushx | Symbol::Popx => {
                         Ok(Some(IncludeToken::MetaInstruction(name)))
                     },
@@ -804,7 +804,7 @@ mod test {
 
     #[test]
     fn test_meta_instructions() {
-        token_types!(MetaInstruction, "msg", "brk", "mul", "div", "retx", "incx", "decx", "addw", "subw", "ldxa", "vsync", "pushx", "popx");
+        token_types!(MetaInstruction, "msg", "brk", "mul", "div", "neg", "retx", "incx", "decx", "addw", "subw", "ldxa", "vsync", "pushx", "popx");
     }
 
     #[test]
