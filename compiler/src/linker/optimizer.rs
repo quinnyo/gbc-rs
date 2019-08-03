@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::mem;
+use std::collections::VecDeque;
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -30,10 +31,11 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
         }
     }
 
+    // Do a dry run to figure out of there is anything to optimize at all
+    // But keep the optimized entries so we don't have to generate them twice
     let mut i = 0;
-    let mut any_optimizations = false;
-    let mut optimized_entries: Vec<SectionEntry> = Vec::with_capacity(entries.len());
-
+    let mut optimized_entries = VecDeque::new();
+    let mut optimized_length = 0;
     while i < entries.len() {
         if let Some((op_code, offset, expression, bytes)) = get_instruction(&entries, i) {
             let b = get_instruction(&entries, i + 1);
@@ -46,13 +48,45 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                 b,
                 c
             ) {
+                optimized_length += new_entries.len();
+                optimized_entries.push_back((i, new_entries, remove_count));
+                i += remove_count;
+
+            } else {
+                optimized_length += 1;
+            }
+
+        } else {
+            optimized_length += 1;
+        }
+        i += 1;
+    }
+
+    // Perform actual optimizations
+    if !optimized_entries.is_empty() {
+        let mut i = 0;
+        let mut entries_with_optimizations: Vec<SectionEntry> = Vec::with_capacity(optimized_length);
+        while i < entries.len() {
+
+            // Check if we optimized any entries at this location
+            let is_optimized = if let Some((index, _,_)) = optimized_entries.front() {
+                *index == i
+
+            } else {
+                false
+            };
+
+            if is_optimized {
+                // Get the previously optimized entries
+                let (_, new_entries, remove_count) = optimized_entries.pop_front().unwrap();
+
                 // Use the initial entry as the basis for the new ones
-                let base_entry = entries[i].clone();
+                let base_entry = &entries[i];
 
                 // Insert new instructions
                 for e in new_entries {
                     if let EntryData::Instruction { op_code, expression, bytes, .. } = e {
-                        optimized_entries.push(SectionEntry::new_with_size(
+                        entries_with_optimizations.push(SectionEntry::new_with_size(
                             base_entry.section_id,
                             base_entry.inner.clone(),
                             instruction::size(op_code),
@@ -71,20 +105,18 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                 }
 
                 i += remove_count;
-                any_optimizations = true;
 
             } else {
-                optimized_entries.push(entries[i].clone());
+                entries_with_optimizations.push(entries[i].clone());
             }
-
-        } else {
-            optimized_entries.push(entries[i].clone());
+            i += 1;
         }
-        i += 1;
-    }
 
-    if any_optimizations {
-        mem::replace(entries, optimized_entries);
+        debug_assert_eq!(entries_with_optimizations.len(), optimized_length);
+
+        // We replace the existing entries inline so we don't need to
+        // pop from the old vector which would be much slower
+        mem::replace(entries, entries_with_optimizations);
         true
 
     } else {
@@ -161,7 +193,8 @@ fn optimize_instructions(
         (0xC2, _, _) |
 
         // jp label    -> jr label
-        // We only want jp's without that are not followed by a nop
+        // We only want jp's without that are not followed by a nop to
+        // avoid messing with potential jump tables
         (0xC3, None, _) |
         (0xC3, Some((0x01..=512, _, _, _)), _) => {
             let address = i32::from(bytes[1]) | (i32::from(bytes[2]) << 8);
@@ -191,6 +224,19 @@ fn optimize_instructions(
                         debug_only: false
                     }]))
                 }
+            } else {
+                None
+            }
+        },
+
+        // Remove any relative jumps which jump directly behind themselves
+        //
+        // jr label
+        // label:
+        (0x18, _, _) => {
+            if bytes[1] == 0 {
+                Some((0, vec![]))
+
             } else {
                 None
             }
@@ -703,6 +749,25 @@ mod test {
                     bytes: vec![203, 63],
                     volatile: false,
                     debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    #[test]
+    fn test_optimize_relative_jump_with_0_offer() {
+        let l = linker_optimize("SECTION ROM0\njr foo\nfoo:\njp bar\nbar:");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "foo".to_string()
+                }),
+                (0, EntryData::Label {
+                    id: 2,
+                    is_local: false,
+                    name: "bar".to_string()
                 })
             ]
         ]);
