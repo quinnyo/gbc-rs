@@ -2,6 +2,7 @@
 use std::fs::File;
 use std::path::PathBuf;
 use std::io::{stdin, stdout, BufReader, Error as IOError, ErrorKind, Read, Write};
+use std::collections::HashSet;
 
 
 // External Dependencies ------------------------------------------------------
@@ -149,7 +150,19 @@ pub fn image_to_indicies(buffer: RgbaImage, color_palette: &[[u8; 4]]) -> Result
         }
         let x = index % w;
         let y = index / h;
-        return Err(format!("Image pixel at {}x{} with color {:?} does not map to any entries in the color palette of {:?}", x, y, pixel.data, color_palette));
+
+        let mut colors = HashSet::new();
+        for pixel in buffer.pixels() {
+            colors.insert(format!("{:0>2X}{:0>2X}{:0>2X}", pixel.data[0], pixel.data[1], pixel.data[2]));
+        }
+        return Err(format!(
+            "Image pixel at {}x{} with color {:?} does not map to any entries in the color palette of {:?}.\nFull image palette is {}",
+            x,
+            y,
+            pixel.data,
+            color_palette ,
+            colors.into_iter().collect::<Vec<String>>().join(",")
+        ));
     }
     Ok(Indicies {
         width: w,
