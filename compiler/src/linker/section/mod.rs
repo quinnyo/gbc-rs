@@ -42,7 +42,7 @@ lazy_static! {
     static ref INSTRUCTIONS: Vec<Instruction> = gb_cpu::instruction_list();
 
     static ref SECTION_DEFAULTS: HashMap<Symbol, SectionDefault> = {
-        let mut map = HashMap::new();
+        let mut map = HashMap::with_capacity(8);
         map.insert(Symbol::ROM0, SectionDefault {
             base_address: 0x0000,
             size: 0x4000,

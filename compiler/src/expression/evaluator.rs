@@ -78,11 +78,11 @@ impl EvaluatorContext {
     #[allow(clippy::new_without_default)]
     pub fn new(linter_enabled: bool) -> Self {
         Self {
-            constants: HashMap::new(),
-            raw_constants: HashMap::new(),
-            label_addresses: HashMap::new(),
-            raw_labels: HashMap::new(),
-            inactive_labels: HashMap::new(),
+            constants: HashMap::with_capacity(512),
+            raw_constants: HashMap::with_capacity(512),
+            label_addresses: HashMap::with_capacity(512),
+            raw_labels: HashMap::with_capacity(512),
+            inactive_labels: HashMap::with_capacity(64),
             relative_address_offset: 0,
             linter_enabled
         }

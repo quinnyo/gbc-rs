@@ -87,7 +87,7 @@ impl LexerStage for ValueStage {
         _linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let mut parent_labels: HashMap<ParentLabelIndex, (InnerToken, usize)> = HashMap::new();
+        let mut parent_labels: HashMap<ParentLabelIndex, (InnerToken, usize)> = HashMap::with_capacity(512);
         let mut parent_labels_names: Vec<Symbol> = Vec::with_capacity(64);
         let mut unique_label_id = 0;
         let mut tokens = Self::parse_tokens(
@@ -116,7 +116,7 @@ impl ValueStage {
 
     ) -> Result<Vec<ValueToken>, SourceError> {
 
-        let mut child_labels: HashMap<ChildLabelIndex, InnerToken> = HashMap::new();
+        let mut child_labels: HashMap<ChildLabelIndex, InnerToken> = HashMap::with_capacity(16);
 
         let mut value_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);

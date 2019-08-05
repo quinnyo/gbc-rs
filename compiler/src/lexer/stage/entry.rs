@@ -140,7 +140,7 @@ impl LexerStage for EntryStage {
         _linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let mut layouts: InstructionLayouts = HashMap::new();
+        let mut layouts: InstructionLayouts = HashMap::with_capacity(512);
         for (index, instr) in gb_cpu::instruction_list().into_iter().enumerate() {
             let layout = instr.layout.iter().filter(|arg| *arg != &Argument::Unused).map(|arg| arg.clone().into()).collect();
             let key: (Symbol, Vec<LexerArgument>) = (Symbol::from(instr.name.to_string()), layout);
@@ -159,8 +159,8 @@ impl EntryStage {
 
     ) -> Result<Vec<EntryToken>, SourceError> {
 
-        let mut fixed_constants = HashMap::new();
-        let mut default_constants = HashMap::new();
+        let mut fixed_constants = HashMap::with_capacity(512);
+        let mut default_constants = HashMap::with_capacity(32);
         let mut entry_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {

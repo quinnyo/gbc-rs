@@ -111,7 +111,7 @@ impl LabelResolver {
 
     pub fn convert_child_labels_refs(tokens: &mut [ValueToken]) -> Result<(), SourceError> {
 
-        let mut parent_label_map = HashMap::new();
+        let mut parent_label_map = HashMap::with_capacity(256);
         let mut child_label_refs = Vec::with_capacity(64);
         let mut error = Self::inner_assign_and_verify_child_label_refs(
             tokens,

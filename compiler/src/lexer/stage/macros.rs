@@ -55,7 +55,7 @@ lazy_static! {
         MacroDefinition::builtin("ATAN2", vec![(ExpressionArgumenType::Number, "y"), (ExpressionArgumenType::Number, "x")])
     ];
     pub static ref BUILTIN_MACRO_INDEX: HashMap<Symbol, usize> = {
-        let mut map = HashMap::new();
+        let mut map = HashMap::with_capacity(BUILTIN_MACRO_DEFS.len());
         for (index, def) in BUILTIN_MACRO_DEFS.iter().enumerate() {
             map.insert(def.name.value.clone(), index);
         }

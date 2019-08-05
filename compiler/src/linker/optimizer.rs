@@ -135,6 +135,37 @@ fn optimize_instructions(
 
 ) -> Option<(usize, Vec<EntryData>)> {
     match (op_code, b, c) {
+        /*
+        // and a,X
+        // cp 0
+        // jr/jp z/nz
+        (0xA0..=0xA7, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) | (0xE6, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) => {
+            // Check for jr z,nz or jp z,nz
+            if cp_bytes[1] == 0x00 && (jo == 0x28 || jo == 0x20 || jo == 0xC2 || jo == 0xCA) {
+                // TODO remove cp 0
+                println!("potential and X / cp 0 / jump found {:?}", expr);
+                None
+
+            } else {
+                None
+            }
+        },
+
+        // or a,X
+        // cp 0
+        // jr/jp z/nz
+        (0xB0..=0xB7, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) | (0xF6, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) => {
+            // Check for jr z,nz or jp z,nz
+            if cp_bytes[1] == 0x00 && (jo == 0x28 || jo == 0x20 || jo == 0xC2 || jo == 0xCA) {
+                // TODO remove cp 0
+                println!("potential or X / cp 0 / jump found {:?}", expr);
+                None
+
+            } else {
+                None
+            }
+        },*/
+
         // ld a,0 -> xor a
         //
         // -> save 1 byte and 3 T-states

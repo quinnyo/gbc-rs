@@ -22,7 +22,7 @@ static NINTENDO_LOGO: [u8; 48] = [
 
 lazy_static! {
     static ref ROM_KB_SIZES: HashMap<(u8, u8), [u16; 2]> = {
-        let mut sizes = HashMap::new();
+        let mut sizes = HashMap::with_capacity(16);
         //                         KB    Banks
         sizes.insert((0x00, 0), [  32,   0]);
         sizes.insert((0x01, 0), [  64,   4]);
@@ -41,7 +41,7 @@ lazy_static! {
     };
 
     static ref RAM_KB_SIZES: HashMap<(u8, u8), [u16; 2]> = {
-        let mut sizes = HashMap::new();
+        let mut sizes = HashMap::with_capacity(8);
         //                        KB   Banks
         sizes.insert((0x00, 0), [  0,  0]);
         sizes.insert((0x00, 2), [  0,  0]); // None (must always be set with MBC2 even though it has 512x4 bits RAM)
@@ -53,7 +53,7 @@ lazy_static! {
     };
 
     static ref CART_TYPES: HashMap<u8, CartType> = {
-        let mut types = HashMap::new();
+        let mut types = HashMap::with_capacity(32);
         types.insert(0x00, CartType::from_str("ROM"));
         types.insert(0x01, CartType::from_str("MBC1"));
         types.insert(0x02, CartType::from_str("MBC1+RAM"));
