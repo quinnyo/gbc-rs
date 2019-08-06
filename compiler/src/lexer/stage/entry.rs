@@ -452,22 +452,27 @@ impl EntryStage {
         let mut expression: OptionalDataExpression = None;
 
         let mut layout = Vec::with_capacity(8);
-        let mut arg_count = 0;
-        let mut past_comma = false;
+        let mut comma_count = 0;
         let mut trailing_comma = None;
 
         // Parse Instruction Arguments Structure
-        while arg_count < max_arg_count && arg_count < 2 {
+        while layout.len() < max_arg_count {
+
+            // Check for a single following comma between arguments
+            if tokens.peek_is(ExpressionTokenType::Comma, None) {
+                let inner = tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction register argument")?.into_inner();
+                comma_count += 1;
+                trailing_comma = Some(inner);
 
             // Register arguments
-            if tokens.peek_is(ExpressionTokenType::Register, None) {
+            } else if tokens.peek_is(ExpressionTokenType::Register, None) {
                 trailing_comma = None;
                 let reg = tokens.get("while parsing instruction register argument")?;
                 if let ExpressionToken::Register { name, .. } = reg {
 
                     // Special casing for conditional instructions where "c" is the carry flag
                     // instead of a register if infront of the comma
-                    if !past_comma && gb_cpu::instruction_is_conditional(&inner.value.as_str()) && name == Register::C{
+                    if comma_count == 0 && gb_cpu::instruction_is_conditional(&inner.value.as_str()) && name == Register::C{
                         layout.push(LexerArgument::Flag(Flag::Carry));
 
                     } else {
@@ -479,7 +484,7 @@ impl EntryStage {
                 }
 
             // Flag must always be infront of a comma
-            } else if tokens.peek_is(ExpressionTokenType::Flag, None) && !past_comma {
+            } else if tokens.peek_is(ExpressionTokenType::Flag, None) && comma_count == 0 {
                 trailing_comma = None;
                 let flag = tokens.get("while parsing instruction flag argument")?;
                 if let ExpressionToken::Flag { typ, .. } = flag {
@@ -535,22 +540,24 @@ impl EntryStage {
                 } else {
                     unreachable!();
                 }
+
+            // Invalid instruction token
+            } else {
+                break;
             }
 
-            arg_count += 1;
-
-            // Check for a single following comma between arguments
-            if tokens.peek_is(ExpressionTokenType::Comma, None) && !past_comma {
-                let inner = tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction register argument")?.into_inner();
-                past_comma = true;
-                trailing_comma = Some(inner);
-            }
         }
 
+        let arg_count = layout.len();
         let key = (inner.value.clone(), layout);
         if let Some(comma) = trailing_comma {
             Err(comma.error(
                 format!("Unexpected trailing comma after \"{}\" instruction.", inner.value)
+            ))
+
+        } else if comma_count < arg_count.saturating_sub(1) {
+            return Err(inner.error(
+                format!("Missing comma between instruction arguments.")
             ))
 
         } else if let Some(op_code) = layouts.get(&key).cloned() {
@@ -1676,6 +1683,11 @@ mod test {
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
         assert_eq!(entry_lexer_error("ROMX"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Segment, expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
+    }
+
+    #[test]
+    fn test_parser_no_comma() {
+        assert_eq!(entry_lexer_error("global_label:\njr z.child_label\n.child_label:"), "In file \"main.gb.s\" on line 2, column 1: Missing comma between instruction arguments.\n\njr z.child_label\n^--- Here");
     }
 
     // Constant Declarations --------------------------------------------------
