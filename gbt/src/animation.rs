@@ -20,6 +20,7 @@ struct AnimationFrame {
 pub fn convert(
     image_file: PathBuf,
     color_palette: Vec<&str>,
+    decode_buffer_size: usize,
     output_file: Option<PathBuf>
 
 ) -> Result<(), String> {
@@ -63,25 +64,60 @@ pub fn convert(
 
     for frame in animation_frames {
 
-        let mut frame_updates: Vec<u8> = vec![];
-        let mut frame_update_count = 0;
+        let mut tile_updates: Vec<u8> = vec![];
+        let mut tile_update_count = 0;
 
         // Calculate Frame Differences
         for (index, (tile, previous_tile)) in frame.tiles.iter().zip(previous_frame.tiles.iter()).enumerate() {
             if tile != previous_tile {
-                frame_updates.push(index as u8);
-                frame_updates.extend(tile.iter().cloned());
-                frame_update_count += 1;
+                let tile_data = tile.iter().cloned();
+                if tile_updates.len() + 1 + tile_data.len() >= decode_buffer_size {
+                    serialize_updates(
+                        0,
+                        &mut tile_update_count,
+                        &mut tile_updates,
+                        &mut animation_data
+                    );
+                }
+                tile_updates.push(index as u8);
+                tile_updates.extend(tile_data);
+                tile_update_count += 1;
             }
         }
 
-        let (mut frame_data, _) = compress(&frame_updates, true);
-        animation_data.push(frame_update_count);
-        animation_data.push((frame.delay / 2) as u8);
-        animation_data.append(&mut frame_data);
+        serialize_updates(
+            (frame.delay / 2) as u8,
+            &mut tile_update_count,
+            &mut tile_updates,
+            &mut animation_data
+        );
         previous_frame = frame;
     }
 
     util::output_binary(output_file, animation_data)
+}
+
+fn serialize_updates(
+    delay: u8,
+    tile_update_count: &mut u8,
+    tile_updates: &mut Vec<u8> ,
+    animation_data: &mut Vec<u8>
+) {
+    if *tile_update_count > 0 {
+
+        // Compressed tile data
+        let (mut frame_data, _) = compress(&tile_updates, true);
+        animation_data.append(&mut frame_data);
+        tile_updates.clear();
+
+        // If delay is zero there will be more tile update data to uncompress and apply
+        animation_data.push(*tile_update_count);
+        animation_data.push(delay);
+        *tile_update_count = 0;
+
+    } else {
+        *animation_data.last_mut().unwrap() = delay;
+    }
+
 }
 

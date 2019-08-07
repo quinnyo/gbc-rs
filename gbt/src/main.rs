@@ -111,6 +111,13 @@ fn main() {
                 .takes_value(true)
                 .help("GameBoy animation file to generate")
             )
+            .arg(Arg::with_name("BUFFER_SIZE")
+                .long("buffer-size")
+                .short("b")
+                .default_value("512")
+                .takes_value(true)
+                .help("Buffer size available for decompression during runtime (in bytes)")
+            )
             .arg(Arg::with_name("COLOR_PALETTE")
                 .long("color-palette")
                 .short("p")
@@ -183,6 +190,7 @@ fn main() {
         if let Err(err) = animation::convert(
             PathBuf::from(matches.value_of("IMAGE_FILE").unwrap()),
             matches.values_of("COLOR_PALETTE").unwrap().collect(),
+            matches.value_of("BUFFER_SIZE").unwrap().parse().unwrap_or(512),
             matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
 
         ) {

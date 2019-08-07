@@ -9,6 +9,7 @@ Binaries:
 
 ## Commands
 
+- `animation`: Converts gif files into a custom animation format for playback
 - `tiles`: Converts image files into the GameBoy tile data format.
 - `sgb`: Converts images files into Super GameBoy border data.
 - `lmms`: Converts [LMMS Projects](https://lmms.io/) that use the FreeBoy Audio Plugin into a custom GameBoy format.
