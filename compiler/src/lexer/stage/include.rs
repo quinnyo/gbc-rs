@@ -51,6 +51,11 @@ struct IncludeLexerState<'a, T: FileReader> {
     file_path: &'a PathBuf
 }
 
+enum IncludeResult  {
+    Text(PathBuf, String),
+    Binary(PathBuf, Vec<u8>)
+}
+
 
 // Include Level Lexer Implementation -----------------------------------------
 pub struct IncludeStage;
@@ -66,52 +71,36 @@ impl LexerStage for IncludeStage {
         files: &mut Vec<LexerFile>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let mut tokens = Vec::with_capacity(512);
-        Self::include_file(IncludeLexerState {
+        let mut state = IncludeLexerState {
             file_reader,
             files,
             parent_path: None,
             parent_file_index: 0,
             source_index: 0,
             file_path
+        };
 
-        }, &mut tokens, Vec::new(), None)?;
+        let (file_path, contents) = state.file_reader.read_file(state.parent_path.as_ref(), state.file_path).map_err(|err| {
+            SourceError::new(state.parent_file_index, state.source_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
+        })?;
+
+        state.files.push(LexerFile::new(
+            state.files.len(),
+            contents,
+            file_path.clone(),
+            Vec::with_capacity(8)
+        ));
+
+        state.parent_path = Some(file_path);
+
+        let mut tokens = Vec::with_capacity(2048);
+        Self::tokenize(&mut tokens, &mut state)?;
         Ok(tokens)
     }
 
 }
 
 impl IncludeStage {
-
-    fn include_file<T: FileReader>(
-        mut state: IncludeLexerState<T>,
-        tokens: &mut Vec<IncludeToken>,
-        include_stack: Vec<InnerToken>,
-        using: Option<String>
-
-    ) -> Result<(), SourceError> {
-
-        let (file_path, mut contents) = state.file_reader.read_file(state.parent_path.as_ref(), state.file_path).map_err(|err| {
-            SourceError::new(state.parent_file_index, state.source_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
-        })?;
-
-        if let Some(using) = using {
-            contents = state.file_reader.execute_command(Some(file_path.clone()), using.as_str(), contents).map_err(|err| {
-                SourceError::new(state.parent_file_index, state.source_index, err.to_string())
-            })?;
-        }
-
-        state.files.push(LexerFile::new(
-            state.files.len(),
-            contents,
-            file_path.clone(),
-            include_stack
-        ));
-
-        state.parent_path = Some(file_path);
-        Self::tokenize(tokens, &mut state)
-
-    }
 
     fn tokenize<T: FileReader>(
         tokens: &mut Vec<IncludeToken>,
@@ -144,53 +133,14 @@ impl IncludeStage {
     ) -> Result<(), SourceError> {
         match Self::next_token(gen, "when parsing INCLUDE directive, expected a StringLiteral or BINARY keyword instead")? {
             IncludeToken::StringLiteral(token) => {
-                let mut include_stack = state.files[parent_file_index].include_stack.clone();
-                include_stack.push(token.clone());
-
                 let using = Self::tokenize_using(gen)?;
-                Self::include_file(
-                    IncludeLexerState {
-                        file_reader: state.file_reader,
-                        files: state.files,
-                        parent_path: state.parent_path.clone(),
-                        parent_file_index,
-                        source_index: token.start_index,
-                        file_path: &PathBuf::from(token.value.to_string())
-                    },
-                    tokens,
-                    include_stack,
-                    using
-                )
+                Self::incude_file(token, tokens, state, parent_file_index, using, false)
             },
             IncludeToken::Reserved(ref name) if name.value == Symbol::BINARY => {
                 match Self::next_token(gen, "when parsing INCLUDE BINARY directive")? {
                     IncludeToken::StringLiteral(token) => {
-
-                        // Parse optional command
-                        let using_command = Self::tokenize_using(gen)?;
-
-                        // Load binary
-                        let (binary_path, mut bytes) = state.file_reader.read_binary_file(
-                            state.parent_path.as_ref(),
-                            &PathBuf::from(token.value.to_string())
-
-                        ).map_err(|err| {
-                            SourceError::new(token.file_index, token.start_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
-                        })?;
-
-                        // Apply optional command to bytes
-                        if let Some(using) = using_command {
-                            bytes = state.file_reader.execute_binary_command(
-                                Some(binary_path),
-                                using.as_str(),
-                                &bytes
-
-                            ).map_err(|err| {
-                                SourceError::new(token.file_index, token.start_index, err.to_string())
-                            })?;
-                        }
-                        tokens.push(IncludeToken::BinaryFile(token, bytes));
-                        Ok(())
+                        let using = Self::tokenize_using(gen)?;
+                        Self::incude_file(token, tokens, state, parent_file_index, using, true)
                     },
                     other => Err(other.error("Expected a StringLiteral instead.".to_string()))
                 }
@@ -199,16 +149,148 @@ impl IncludeStage {
         }
     }
 
-    fn tokenize_using(gen: &mut TokenGenerator) -> Result<Option<String>, SourceError> {
+    fn incude_file<T: FileReader>(
+        token: InnerToken,
+        tokens: &mut Vec<IncludeToken>,
+        state: &mut IncludeLexerState<T>,
+        parent_file_index: usize,
+        using: Option<(String, bool)>,
+        binary_input: bool
+
+    ) -> Result<(), SourceError> {
+        let mut include_stack = state.files[parent_file_index].include_stack.clone();
+        include_stack.push(token.clone());
+
+        let mut state = IncludeLexerState {
+            file_reader: state.file_reader,
+            files: state.files,
+            parent_path: state.parent_path.clone(),
+            parent_file_index,
+            source_index: token.start_index,
+            file_path: &PathBuf::from(token.value.to_string())
+        };
+
+        // Read Binary Files
+        let input = if binary_input {
+            let (file_path, bytes) = state.file_reader.read_binary_file(
+                state.parent_path.as_ref(),
+                state.file_path
+
+            ).map_err(|err| {
+                SourceError::new(
+                    state.parent_file_index,
+                    state.source_index,
+                    format!("Failed to include file \"{}\": {}", err.path.display(), err.io)
+                )
+            })?;
+
+            // Transform via Using Command
+            if let Some((using, output_binary)) = using {
+                let bytes = state.file_reader.execute_binary_command(
+                    Some(file_path.clone()),
+                    using.as_str(),
+                    &bytes
+
+                ).map_err(|err| {
+                    SourceError::new(token.file_index, token.start_index, err.to_string())
+                })?;
+
+                // Convert Output for desired include
+                if output_binary {
+                    IncludeResult::Binary(file_path, bytes)
+
+                } else {
+                    IncludeResult::Text(file_path, String::from_utf8_lossy(&bytes).to_string())
+                }
+
+            } else {
+                IncludeResult::Binary(file_path, bytes)
+            }
+
+        // Read Text Files
+        } else {
+            let (file_path, text) = state.file_reader.read_file(
+                state.parent_path.as_ref(),
+                state.file_path
+
+            ).map_err(|err| {
+                SourceError::new(
+                    state.parent_file_index,
+                    state.source_index,
+                    format!("Failed to include file \"{}\": {}", err.path.display(), err.io)
+                )
+            })?;
+
+            // Transform via Using Command
+            if let Some((using, output_binary)) = using {
+                let text = state.file_reader.execute_command(
+                    Some(file_path.clone()),
+                    using.as_str(),
+                    text
+
+                ).map_err(|err| {
+                    SourceError::new(token.file_index, token.start_index, err.to_string())
+                })?;
+
+                // Convert Output for desired include
+                if output_binary {
+                    IncludeResult::Binary(file_path, text.into_bytes())
+
+                } else {
+                    IncludeResult::Text(file_path, text)
+                }
+
+            } else {
+                IncludeResult::Text(file_path, text)
+            }
+        };
+
+        match input {
+            IncludeResult::Binary(_, bytes) => {
+                tokens.push(IncludeToken::BinaryFile(token, bytes));
+                Ok(())
+            },
+            IncludeResult::Text(file_path, text) => {
+                state.files.push(LexerFile::new(
+                    state.files.len(),
+                    text,
+                    file_path.clone(),
+                    include_stack
+                ));
+                state.parent_path = Some(file_path);
+                Self::tokenize(tokens, &mut state)
+            }
+        }
+
+    }
+
+    fn tokenize_using(gen: &mut TokenGenerator) -> Result<Option<(String, bool)>, SourceError> {
         let pre_state = gen.state();
         if let Ok(using_token) = Self::next_token(gen, "") {
             if using_token.is(IncludeType::Reserved) && using_token.is_symbol(Symbol::USING) {
-                let command_token = Self::next_token(gen, "when parsing USING directive, expected a StringLiteral instead.")?;
-                if command_token.is(IncludeType::StringLiteral) {
-                    return Ok(Some(command_token.into_inner().value.to_string()))
+                let binary_token = Self::next_token(gen, "when parsing USING directive, expected a StringLiteral or BINARY keyword instead")?;
+                // USING BINARY "..."
+                if binary_token.is(IncludeType::Reserved) && binary_token.is_symbol(Symbol::BINARY) {
+                    let command_token = Self::next_token(gen, "when parsing USING directive, expected a StringLiteral or BINARY keyword instead")?;
+                    if command_token.is(IncludeType::StringLiteral) {
+                        return Ok(Some((
+                            command_token.into_inner().value.to_string(),
+                            true
+                        )))
+
+                    } else {
+                        return Err(command_token.error("Expected a StringLiteral or BINARY keyword after USING keyword.".to_string()));
+                    }
+
+                // USING "..."
+                } else if binary_token.is(IncludeType::StringLiteral) {
+                    return Ok(Some((
+                        binary_token.into_inner().value.to_string(),
+                        false
+                    )))
 
                 } else {
-                    return Err(command_token.error("Expected a StringLiteral after USING keyword.".to_string()));
+                    return Err(binary_token.error("Expected a StringLiteral or BINARY keyword after USING keyword.".to_string()));
                 }
             }
         }
@@ -495,6 +577,12 @@ mod test {
         }
     }
 
+    macro_rules! itkf {
+        ($start:expr, $end:expr, $parsed:expr, $file:expr) => {
+            InnerToken::new($file, $start, $end, $parsed.into())
+        }
+    }
+
     macro_rules! token_types {
         ($tok:ident, $id:expr) => {
             assert_eq!(include_lexer($id), vec![tk!($tok, 0, $id.len(), $id)]);
@@ -530,7 +618,7 @@ mod test {
     }
 
     #[test]
-    fn test_resolve_include_using() {
+    fn test_resolve_include_using_text() {
 
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
@@ -547,6 +635,28 @@ mod test {
         let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(1, NumberLiteral, 0, 2, "53")
+        ]);
+
+    }
+
+    #[test]
+    fn test_resolve_include_using_binary() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_command(
+            "cmd",
+            vec!["--arg".into(), "--arg-two".into(), "src/foo.gb.s".into()],
+            vec![52, 50],
+            vec![42],
+            None
+        );
+        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING BINARY 'cmd --arg --arg-two'");
+        reader.add_file("src/foo.gb.s", "42");
+
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        assert_eq!(lexer.tokens, vec![
+            IncludeToken::BinaryFile(itk!(8, 18, "foo.gb.s"), vec![42])
         ]);
 
     }
@@ -686,8 +796,8 @@ mod test {
 
     #[test]
     fn test_resolve_include_using_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 21: Expected a StringLiteral after USING keyword.\n\nINCLUDE \'foo\' USING 4\n                    ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE 'foo' USING"), "In file \"main.gb.s\" on line 1, column 19: Unexpected end of input when parsing USING directive, expected a StringLiteral instead..\n\nINCLUDE \'foo\' USING\n                  ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 21: Expected a StringLiteral or BINARY keyword after USING keyword.\n\nINCLUDE \'foo\' USING 4\n                    ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 'foo' USING"), "In file \"main.gb.s\" on line 1, column 19: Unexpected end of input when parsing USING directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE \'foo\' USING\n                  ^--- Here");
     }
 
     #[test]
@@ -708,7 +818,32 @@ mod test {
     }
 
     #[test]
-    fn test_resolve_include_binary_using() {
+    fn test_resolve_include_binary_using_text() {
+
+        let mut reader = MockFileReader::default();
+        reader.base = PathBuf::from("src");
+        reader.add_command(
+            "cmd",
+            vec!["--arg".into(), "--arg-two".into(), "src/data.bin".into()],
+            vec![0, 1, 2, 3, 4, 5, 6, 7],
+            b"DB $1, $2".to_vec(),
+            None
+        );
+        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING 'cmd --arg --arg-two'\n");
+        reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
+
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        assert_eq!(lexer.tokens, vec![
+            IncludeToken::Reserved(itkf!(0, 2, "DB", 1)),
+            IncludeToken::NumberLiteral(itkf!(3, 5, "$1", 1)),
+            IncludeToken::Comma(itkf!(5, 6, ",", 1)),
+            IncludeToken::NumberLiteral(itkf!(7, 9, "$2", 1))
+        ]);
+
+    }
+
+    #[test]
+    fn test_resolve_include_binary_using_binary() {
 
         let mut reader = MockFileReader::default();
         reader.base = PathBuf::from("src");
@@ -719,7 +854,7 @@ mod test {
             vec![42],
             None
         );
-        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING 'cmd --arg --arg-two'\n");
+        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING BINARY 'cmd --arg --arg-two'\n");
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
 
         let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
@@ -748,8 +883,8 @@ mod test {
 
     #[test]
     fn test_resolve_include_binary_using_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 28: Expected a StringLiteral after USING keyword.\n\nINCLUDE BINARY \'foo\' USING 4\n                           ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING"), "In file \"main.gb.s\" on line 1, column 26: Unexpected end of input when parsing USING directive, expected a StringLiteral instead..\n\nINCLUDE BINARY \'foo\' USING\n                         ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 28: Expected a StringLiteral or BINARY keyword after USING keyword.\n\nINCLUDE BINARY \'foo\' USING 4\n                           ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING"), "In file \"main.gb.s\" on line 1, column 26: Unexpected end of input when parsing USING directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE BINARY \'foo\' USING\n                         ^--- Here");
     }
 
     #[test]
