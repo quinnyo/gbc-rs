@@ -24,6 +24,7 @@ lexer_token!(IncludeToken, IncludeType, (Debug, Eq, PartialEq, Clone), {
     MetaInstruction(()),
     Parameter(()),
     Offset(()),
+    Member(()),
     NumberLiteral(()),
     StringLiteral(()),
     TokenGroup((Vec<IncludeToken>)),
@@ -328,10 +329,10 @@ impl IncludeStage {
                     Symbol::DS8 | Symbol::EQU | Symbol::FOR |
                     Symbol::DS16 | Symbol::BANK |
                     Symbol::THEN | Symbol::ELSE | Symbol::ENDIF |
-                    Symbol::MACRO | Symbol::USING | Symbol::BLOCK |
+                    Symbol::MACRO | Symbol::USING | Symbol::BLOCK | Symbol::STRUCT |
                     Symbol::ENDFOR | Symbol::REPEAT | Symbol::BINARY | Symbol::DEFAULT | Symbol::SECTION | Symbol::GLOBAL |
                     Symbol::INCLUDE | Symbol::VOLATILE |
-                    Symbol::ENDMACRO | Symbol::ENDBLOCK => {
+                    Symbol::ENDMACRO | Symbol::ENDBLOCK | Symbol::ENDSTRUCT => {
                         Ok(Some(IncludeToken::Reserved(name)))
                     },
                     // ROM Segments
@@ -449,7 +450,16 @@ impl IncludeStage {
                 Ok(Some(IncludeToken::TokenGroup(index_token, tokens)))
             },
             // Operator
-            '-' | '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
+            '-'  => {
+                if let Some('>') = gen.peek() {
+                    let t = gen.collect_double();
+                    Ok(Some(IncludeToken::Member(t)))
+
+                } else {
+                    Ok(Some(IncludeToken::Operator(gen.collect_single())))
+                }
+            },
+            '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
                 Ok(Some(IncludeToken::Operator(gen.collect_single())))
             },
             // Comments
@@ -910,8 +920,8 @@ mod test {
             Reserved,
             "DB", "DW", "BW", "IF", "TO", "IN",
             "FOR", "DS8", "DS16", "EQU", "BANK", "THEN", "ELSE",
-            "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "GLOBAL",
-            "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "ENDBLOCK"
+            "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "GLOBAL", "STRUCT",
+            "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "ENDBLOCK", "ENDSTRUCT"
         );
     }
 
@@ -1057,6 +1067,7 @@ mod test {
             tk!(Operator, 11, 12, "/"),
             tk!(Operator, 12, 13, "^"),
         ]);
+        assert_eq!(include_lexer("->"), vec![tk!(Member, 0, 2, "->")]);
     }
 
     #[test]

@@ -119,6 +119,17 @@ impl TokenGenerator {
         )
     }
 
+    pub fn collect_double(&mut self) -> InnerToken {
+        let p = self.state.current;
+        let t = self.next();
+        InnerToken::new(
+            self.file_index,
+            self.state.index - 2,
+            self.state.index,
+            format!("{}{}", p, t)
+        )
+    }
+
     pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, SourceError> {
         self.state.start = self.state.index - 1;
         let mut chars = String::with_capacity(8);

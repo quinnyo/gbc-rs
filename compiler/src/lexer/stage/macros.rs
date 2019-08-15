@@ -111,6 +111,11 @@ pub enum BlockStatement<T: LexerToken> {
     Volatile(Vec<T>)
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct StructStatement<T: LexerToken> {
+    pub name: Box<T>,
+    pub body: Vec<T>
+}
 
 // Macro Specific Tokens ------------------------------------------------------
 lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
@@ -130,6 +135,8 @@ lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     ForStatement((ForStatement<MacroToken>)),
     BlockStatement((BlockStatement<MacroToken>)),
+    StructStatement((StructStatement<MacroToken>)),
+    Lookup((Vec<InnerToken>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -398,8 +405,22 @@ impl MacroStage {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
 
+            // Parse struct statements
+            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDSTRUCT) {
+                return Err(token.error(format!("Unexpected \"{}\" token outside of STRUCT statement.", token.symbol())));
+
+            } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::STRUCT) {
+                let inner = token.inner().clone();
+                let name = MacroToken::from(tokens.expect(IncludeType::Name, None, "when parsing STRUCT statement")?);
+
+                let body = Self::parse_struct_body(&mut tokens)?;
+                tokens_with_statements.push(MacroToken::StructStatement(inner, StructStatement {
+                    name: Box::new(name),
+                    body
+                }));
+
             // Parse IF Statements
-            if token.is(IncludeType::Reserved) && (token.is_symbol(Symbol::THEN) || token.is_symbol(Symbol::ELSE) || token.is_symbol(Symbol::ENDIF)) {
+            } else if token.is(IncludeType::Reserved) && (token.is_symbol(Symbol::THEN) || token.is_symbol(Symbol::ELSE) || token.is_symbol(Symbol::ENDIF)) {
                 return Err(token.error(format!("Unexpected \"{}\" token outside of IF statement.", token.symbol())));
 
             } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::IF) {
@@ -472,6 +493,22 @@ impl MacroStage {
                     return Err(token.error("Expected either a USING or VOLATILE keyword to BLOCK directive.".to_string()));
                 }
 
+            // Parse Struct Access
+            } else if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::Member, None) {
+                let mut fields = Vec::with_capacity(4);
+                let mut name = token;
+                let inner = name.inner().clone();
+                while tokens.peek_is(IncludeType::Member, None) {
+                    fields.push(name.into_inner());
+                    tokens.expect(IncludeType::Member, None, "when parsing struct field access")?;
+                    name = tokens.expect(IncludeType::Name, None, "when parsing struct field access")?;
+                }
+                fields.push(name.into_inner());
+                tokens_with_statements.push(MacroToken::Lookup(inner, fields));
+
+            } else if token.is(IncludeType::Member) {
+                return Err(token.error("Incomplete struct field access.".to_string()));
+
             } else {
                 tokens_with_statements.push(MacroToken::from(token));
             }
@@ -507,7 +544,7 @@ impl MacroStage {
                 } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), None) {
                     def
 
-                // Nout found
+                // Not found
                 } else {
                     let error = token.error(format!("Invocation of undefined macro \"{}\"", token.symbol()));
                     if let Some(def) = Self::get_macro_by_name_all(&user_macro_defs, token.symbol()) {
@@ -647,6 +684,8 @@ impl MacroStage {
         expanding_tokens: &mut Vec<IncludeToken>
 
     ) -> Result<(), SourceError> {
+        // TODO add EXPOSED macros which do not set the macro id
+        // this way they will leak into their surrounding if desired
         token.inner_mut().set_macro_call_id(*macro_call_id);
         if token.is(IncludeType::Parameter) {
             if let Some((index, _)) = Self::get_macro_def_param_by_name(context.def, token.symbol()) {
@@ -915,6 +954,37 @@ impl MacroStage {
         Self::parse_statements(body_tokens)
     }
 
+
+    fn parse_struct_body(
+        tokens: &mut TokenIterator<IncludeToken>
+
+    ) -> Result<Vec<MacroToken>, SourceError> {
+        let mut body_tokens = Vec::with_capacity(16);
+        let mut struct_depth = 0;
+        while struct_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDSTRUCT)) {
+
+            let token = tokens.get("Unexpected end of input while parsing STRUCT statement body.")?;
+            if token.is_symbol(Symbol::GLOBAL) {
+                return Err(token.error("Struct fields cannot be declared GLOBAL individually.".to_string()));
+            }
+
+            // Check for nested statements
+            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::STRUCT) {
+                struct_depth += 1;
+
+            } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDSTRUCT) {
+                struct_depth -= 1;
+            }
+
+            body_tokens.push(token);
+
+        }
+        tokens.expect(IncludeType::Reserved, Some(Symbol::ENDSTRUCT), "when parsing STRUCT statement body")?;
+
+        // Parse nested statements
+        Self::parse_statements(body_tokens)
+    }
+
 }
 
 
@@ -933,7 +1003,8 @@ mod test {
         IncludeToken,
         IfStatementBranch,
         ForStatement,
-        BlockStatement
+        BlockStatement,
+        StructStatement
     };
 
     fn macro_lexer_error<S: Into<String>>(s: S) -> String {
@@ -1874,6 +1945,68 @@ mod test {
     fn test_error_block() {
         assert_eq!(macro_lexer_error("BLOCK"), "In file \"main.gb.s\" on line 1, column 1: Expected either a USING or VOLATILE keyword to BLOCK directive.\n\nBLOCK\n^--- Here");
         assert_eq!(macro_lexer_error("ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDBLOCK\" token outside of BLOCK statement.\n\nENDBLOCK\n^--- Here");
+    }
+
+    // Struct Statements ------------------------------------------------------
+    #[test]
+    fn test_struct_statement() {
+        let lexer = macro_lex("STRUCT foo ENDSTRUCT");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::StructStatement(itk!(0, 6, "STRUCT"), StructStatement {
+                name: Box::new(MacroToken::Name(itk!(7, 10, "foo"))),
+                body: vec![]
+            })
+        ]);
+        let lexer = macro_lex("STRUCT foo\nfoo: DB\nbar: DB\nENDSTRUCT");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::StructStatement(itk!(0, 6, "STRUCT"), StructStatement {
+                name: Box::new(MacroToken::Name(itk!(7, 10, "foo"))),
+                body: vec![
+                    MacroToken::Name(itk!(11, 14, "foo")),
+                    MacroToken::Colon(itk!(14, 15, ":")),
+                    MacroToken::Reserved(itk!(16, 18, "DB")),
+                    MacroToken::Name(itk!(19, 22, "bar")),
+                    MacroToken::Colon(itk!(22, 23, ":")),
+                    MacroToken::Reserved(itk!(24, 26, "DB"))
+                ]
+            })
+        ]);
+    }
+
+    #[test]
+    fn test_struct_statement_nested() {
+        let lexer = macro_lex("STRUCT foo prefix: DB STRUCT bar inner: DB ENDSTRUCT outer: DB ENDSTRUCT");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::StructStatement(itk!(0, 6, "STRUCT"), StructStatement {
+                name: Box::new(MacroToken::Name(itk!(7, 10, "foo"))),
+                body: vec![
+                    MacroToken::Name(itk!(11, 17, "prefix")),
+                    MacroToken::Colon(itk!(17, 18, ":")),
+                    MacroToken::Reserved(itk!(19, 21, "DB")),
+                    MacroToken::StructStatement(itk!(22, 28, "STRUCT"), StructStatement {
+                        name: Box::new(MacroToken::Name(itk!(29, 32, "bar"))),
+                        body: vec![
+                            MacroToken::Name(itk!(33, 38, "inner")),
+                            MacroToken::Colon(itk!(38, 39, ":")),
+                            MacroToken::Reserved(itk!(40, 42, "DB")),
+                        ]
+                    }),
+                    MacroToken::Name(itk!(53, 58, "outer")),
+                    MacroToken::Colon(itk!(58, 59, ":")),
+                    MacroToken::Reserved(itk!(60, 62, "DB"))
+                ]
+            })
+        ]);
+    }
+
+    #[test]
+    fn test_error_struct_statement() {
+        assert_eq!(macro_lexer_error("STRUCT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing STRUCT statement, expected a \"Name\" token instead.\n\nSTRUCT\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDSTRUCT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDSTRUCT\" token outside of STRUCT statement.\n\nENDSTRUCT\n^--- Here");
+        assert_eq!(macro_lexer_error("STRUCT foo GLOBAL ENDSTRUCT"), "In file \"main.gb.s\" on line 1, column 12: Struct fields cannot be declared GLOBAL individually.\n\nSTRUCT foo GLOBAL ENDSTRUCT\n           ^--- Here");
+        assert_eq!(macro_lexer_error("->"), "In file \"main.gb.s\" on line 1, column 1: Incomplete struct field access.\n\n->\n^--- Here");
+        assert_eq!(macro_lexer_error("foo->"), "In file \"main.gb.s\" on line 1, column 4: Unexpected end of input when parsing struct field access, expected a \"Name\" token instead.\n\nfoo->\n   ^--- Here");
+        assert_eq!(macro_lexer_error("foo->DB"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Reserved\" when parsing struct field access, expected a \"Name\" token instead.\n\nfoo->DB\n     ^--- Here");
     }
 
 }

@@ -13,6 +13,7 @@ use crate::lexer::stage::macros::BlockStatement;
 // Types ----------------------------------------------------------------------
 pub type ParentLabelIndex = (Symbol, Option<usize>, MacroCallIndex);
 pub type ChildLabelIndex = (Symbol, MacroCallIndex);
+pub type StructIndex = (Symbol, Option<usize>, MacroCallIndex);
 
 type ParentLabelEntry = Option<(usize, Vec<(ChildLabelIndex, usize)>, Vec<(ChildLabelIndex, usize, ChildCallIndex, Option<usize>)>)>;
 type ChildCallIndex = Option<(usize, usize)>;
@@ -54,12 +55,26 @@ impl LabelResolver {
         }
     }
 
+    pub fn struct_id(inner: &InnerToken, parent_only: bool, file_index: Option<usize>) -> StructIndex {
+        if parent_only || inner.macro_call_id.is_none() {
+            (inner.value.clone(), file_index, None)
+
+        } else if let Some(call_id) = inner.macro_call_id() {
+            (inner.value.clone(), file_index, Some(call_id))
+
+        } else {
+            unreachable!()
+        }
+    }
+
     pub fn convert_parent_label_refs(
         parent_labels: &HashMap<ParentLabelIndex, (InnerToken, usize)>,
+        structs: &HashMap<StructIndex, (InnerToken, HashMap<String, (InnerToken, usize)>)>,
         tokens: &mut [ValueToken]
 
-    ) {
+    ) -> Result<(), SourceError> {
         for token in tokens {
+
             let reference = if let ValueToken::Name(inner) = token {
                 // Macro Internal Lookup
                 if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
@@ -77,6 +92,63 @@ impl LabelResolver {
                     Some(ValueToken::Name(inner.clone()))
                 }
 
+            } else if let ValueToken::Lookup(_, fields) = token {
+
+                let field_path: Vec<String> = fields.iter().map(|f| f.value.to_string()).collect();
+                let mut struct_path = field_path.clone();
+
+                // Find struct
+                let mut inner = fields[0].clone();
+                let mut struct_data = None;
+                while !struct_path.is_empty() {
+                    struct_path.pop();
+                    inner.value = struct_path.join("->").into();
+
+                    // Macro Internal Struct Lookup
+                    if let Some(data) = structs.get(&Self::struct_id(&inner, false, Some(inner.file_index))) {
+                        struct_data = Some(data);
+                        break;
+
+                    // File Local Struct Lookup
+                    } else if let Some(data) = structs.get(&Self::struct_id(&inner, true, Some(inner.file_index))) {
+                        struct_data = Some(data);
+                        break;
+
+                    // Global Struct Lookup
+                    } else if let Some(data) = structs.get(&Self::struct_id(&inner, true, None)) {
+                        struct_data = Some(data);
+                        break;
+                    }
+
+                }
+
+                // Found a struct with the same name
+                if let Some((struct_inner, struct_fields)) = struct_data {
+
+                    // Lookup field in struct
+                    let field_path = field_path.join("->");
+                    if let Some((_, id)) = struct_fields.get(&field_path) {
+                        let mut inner = fields[0].clone();
+                        inner.value = field_path.into();
+                        inner.end_index = fields.last().unwrap().end_index;
+                        Some(ValueToken::ParentLabelRef(inner, *id))
+
+                    } else {
+                        // TODO suggest similiar fields in other structs?
+                        return Err(inner.error(
+                            format!(
+                                "Reference to unknown field \"{}\".",
+                                fields.last().unwrap().value
+                            )
+
+                        ).with_reference(struct_inner, "in struct defined"));
+                    }
+
+                } else {
+                    // TODO suggest structs with similiar names
+                    return Err(inner.error(format!("Reference to unknown struct \"{}\".", fields[0].value)));
+                }
+
             } else {
                 None
             };
@@ -86,27 +158,28 @@ impl LabelResolver {
 
             } else if let ValueToken::BuiltinCall(_, arguments) = token {
                 for arg_tokens in arguments {
-                    Self::convert_parent_label_refs(parent_labels, arg_tokens)
+                    Self::convert_parent_label_refs(parent_labels, structs, arg_tokens)?
                 }
 
             } else if let ValueToken::IfStatement(_, branches) = token {
                 for branch in branches {
                     if let Some(condition) = branch.condition.as_mut() {
-                        Self::convert_parent_label_refs(parent_labels, condition);
+                        Self::convert_parent_label_refs(parent_labels, structs, condition)?;
                     }
-                    Self::convert_parent_label_refs(parent_labels, &mut branch.body);
+                    Self::convert_parent_label_refs(parent_labels, structs, &mut branch.body)?;
                 }
 
             } else if let ValueToken::ForStatement(_, for_statement) = token {
-                Self::convert_parent_label_refs(parent_labels, &mut for_statement.body);
+                Self::convert_parent_label_refs(parent_labels, structs, &mut for_statement.body)?;
 
             } else if let ValueToken::BlockStatement(_, block) = token {
                 match block {
-                    BlockStatement::Using(_, body) => Self::convert_parent_label_refs(parent_labels, body),
-                    BlockStatement::Volatile(body) => Self::convert_parent_label_refs(parent_labels, body)
+                    BlockStatement::Using(_, body) => Self::convert_parent_label_refs(parent_labels, structs, body)?,
+                    BlockStatement::Volatile(body) => Self::convert_parent_label_refs(parent_labels, structs, body)?
                 };
             }
         }
+        Ok(())
     }
 
     pub fn convert_child_labels_refs(tokens: &mut [ValueToken]) -> Result<(), SourceError> {
