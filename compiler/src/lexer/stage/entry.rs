@@ -556,8 +556,8 @@ impl EntryStage {
             ))
 
         } else if comma_count < arg_count.saturating_sub(1) {
-            return Err(inner.error(
-                format!("Missing comma between instruction arguments.")
+            Err(inner.error(
+                "Missing comma between instruction arguments.".to_string()
             ))
 
         } else if let Some(op_code) = layouts.get(&key).cloned() {

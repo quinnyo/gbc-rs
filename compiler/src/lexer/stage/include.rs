@@ -321,7 +321,7 @@ impl IncludeStage {
             ' ' | '\t' | '\n' | '\r' => Ok(None),
 
             // Names
-            'a'...'z' | 'A'...'Z' | '_' => {
+            'a'..='z' | 'A'..='Z' | '_' => {
                 let name = Self::collect_inner_name(gen, true)?;
                 match name.value {
                     // Split into Reserved Words
@@ -374,7 +374,7 @@ impl IncludeStage {
                         if let '_' = c {
                             TokenChar::Ignore
 
-                        } else if let '0'...'9' | '+' | '-' = c {
+                        } else if let '0'..='9' | '+' | '-' = c {
                             TokenChar::Valid(c)
 
                         } else {
@@ -382,7 +382,7 @@ impl IncludeStage {
                         }
                     })?)))
 
-                } else if let Some('a'...'z') | Some('A'...'Z') = gen.peek() {
+                } else if let Some('a'..='z') | Some('A'..='Z') = gen.peek() {
                     Ok(Some(IncludeToken::Parameter(Self::collect_inner_name(gen, false)?)))
 
                 } else {
@@ -390,13 +390,13 @@ impl IncludeStage {
                 }
             },
             // NumberLiteral
-            '0'...'9' => Ok(Some(Self::collect_number_literal(gen)?)),
-            '$' => if let Some('0'...'9') | Some('a'...'f') | Some('A'...'F') = gen.peek() {
+            '0'..='9' => Ok(Some(Self::collect_number_literal(gen)?)),
+            '$' => if let Some('0'..='9') | Some('a'..='f') | Some('A'..='F') = gen.peek() {
                 Ok(Some(IncludeToken::NumberLiteral(gen.collect(true, |c, _| {
                     if let '_' = c {
                         TokenChar::Ignore
 
-                    } else if let '0'...'9' | 'a'...'f' | 'A'...'F' = c {
+                    } else if let '0'..='9' | 'a'..='f' | 'A'..='F' = c {
                         TokenChar::Valid(c)
 
                     } else {
@@ -407,12 +407,12 @@ impl IncludeStage {
             } else {
                 Err(gen.error("Expected a valid hexadecimal digit"))
             },
-            '%' => if let Some('0'...'1') = gen.peek() {
+            '%' => if let Some('0'..='1') = gen.peek() {
                 Ok(Some(IncludeToken::NumberLiteral(gen.collect(true, |c, _| {
                     if let '_' = c {
                         TokenChar::Ignore
 
-                    } else if let '0'...'1' = c {
+                    } else if let '0'..='1' = c {
                         TokenChar::Valid(c)
 
                     } else {
@@ -432,7 +432,7 @@ impl IncludeStage {
             },
             // Token Groups
             '`' => if inside_token_group {
-                return Ok(Some(IncludeToken::TokenGroupClose(gen.collect_single())));
+                Ok(Some(IncludeToken::TokenGroupClose(gen.collect_single())))
 
             } else {
                 let index_token = gen.collect_single();
@@ -516,7 +516,7 @@ impl IncludeStage {
 
     fn collect_inner_name(gen: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, SourceError> {
         Ok(gen.collect(inclusive, |c, _| {
-            if let 'a'...'z' | 'A'...'Z' | '_' | '0'...'9' = c {
+            if let 'a'..='z' | 'A'..='Z' | '_' | '0'..='9' = c {
                 TokenChar::Valid(c)
 
             } else {
@@ -539,7 +539,7 @@ impl IncludeStage {
                     TokenChar::Valid(c)
                 }
 
-            } else if let '0'...'9' = c {
+            } else if let '0'..='9' = c {
                 TokenChar::Valid(c)
 
             } else {
