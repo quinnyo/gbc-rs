@@ -401,7 +401,7 @@ impl Encoder {
         let mut index = 0;
         let mut literal_count = 0;
 
-        let mut commands: Vec<Box<Command>> = Vec::new();
+        let mut commands: Vec<Box<dyn Command>> = Vec::new();
         while index < data.len() {
 
             let command = Encoder::command(data, index);
