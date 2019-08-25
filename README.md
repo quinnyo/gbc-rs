@@ -212,6 +212,22 @@ FOR i IN 0 TO 10 REPEAT
 ENDFOR
 ```
 
+### STRUCT statements
+
+Labels can be grouped into `STRUCTS` in order to reduce code complexity:
+
+```asm
+; Create a struct "foo" with two fields
+STRUCT foo
+    field: DB
+    value: DB
+ENDSTRUCT
+
+; Load the address of the first field into hl
+ld      hl,foo->field
+```
+
+
 ### Meta Instructions
 
 Meta instructions encode multiple *native* instruction at the source level in order
