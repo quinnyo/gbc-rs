@@ -47,14 +47,6 @@ impl DecompilationError {
         }
     }
 
-    fn from_string<S: Into<String>>(message: S) -> Self {
-        Self {
-            stage: "instruction parsing".to_string(),
-            error: None,
-            message: Some(message.into())
-        }
-    }
-
 }
 
 impl fmt::Display for DecompilationError {

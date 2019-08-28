@@ -51,7 +51,39 @@ OPTIONS:
 
 ARGS:
     <SOURCE_FILE>    Input source file
+
+SUBCOMMANDS:
+    debug      Builds a debug ROM using the local "gbc.toml" project configuration.
+    emu        Builds a ROM and emulates it via the specified configuration.
+    help       Prints this message or the help of the given subcommand(s)
+    release    Builds a release ROM using the local "gbc.toml" project configuration.
 ```
+
+## Project Configuration Files
+
+A `gbc.toml` file can be placed in the project's top level directory.
+
+```toml
+# Example Configuration File
+[rom]
+input = "src/main.gbc"
+output = "build/rom.gbc"
+
+[report]
+info = true
+segments = true
+
+[emulator.gambatte]
+command = "gambatte_sdl -s 2"
+
+[emulator.bgb]
+debug = true
+command = "bgb"
+```
+
+The project can be now build via `gbc release` or `gbc debug` and once of the 
+configured emulators can be invoked via `gbc emu <name>`.
+
 
 ## General Syntax
 

@@ -1,107 +1,85 @@
 // STD Dependencies -----------------------------------------------------------
 use std::env;
-use std::process;
-use std::fs::File;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::io::{Error as IOError, Read, Write};
+use std::process::Command;
 
 
 // External Dependencies ------------------------------------------------------
-use clap::{Arg, App};
 use decompiler::Decompiler;
-use file_io::{FileError, FileReader, FileWriter};
+use file_io::Logger;
 use compiler::compiler::Compiler;
+
+
+// Modules --------------------------------------------------------------------
+mod app;
+mod config;
+mod reader;
+
+
+// Internal Dependencies ------------------------------------------------------
+use self::config::ProjectConfig;
+use self::reader::ProjectReader;
 
 
 // CLI Interface --------------------------------------------------------------
 fn main() {
 
-    let matches = App::new("gbc")
-        .version("0.5")
-        .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
-        .about("GameBoy Compiler")
-        .arg(Arg::with_name("SOURCE_FILE")
-            .help("Input source file")
-            .required(true)
-            .index(1)
-        )
-        .arg(Arg::with_name("ROM_FILE")
-            .long("output-rom")
-            .short("o")
-            .value_name("FILE")
-            .takes_value(true)
-            .help("ROM file to generate")
-        )
-        .arg(Arg::with_name("MAP_FILE")
-            .long("symbol-map")
-            .short("m")
-            .value_name("FILE")
-            .takes_value(true)
-            .help("Output symbol mapping for BGB debugger")
-        )
-        .arg(Arg::with_name("info")
-            .long("info")
-            .short("i")
-            .help("Display ROM info")
-        )
-        .arg(Arg::with_name("segments")
-            .long("segments")
-            .short("S")
-            .help("Display segments usage")
-        )
-        .arg(Arg::with_name("lint")
-            .long("lint")
-            .short("l")
-            .help("Run linter only and display warnings")
-        )
-        .arg(Arg::with_name("silent")
-            .long("silent")
-            .short("s")
-            .help("Surpress all output")
-        )
-        .arg(Arg::with_name("no-optimize")
-            .long("no-optimize")
-            .help("Disable instruction optimizations")
-        )
-        .arg(Arg::with_name("debug")
-            .long("debug")
-            .short("D")
-            .help("Enable debug instructions for BGB debugger")
-        )
-        .arg(Arg::with_name("decompile")
-            .long("decompile")
-            .short("d")
-            .help("Decompile the input file instead")
-        )
-        .get_matches();
+    let matches = app::app();
+    if matches.subcommand_matches("release").is_some() {
+        let mut logger = Logger::new();
+        let config = ProjectConfig::load(&mut logger, &ProjectReader::from_absolute(env::current_dir().unwrap()));
+        ProjectConfig::build(&config, &mut logger, true);
 
-    if let Some(file) = matches.value_of("SOURCE_FILE") {
+    } else if matches.subcommand_matches("debug").is_some() {
+        let mut logger = Logger::new();
+        let config = ProjectConfig::load(&mut logger, &ProjectReader::from_absolute(env::current_dir().unwrap()));
+        ProjectConfig::build(&config, &mut logger, false);
+
+    } else if let Some(matches) = matches.subcommand_matches("emu") {
+        let mut logger = Logger::new();
+        let config = ProjectConfig::load(&mut logger, &ProjectReader::from_absolute(env::current_dir().unwrap()));
+        let name = matches.value_of("EMULATOR").unwrap();
+
+        if let Some(emulator) = config.emulator.get(name) {
+            ProjectConfig::build(&config, &mut logger, !emulator.debug);
+            logger.status("Emulating", format!("Running \"{}\"...", emulator.command));
+            logger.flush();
+
+            let mut args = emulator.command.split(' ');
+            let name = args.next().expect("Failed to get command name");
+            let mut args: Vec<String> = args.map(|arg| arg.to_string()).collect();
+            args.push(config.rom.output.display().to_string());
+            let mut child = Command::new(name).args(args).spawn().expect("Command failed");
+            child.wait().ok();
+
+        } else {
+            logger.fail(Logger::format_error(
+                format!("No emulator configuration for \"{}\".", name)
+            ));
+        }
+
+    } else if let Some(file) = matches.value_of("SOURCE_FILE") {
 
         // Create a project reader with the directory of the supplied argument file as the project
         // base so includes can be relative to the base directory by prefixing them with "/"
         let main = PathBuf::from(file);
-        let mut reader = ProjectReader::new(main.clone());
+        let mut reader = ProjectReader::from_relative(main.clone());
         let main_file = PathBuf::from(main.file_name().unwrap());
 
         // Decompile
         if matches.occurrences_of("decompile") > 0 {
+            let mut logger = Logger::new();
             let mut decompiler = Decompiler::new();
             if matches.occurrences_of("silent") > 0 {
-                decompiler.set_silent();
+                logger.set_silent();
             }
 
-            match decompiler.decompile_file(&mut reader, main_file) {
-                Ok(output) => println!("{}", output),
-                Err((output, err)) => {
-                    println!("{}", output);
-                    eprintln!("{}", err);
-                    process::exit(1)
-                }
-            }
+            let result = decompiler.decompile_file(&mut logger, &mut reader, main_file);
+            logger.finish(result);
 
         // Compile
         } else {
+            let mut logger = Logger::new();
             let mut compiler = Compiler::new();
 
             if matches.occurrences_of("segments") > 0 {
@@ -109,7 +87,7 @@ fn main() {
             }
 
             if matches.occurrences_of("silent") > 0 {
-                compiler.set_silent();
+                logger.set_silent();
             }
 
             if matches.occurrences_of("lint") > 0 {
@@ -136,132 +114,10 @@ fn main() {
                 compiler.set_generate_symbols(PathBuf::from(map));
             }
 
-            match compiler.compile(&mut reader, main_file) {
-                Ok(output) => println!("{}", output),
-                Err((output, err)) => {
-                    println!("{}", output);
-                    eprintln!("{}", err);
-                    process::exit(1)
-                }
-            }
+            let result = compiler.compile(&mut logger, &mut reader, main_file);
+            logger.finish(result);
         }
 
-    }
-}
-
-// Helpers --------------------------------------------------------------------
-struct ProjectReader {
-    base: PathBuf
-}
-
-impl ProjectReader {
-
-    fn new(mut main: PathBuf) -> Self {
-        let mut base = env::current_dir().unwrap();
-        main.set_file_name("");
-        base.push(main);
-        Self {
-            base
-        }
-    }
-
-    fn read_file_inner(&self, full_path: &PathBuf) -> Result<(PathBuf, String), IOError> {
-        let mut file = File::open(full_path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        Ok((full_path.clone(), contents))
-    }
-
-    fn read_binary_file_inner(&self, full_path: &PathBuf) -> Result<(PathBuf, Vec<u8>), IOError> {
-        let mut file = File::open(full_path)?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)?;
-        Ok((full_path.clone(), contents))
-    }
-
-    fn write_file_inner(&self, path: &PathBuf, data: String) -> Result<(), IOError> {
-        let mut file = File::create(path)?;
-        file.write_all(&data.into_bytes())?;
-        Ok(())
-    }
-
-    fn write_binary_file_inner(&self, path: &PathBuf, data: Vec<u8>) -> Result<(), IOError> {
-        let mut file = File::create(path)?;
-        file.write_all(&data)?;
-        Ok(())
-    }
-
-}
-
-impl FileReader for ProjectReader {
-
-    fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String> {
-        let mut child = Command::new(name)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn().map_err(|e| {
-                format!("Failed to execute process: {}", e)
-            })?;
-
-        if let Some(stdin) = child.stdin.as_mut() {
-            // We ignore any potential error here in case the child
-            // is not waiting for STDIN
-            stdin.write_all(input).ok();
-        }
-
-        let output = child.wait_with_output().map_err(|e| {
-            format!("Failed to execute process (STDOUT): {}", e)
-        })?;
-
-        if output.status.success() {
-            Ok(output.stdout)
-
-        } else {
-            Err(String::from_utf8_lossy(&output.stderr).to_string())
-        }
-
-    }
-
-    fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {
-        let path = Self::resolve_path(&self.base, parent, child);
-        self.read_file_inner(&path).map_err(|io| {
-            FileError {
-                io,
-                path
-            }
-        })
-    }
-
-    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {
-        let path = Self::resolve_path(&self.base, parent, child);
-        self.read_binary_file_inner(&path).map_err(|io| {
-            FileError {
-                io,
-                path
-            }
-        })
-    }
-}
-
-impl FileWriter for ProjectReader {
-    fn write_file(&mut self, path: &PathBuf, data: String) -> Result<(), FileError> {
-        self.write_file_inner(path, data).map_err(|io| {
-            FileError {
-                io,
-                path: path.clone()
-            }
-        })
-    }
-
-    fn write_binary_file(&mut self, path: &PathBuf, data: Vec<u8>) -> Result<(), FileError> {
-        self.write_binary_file_inner(path, data).map_err(|io| {
-            FileError {
-                io,
-                path: path.clone()
-            }
-        })
     }
 }
 

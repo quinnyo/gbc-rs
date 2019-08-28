@@ -4,9 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 
 // External Dependencies ------------------------------------------------------
-use colored::Colorize;
 use gb_cpu::{Instruction, self};
-use file_io::{FileReader, FileWriter};
+use file_io::{FileReader, FileWriter, Logger};
 
 
 // Modules --------------------------------------------------------------------
@@ -21,9 +20,7 @@ use self::error::{DecompilationError, RomError};
 pub struct Decompiler {
     instructions: Vec<Instruction>,
     addresses: HashMap<usize, AddressEntry>,
-    visited: HashSet<usize>,
-    silent: bool,
-    output: Vec<String>
+    visited: HashSet<usize>
 }
 
 impl Decompiler {
@@ -32,22 +29,17 @@ impl Decompiler {
         Self {
             instructions: gb_cpu::instruction_list(),
             addresses: HashMap::new(),
-            visited: HashSet::new(),
-            silent: false,
-            output: Vec::new()
+            visited: HashSet::new()
         }
-    }
-
-    pub fn set_silent(&mut self) {
-        self.silent = true;
     }
 
     pub fn decompile_file<T: FileReader + FileWriter>(
         &mut self,
+        logger: &mut Logger,
         io: &mut T,
         file: PathBuf
 
-    ) -> Result<String, (String, DecompilationError)> {
+    ) -> Result<(), DecompilationError> {
 
         self.address_entry(0x0040).set_label("IV_VBLANK".to_string());
         self.address_entry(0x0040).record_call_from(0xFFFF);
@@ -56,7 +48,7 @@ impl Decompiler {
         self.address_entry(0x0058).set_label("IV_SERIAL".to_string());
         self.address_entry(0x0100).set_label("BOOT_ROM_EXIT".to_string());
 
-        let (rom_buffer, symbols) = self.read_rom_file(io, &file).map_err(|e| self.error("instruction parsing", e))?;
+        let (rom_buffer, symbols) = self.read_rom_file(io, &file).map_err(|e| DecompilationError::new("instruction parsing", e))?;
 
         let mut known_addresses = vec![
             (0x0100, Some(0x0100)),
@@ -71,16 +63,16 @@ impl Decompiler {
         // TODO tweak the symbol file?
         known_addresses.append(&mut self.parse_symbols(symbols));
 
-        self.analyze_from(&rom_buffer, known_addresses).map_err(|e| self.error("instruction parsing", e))?;
+        self.analyze_from(&rom_buffer, known_addresses).map_err(|e| DecompilationError::new("instruction parsing", e))?;
 
         // TODO detect data blocks
         // TODO handle msg / brk instructions in instruction decoder
         // TODO display known argument labels inline
 
         for adr in self.range_to_string(0x0000, 0x4000) {
-            self.log(adr);
+            logger.log(adr);
         }
-        Ok(self.output.join("\n"))
+        Ok(())
     }
 
     fn parse_symbols(&mut self, symbols: Vec<String>) -> Vec<(usize, Option<usize>)> {
@@ -297,31 +289,6 @@ impl Decompiler {
             Vec::new()
         };
         Ok((contents, symbols))
-    }
-
-
-    // Helpers ----------------------------------------------------------------
-    // TODO dry with compiler
-    fn log<S: Into<String>>(&mut self, s: S) {
-        if !self.silent  {
-            self.output.push(s.into());
-        }
-    }
-
-    fn warning<S: Into<String>>(&mut self, s: S) {
-        if !self.silent {
-            self.output.push(format!("     {} {}", "Warning".bright_yellow(), s.into()));
-        }
-    }
-
-    fn info<S: Into<String>>(&mut self, s: S) {
-        if !self.silent {
-            self.output.push(format!("        {} {}", "Info".bright_blue(), s.into()));
-        }
-    }
-
-    fn error(&self, stage: &str, error: RomError) -> (String, DecompilationError) {
-        (self.output.join("\n"), DecompilationError::new(stage, error))
     }
 
 }
