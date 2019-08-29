@@ -1,7 +1,7 @@
 // External Dependencies ------------------------------------------------------
-use clap::{Arg, App, SubCommand, ArgMatches};
+use clap::{Arg, App, SubCommand};
 
-pub fn app<'a>() -> ArgMatches<'a> {
+pub fn app<'a>() -> App<'a, 'a> {
     App::new("gbc")
         .version("0.5")
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
@@ -25,7 +25,6 @@ pub fn app<'a>() -> ArgMatches<'a> {
         )
         .arg(Arg::with_name("SOURCE_FILE")
             .help("Input source file")
-            // TODO require if no subcommand is specified
             .index(1)
         )
         .arg(Arg::with_name("ROM_FILE")
@@ -76,5 +75,4 @@ pub fn app<'a>() -> ArgMatches<'a> {
             .short("d")
             .help("Decompile the input file instead")
         )
-        .get_matches()
 }

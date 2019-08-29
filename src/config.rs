@@ -76,7 +76,7 @@ impl ProjectConfig {
         logger.finish(result);
     }
 
-    fn try_load(logger: &mut Logger, reader: &ProjectReader) -> Result<ProjectConfig, IOError> {
+    pub fn try_load(logger: &mut Logger, reader: &ProjectReader) -> Result<ProjectConfig, IOError> {
         let mut dir = reader.base_dir().clone();
         loop {
             let mut config_file = dir.clone();
