@@ -140,7 +140,7 @@ impl Linker {
 
         if optimize {
             // Run passes until no more optimizations were applied
-            while Self::optimize_instructions(&mut sections) {
+            while Self::optimize_instructions(&mut sections, strip_debug) {
                 Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
             }
         }
@@ -397,11 +397,11 @@ impl Linker {
         Ok(())
     }
 
-    fn optimize_instructions(sections: &mut Vec<Section>) -> bool {
+    fn optimize_instructions(sections: &mut Vec<Section>, strip_debug: bool) -> bool {
         let mut optimizations_applied = false;
         for s in sections.iter_mut() {
             if s.is_rom {
-                optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries);
+                optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries, strip_debug);
             }
         }
         optimizations_applied
@@ -487,6 +487,11 @@ mod test {
     pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
         Linker::from_lexer(&reader, entry_lex(s.into()), true, true, false).expect("Instruction optimization failed")
+    }
+
+    pub fn linker_optimize_keep_debug<S: Into<String>>(s: S) -> Linker {
+        let reader = MockFileReader::default();
+        Linker::from_lexer(&reader, entry_lex(s.into()), false, true, false).expect("Instruction optimization failed")
     }
 
     pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {

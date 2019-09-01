@@ -10,7 +10,7 @@ use super::util::instruction;
 
 
 // Low Level Instruction Optimizer --------------------------------------------
-pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
+pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, strip_debug: bool) -> bool {
 
     fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(u16, i32, &OptionalDataExpression, &[u8])> {
         if let Some(entry) = entries.get(i) {
@@ -46,7 +46,8 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>) -> bool {
                 expression,
                 bytes,
                 b,
-                c
+                c,
+                strip_debug
             ) {
                 optimized_length += new_entries.len();
                 optimized_entries.push_back((i, new_entries, remove_count));
@@ -131,10 +132,26 @@ fn optimize_instructions(
     expression: &OptionalDataExpression,
     bytes: &[u8],
     b: Option<(u16, i32, &OptionalDataExpression, &[u8])>,
-    c: Option<(u16, i32, &OptionalDataExpression, &[u8])>
+    c: Option<(u16, i32, &OptionalDataExpression, &[u8])>,
+    strip_debug: bool
 
 ) -> Option<(usize, Vec<EntryData>)> {
     match (op_code, b, c) {
+        // ld a,a
+        // ld c,c
+        // ld d,d
+        // ld e,e
+        // ld h,h
+        // ld l,l
+        (0x7F, _, _) | (0x49, _, _) | (0x52, _, _) | (0x5B, _, _) | (0x64, _, _)  | (0x6D, _, _) => {
+            Some((0, vec![]))
+        },
+
+        // ld b,b
+        (0x40, _, _) if strip_debug => {
+            Some((0, vec![]))
+        },
+
         /*
         // and a,X
         // cp 0
@@ -296,7 +313,7 @@ fn optimize_instructions(
         // rrca
         // rrca
         // rrca
-        // and %00011111
+        // and %0001_1111
         //
         // save 1 byte and 5 T-states
         (319, Some((319, _, _, _)), Some((319, _, _, _))) => {
@@ -341,6 +358,7 @@ fn optimize_instructions(
 mod test {
     use super::super::test::{
         linker_optimize,
+        linker_optimize_keep_debug,
         linker_section_entries
     };
     use super::EntryData;
@@ -357,7 +375,7 @@ mod test {
     // Optimizations ----------------------------------------------------------
     #[test]
     fn test_no_optimization_across_labels() {
-        let l = linker_optimize("SECTION ROM0\ncall global\nfoo:\nret\nld a,a\nSECTION ROM0[130]\nglobal:");
+        let l = linker_optimize("SECTION ROM0\ncall global\nfoo:\nret\nld a,b\nSECTION ROM0[130]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (3, EntryData::Instruction {
@@ -380,9 +398,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -400,7 +418,7 @@ mod test {
 
     #[test]
     fn test_optimize_lda0_to_xora() {
-        let l = linker_optimize("SECTION ROM0\nld a,0\nld a,a");
+        let l = linker_optimize("SECTION ROM0\nld a,0\nld a,b");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Instruction {
@@ -411,9 +429,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -423,7 +441,7 @@ mod test {
 
     #[test]
     fn test_optimize_cp0_to_ora() {
-        let l = linker_optimize("SECTION ROM0\ncp 0\nld a,a");
+        let l = linker_optimize("SECTION ROM0\ncp 0\nld a,b");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Instruction {
@@ -434,9 +452,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -446,7 +464,7 @@ mod test {
 
     #[test]
     fn test_optimize_ldaffxx_to_ldhaxx() {
-        let l = linker_optimize("SECTION ROM0\nld a,[$FF05]\nld a,a");
+        let l = linker_optimize("SECTION ROM0\nld a,[$FF05]\nld a,b");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (2, EntryData::Instruction {
@@ -457,9 +475,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -469,7 +487,7 @@ mod test {
 
     #[test]
     fn test_optimize_ldffxxa_to_ldhxxa() {
-        let l = linker_optimize("SECTION ROM0\nld [$FF05],a\nld a,a");
+        let l = linker_optimize("SECTION ROM0\nld [$FF05],a\nld a,b");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (2, EntryData::Instruction {
@@ -480,9 +498,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -492,7 +510,7 @@ mod test {
 
     #[test]
     fn test_optimize_callret_to_jp() {
-        let l = linker_optimize("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[130]\nglobal:");
+        let l = linker_optimize("SECTION ROM0\ncall global\nret\nld a,b\nSECTION ROM0[130]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (3, EntryData::Instruction {
@@ -503,9 +521,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -522,7 +540,7 @@ mod test {
 
     #[test]
     fn test_optimize_callret_to_jp_to_jr() {
-        let l = linker_optimize("SECTION ROM0\ncall global\nret\nld a,a\nSECTION ROM0[129]\nglobal:");
+        let l = linker_optimize("SECTION ROM0\ncall global\nret\nld a,b\nSECTION ROM0[129]\nglobal:");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (2, EntryData::Instruction {
@@ -533,9 +551,9 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 127,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![127],
+                    bytes: vec![120],
                     volatile: false,
                     debug_only: false
                 })
@@ -822,6 +840,27 @@ mod test {
                     expression: None,
                     bytes: vec![254, 0],
                     volatile: true,
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    // LD X,X -----------------------------------------------------------------
+    #[test]
+    fn test_remove_register_self_loads() {
+        let l = linker_optimize("SECTION ROM0\nld a,a\nld b,b\nld c,c\nld d,d\nld e,e\nld h,h\nld l,l");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker_optimize_keep_debug("SECTION ROM0\nld a,a\nld b,b\nld c,c\nld d,d\nld e,e\nld h,h\nld l,l");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Instruction {
+                    op_code: 64,
+                    expression: None,
+                    bytes: vec![64],
+                    volatile: false,
                     debug_only: false
                 })
             ]
