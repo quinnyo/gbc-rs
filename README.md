@@ -293,28 +293,19 @@ Adds a 8-bit operand to a 16-bit register using only the `Accumulator`:
 
 ```asm
 ; ld      a,$ff
-; add     a,l
+; add     l
 ; ld      l,a
-; adc     a,h
+; adc     h
 ; sub     l
 ; ld      h,a
 addw  hl,$ff
 addw  bc,$ff
 addw  de,$ff
 
-; add     a,l
-; ld      l,a
-; adc     a,h
-; sub     l
-; ld      h,a
-addw  hl,a
-addw  bc,a
-addw  de,a
-
 ; ld      a,reg
-; add     a,l
+; add     l
 ; ld      l,a
-; adc     a,h
+; adc     h
 ; sub     l
 ; ld      h,a
 addw  hl,reg
@@ -327,7 +318,24 @@ addw  de,reg
 Subtracts a 8-bit operand from the 16-bit register using only the `Accumulator`:
 
 ```asm
-TODO add listing
+; sub     l
+; cpl
+; inc     a
+; ld      l,a
+; ld      a,h
+; sbc     0
+; ld      h,a
+subw      hl,a
+
+; ld      a,l
+; sub     reg
+; ld      l,a
+; ld      a,h
+; sbc     0
+; ld      h,a
+subw      hl,reg
+subw      bc,reg
+subw      de,reg
 ```
 
 #### **retx**
