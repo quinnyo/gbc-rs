@@ -827,7 +827,7 @@ impl EntryStage {
             instructions.push(EntryToken::Instruction(inner.clone(), 0x80 + low.instruction_offset()));
             // ld low,a
             instructions.push(EntryToken::Instruction(inner.clone(), 0x4F + double.instruction_offset()));
-            // adc a,high
+            // adc high
             instructions.push(EntryToken::Instruction(inner.clone(), 0x88 + high.instruction_offset()));
             // sub low
             instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + low.instruction_offset()));
@@ -836,20 +836,45 @@ impl EntryStage {
 
         // subw hl|de|bc,a|b|c|d|e|h|l|$ff
         } else {
-            // ld a,low
-            instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + low.instruction_offset()));
+
 
             if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                // ld a,low
+                instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + low.instruction_offset()));
+
                 // sub expr
                 instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0xD6, expr));
 
             } else {
                 let reg = Self::parse_meta_byte_register(tokens)?;
                 if reg != Register::Accumulator {
+                    // ld a,low
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + low.instruction_offset()));
+
                     // sub reg
                     instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + reg.instruction_offset()));
+
+                } else {
+                    // TODO optimize out any ld a,a etc. instructions (not ld b,b though,since that is a breakpoint)
+
+                    // ld a,reg
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()));
+
+                    // sub low
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + low.instruction_offset()));
+
+                    // ccf
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x3F));
+
+                    // cpl
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x2F));
+
+                    // inc a
+                    instructions.push(EntryToken::Instruction(inner.clone(), 0x3C));
+
                 }
             }
+
 
             // ld low,a
             instructions.push(EntryToken::Instruction(inner.clone(), 0x4F + double.instruction_offset()));
@@ -3006,21 +3031,37 @@ mod test {
     #[test]
     fn test_meta_instruction_subw() {
         assert_eq!(tfe("subw hl,a"), vec![
-            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 7),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x90 + 5),
+
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x3F),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x2F),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x3C),
+
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
             EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
         ]);
-        assert_eq!(tfe("subw bc,a"), vec![
+        assert_eq!(tfe("subw hl,b"), vec![
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 5),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x90 + 0),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 32),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 4),
+            EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 32)
+        ]);
+        assert_eq!(tfe("subw bc,l"), vec![
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 1),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x90 + 5),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 0),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 0),
             EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x47 + 0)
         ]);
-        assert_eq!(tfe("subw de,a"), vec![
+        assert_eq!(tfe("subw de,l"), vec![
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 3),
+            EntryToken::Instruction(itk!(0, 4, "subw"), 0x90 + 5),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x4F + 16),
             EntryToken::Instruction(itk!(0, 4, "subw"), 0x78 + 2),
             EntryToken::InstructionWithArg(itk!(0, 4, "subw"), 0xDE, Expression::Value(ExpressionValue::Integer(0))),
