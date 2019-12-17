@@ -40,7 +40,7 @@ impl Register {
         }
     }
 
-    pub fn width(&self) -> usize {
+    pub fn byte_width(&self) -> usize {
         match self {
             Register::Accumulator => 1,
             Register::B => 1,
@@ -96,6 +96,63 @@ impl Register {
             Register::SP => 0,
         }
 
+    }
+
+    pub fn is_loadable(&self) -> bool {
+        match self {
+            Register::Accumulator => true,
+            Register::B => true,
+            Register::C => true,
+            Register::D => true,
+            Register::E => true,
+            Register::H => true,
+            Register::L => true,
+            Register::BC => true,
+            Register::DE => true,
+            Register::HL => true,
+            _ => false
+        }
+    }
+
+    pub fn to_load_op_code(&self, other: Option<Register>) -> u16 {
+        if let Some(reg) = other {
+            let base = match self {
+                Register::Accumulator => 0x78,
+                Register::B => 0x40,
+                Register::C => 0x48,
+                Register::D => 0x50,
+                Register::E => 0x58,
+                Register::H => 0x60,
+                Register::L => 0x68,
+                _ => unreachable!(),
+            };
+            let offset = match reg {
+                Register::Accumulator => 7,
+                Register::B => 0,
+                Register::C => 1,
+                Register::D => 2,
+                Register::E => 3,
+                Register::H => 4,
+                Register::L => 5,
+                _ => unreachable!()
+            };
+            base + offset
+
+        } else {
+            match self {
+                Register::Accumulator => 0x3E,
+                Register::B => 0x06,
+                Register::C => 0x0E,
+                Register::D => 0x16,
+                Register::E => 0x1E,
+                Register::H => 0x26,
+                Register::L => 0x2E,
+                Register::BC => 0x01,
+                Register::DE => 0x11,
+                Register::HL => 0x21,
+                _ => unreachable!(),
+            }
+        }
     }
 
 }

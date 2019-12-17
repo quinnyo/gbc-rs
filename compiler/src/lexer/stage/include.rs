@@ -31,6 +31,7 @@ lexer_token!(IncludeToken, IncludeType, (Debug, Eq, PartialEq, Clone), {
     TokenGroupClose(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<IncludeToken>>)),
+    LabelCall((Vec<Vec<IncludeToken>>)),
     Comma(()),
     Point(()),
     Colon(()),

@@ -132,6 +132,7 @@ lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
     StringLiteral(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<MacroToken>>)),
+    LabelCall((Vec<Vec<MacroToken>>)),
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     ForStatement((ForStatement<MacroToken>)),
     BlockStatement((BlockStatement<MacroToken>)),
@@ -168,6 +169,13 @@ impl From<IncludeToken> for MacroToken {
 
                 }).collect()
             ),
+            IncludeToken::LabelCall(inner, args) => MacroToken::LabelCall(
+                inner,
+                args.into_iter().map(|tokens| {
+                    tokens.into_iter().map(MacroToken::from).collect()
+
+                }).collect()
+            ),
             IncludeToken::Comma(inner) => MacroToken::Comma(inner),
             IncludeToken::Point(inner) => MacroToken::Point(inner),
             IncludeToken::Colon(inner) => MacroToken::Colon(inner),
@@ -193,6 +201,7 @@ pub struct MacroDefinition {
     file_index: Option<usize>,
     is_builtin: bool,
     is_exported: bool,
+    is_label: bool
 }
 
 impl MacroDefinition {
@@ -207,6 +216,7 @@ impl MacroDefinition {
             file_index: None,
             is_builtin: true,
             is_exported: true,
+            is_label: false
         }
     }
 }
@@ -292,7 +302,7 @@ impl MacroStage {
             0,
             macro_calls,
             &BUILTIN_MACRO_DEFS,
-            &user_macro_defs
+            &mut user_macro_defs
         )?;
 
         // Check for any left over parameter or token groups
@@ -394,7 +404,8 @@ impl MacroStage {
             },
             name: inner,
             is_builtin: false,
-            is_exported
+            is_exported,
+            is_label: false
         });
         Ok(())
 
@@ -522,12 +533,13 @@ impl MacroStage {
         expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
-        user_macro_defs: &[MacroDefinition],
+        user_macro_defs: &mut Vec<MacroDefinition>,
 
     ) -> Result<Vec<IncludeToken>, SourceError> {
 
         let mut tokens_without_macro_calls = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
+        let mut has_global_prefix = false;
         while let Some(token) = tokens.next() {
 
             if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::OpenParen, None) {
@@ -544,8 +556,46 @@ impl MacroStage {
                 } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), None) {
                     def
 
-                // Not found
+                // Parent Label with Optional Arguments or undefined Macro
                 } else {
+
+                    // Collect raw argument tokens
+                    let mut argument_tokens = Vec::with_capacity(8);
+                    while let Some(token) = tokens.next() {
+                        if token.is(IncludeType::CloseParen) {
+                            argument_tokens.push(token);
+                            break;
+
+                        } else {
+                            argument_tokens.push(token);
+                        }
+                    }
+
+                    // Check for label definition and re-insert arguments tokens into stream
+                    if tokens.peek_is(IncludeType::Colon, None) {
+                        tokens_without_macro_calls.push(token.clone());
+                        tokens_without_macro_calls.append(&mut argument_tokens);
+
+                        // Define callable label
+                        let inner = token.into_inner();
+                        user_macro_defs.push(MacroDefinition {
+                            parameters: Vec::new(),
+                            body: Vec::new(),
+                            file_index: if has_global_prefix {
+                                None
+
+                            } else {
+                                Some(inner.file_index)
+                            },
+                            name: inner,
+                            is_builtin: false,
+                            is_exported: has_global_prefix,
+                            is_label: true
+                        });
+                        continue;
+                    }
+
+                    // Not found
                     let error = token.error(format!("Invocation of undefined macro \"{}\"", token.symbol()));
                     if let Some(def) = Self::get_macro_by_name_all(&user_macro_defs, token.symbol()) {
                         return Err(error.with_reference(&def.name, "A non-global macro with the same name is defined"));
@@ -556,7 +606,7 @@ impl MacroStage {
                 };
 
                 let arg_tokens = Self::parse_macro_call_arguments(&mut tokens)?;
-                if arg_tokens.len() != macro_def.parameters.len() {
+                if !macro_def.is_label && arg_tokens.len() != macro_def.parameters.len() {
                     return Err(token.error(format!(
                         "Incorrect number of parameters for invocation of macro \"{}\", expected {} parameter(s) but got {}.",
                         token.symbol(),
@@ -572,8 +622,23 @@ impl MacroStage {
                     arguments: arg_tokens.clone()
                 });
 
+                // Replace callable labels
+                if macro_def.is_label {
+                    tokens_without_macro_calls.push(
+                        Self::parse_label_call(
+                            token.into_inner(),
+                            arg_tokens,
+                            macro_call_id,
+                            expansion_depth,
+                            macro_calls,
+                            builtin_macro_defs,
+                            user_macro_defs
+                        )?
+                    );
+                    *macro_call_id += 1;
+
                 // Replace builtin calls
-                if macro_def.is_builtin {
+                } else if macro_def.is_builtin {
                     tokens_without_macro_calls.push(
                         Self::parse_builtin_call(
                             token.into_inner(),
@@ -629,10 +694,53 @@ impl MacroStage {
                 }
 
             } else {
+                has_global_prefix = token.is_symbol(Symbol::GLOBAL);
                 tokens_without_macro_calls.push(token);
             }
         }
         Ok(tokens_without_macro_calls)
+    }
+
+    fn parse_label_call(
+        inner: InnerToken,
+        arg_tokens: Vec<Vec<IncludeToken>>,
+        macro_call_id: &mut usize,
+        expansion_depth: usize,
+        macro_calls: &mut Vec<MacroCall>,
+        builtin_macro_defs: &[MacroDefinition],
+        user_macro_defs: &mut Vec<MacroDefinition>,
+
+    ) -> Result<IncludeToken, SourceError> {
+
+        let mut arguments = Vec::with_capacity(arg_tokens.len());
+        for tokens in arg_tokens {
+
+            let mut expanded = Vec::with_capacity(tokens.len() * 2);
+            for t in tokens {
+                // Expand token groups when calling builtin macros
+                // This allows us to have a "BYTESIZE" / "CYCLES" builtin
+                // macros
+                if let IncludeToken::TokenGroup(_, mut inner) = t {
+                    expanded.append(&mut inner);
+
+                } else {
+                    expanded.push(t);
+                }
+            }
+
+            // Recursively expand and parse all arguments
+            // so that MAX(MIN(FLOOR())) results in 3 BuiltinCalls
+            arguments.push(Self::expand_macro_calls(
+                expanded,
+                macro_call_id,
+                expansion_depth,
+                macro_calls,
+                builtin_macro_defs,
+                user_macro_defs
+            )?);
+        }
+
+        Ok(IncludeToken::LabelCall(inner, arguments))
     }
 
     fn parse_builtin_call(
@@ -642,7 +750,7 @@ impl MacroStage {
         expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
-        user_macro_defs: &[MacroDefinition],
+        user_macro_defs: &mut Vec<MacroDefinition>,
 
     ) -> Result<IncludeToken, SourceError> {
 
@@ -1029,7 +1137,8 @@ mod test {
                 body: $body,
                 file_index: Some($file),
                 is_builtin: false,
-                is_exported: false
+                is_exported: false,
+                is_label: false
             }
         }
     }
@@ -1042,7 +1151,8 @@ mod test {
                 body: $body,
                 file_index: None,
                 is_builtin: false,
-                is_exported: true
+                is_exported: true,
+                is_label: false
             }
         }
     }
@@ -1322,8 +1432,70 @@ mod test {
         ]);
     }
 
-    // Builtin Macro Calls ----------------------------------------------------
+    // Optional Label Arguments -----------------------------------------------
+    #[test]
+    fn test_macro_passthrough_parent_label_with_arguments() {
+        let lexer = macro_lex("parent_label(bc, de, hl):\nparent_label(1, 2, 3)");
+        assert_eq!(lexer.tokens, vec![
+           MacroToken::Name(
+                itk!(0, 12, "parent_label")
+           ),
+           MacroToken::OpenParen(
+                itk!(12, 13, "(")
+           ),
+           MacroToken::Register(
+                itk!(13, 15, "bc")
+           ),
+           MacroToken::Comma(
+                itk!(15, 16, ",")
+           ),
+           MacroToken::Register(
+                itk!(17, 19, "de")
+           ),
+           MacroToken::Comma(
+                itk!(19, 20, ",")
+           ),
+           MacroToken::Register(
+                itk!(21, 23, "hl")
+           ),
+           MacroToken::CloseParen(
+                itk!(23, 24, ")")
+           ),
+           MacroToken::Colon(
+                itk!(24, 25, ":")
+           ),
+           MacroToken::LabelCall(
+                itk!(26, 38, "parent_label"),
+                vec![
+                    vec![MacroToken::NumberLiteral(
+                       itk!(39, 40, "1")
+                    )],
+                    vec![MacroToken::NumberLiteral(
+                       itk!(42, 43, "2")
+                    )],
+                    vec![MacroToken::NumberLiteral(
+                       itk!(45, 46, "3")
+                    )]
+                ]
+           )
+        ]);
+        assert_eq!(lexer.macro_calls, vec![
+           mcall!(0, itk!(26, 38, "parent_label"), vec![
+                vec![IncludeToken::NumberLiteral(
+                   itk!(39, 40, "1")
+                )],
+                vec![IncludeToken::NumberLiteral(
+                   itk!(42, 43, "2")
+                )],
+                vec![IncludeToken::NumberLiteral(
+                   itk!(45, 46, "3")
+                )]
+            ])
+        ]);
+        assert_eq!(lexer.macro_calls_count(), 1);
+    }
 
+    // Builtin Macro Calls ----------------------------------------------------
     #[test]
     fn test_macro_call_no_args() {
         let lexer = macro_lex("DBG()");

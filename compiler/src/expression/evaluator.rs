@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 
 // External Dependencies ------------------------------------------------------
+use gb_cpu::Register;
 use ordered_float::OrderedFloat;
 
 
@@ -68,6 +69,7 @@ pub struct EvaluatorContext {
     raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,
     label_addresses: HashMap<usize, usize>,
     raw_labels: HashMap<(Symbol, usize), InnerToken>,
+    callable_labels: HashMap<usize, (InnerToken, Option<Vec<Register>>)>,
     inactive_labels: HashMap<usize, InnerToken>,
     relative_address_offset: i32,
     linter_enabled: bool
@@ -82,6 +84,7 @@ impl EvaluatorContext {
             raw_constants: HashMap::with_capacity(512),
             label_addresses: HashMap::with_capacity(512),
             raw_labels: HashMap::with_capacity(512),
+            callable_labels: HashMap::with_capacity(64),
             inactive_labels: HashMap::with_capacity(64),
             relative_address_offset: 0,
             linter_enabled
@@ -187,12 +190,20 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn declare_label(&mut self, inner: &InnerToken, index: usize, active: bool) {
-        self.raw_labels.insert((inner.value.clone(), index), inner.clone());
+    pub fn declare_label(&mut self, inner: &InnerToken, label_id: usize, args: Option<Vec<Register>>, active: bool) {
+
+        // Record labels which
+        if args.is_some() {
+            self.callable_labels.insert(label_id, (inner.clone(), args));
+        }
+
         // Record labels which exists but are in branches which are not active
         if !active {
-            self.inactive_labels.insert(index, inner.clone());
+            self.inactive_labels.insert(label_id, inner.clone());
         }
+
+        self.raw_labels.insert((inner.value.clone(), label_id), inner.clone());
+
     }
 
     pub fn update_label_address(&mut self, label_id: usize, address: usize) {
@@ -255,10 +266,11 @@ impl EvaluatorContext {
         expression: &DataExpression,
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
+        is_call_instruction: bool,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
-        self.inner_dyn_resolve(expression, usage, address_offset, from_file_index)
+        self.inner_dyn_resolve(expression, usage, address_offset, is_call_instruction, from_file_index)
     }
 
     pub fn resolve_opt_dyn_expression(
@@ -270,10 +282,57 @@ impl EvaluatorContext {
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            Ok(Some(self.inner_dyn_resolve(expr, usage, address_offset, from_file_index)?))
+            Ok(Some(self.inner_dyn_resolve(expr, usage, address_offset, false, from_file_index)?))
 
         } else {
             Ok(None)
+        }
+    }
+
+    pub fn resolve_call_signature(
+        &self,
+        expression: &DataExpression,
+        usage: &mut UsageInformation
+
+    ) -> Result<Vec<(Register, Expression)>, SourceError> {
+        // Expression must be a valid LabelCall here
+        if let Expression::LabelCall { inner, id, args, .. } = expression {
+            if let Some((outer, signature)) = self.callable_labels.get(id) {
+
+                if self.linter_enabled {
+                    usage.use_label(*id);
+                }
+
+                if let Some(signature) = signature {
+                    if signature.len() != args.len() {
+                        return Err(outer.error(
+                            "Invalid number of arguments for label call".to_string()
+
+                        ).with_reference(inner, format!("Label takes {} arguments, but {} were supplied", signature.len(), args.len())));
+
+                    } else {
+                        Ok(signature.iter().zip(args.iter()).map(|(reg, expr)| {
+                            (reg.clone(), expr.clone())
+
+                        }).collect())
+                    }
+
+                } else if !args.is_empty() {
+                    return Err(outer.error(
+                        "Invalid number of arguments for label call".to_string()
+
+                    ).with_reference(inner, "Label takes no arguments".to_string()));
+
+                } else {
+                    Ok(Vec::new())
+                }
+
+            } else {
+                panic!("Invalid callable when resolving signature!");
+            }
+
+        } else {
+            panic!("Invalid callable when resolving signature!");
         }
     }
 
@@ -282,17 +341,18 @@ impl EvaluatorContext {
         expression: &Expression,
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
+        is_call_instruction: bool,
         from_file_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
         match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_dyn_resolve(left, usage, address_offset, from_file_index)?;
-                let right = self.inner_dyn_resolve(right, usage, address_offset, from_file_index)?;
+                let left = self.inner_dyn_resolve(left, usage, address_offset, false, from_file_index)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, false, from_file_index)?;
                 Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
-                let right = self.inner_dyn_resolve(right, usage, address_offset, from_file_index)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, false, from_file_index)?;
                 Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
@@ -337,6 +397,16 @@ impl EvaluatorContext {
                         if self.linter_enabled {
                             usage.use_label(*id);
                         }
+
+                        if let Some((inner, _)) = self.callable_labels.get(id) {
+                            if is_call_instruction {
+                                return Err(outer.error(
+                                    "Reference to call-only label".to_string()
+
+                                ).with_reference(inner, "Label is declared as callable and must be invoked with arguments".to_string()));
+                            }
+                        }
+
                         if let Some(addr) = self.label_addresses.get(id) {
                             ExpressionResult::Integer(*addr as i32)
 
@@ -359,11 +429,28 @@ impl EvaluatorContext {
                         arg,
                         usage,
                         address_offset,
+                        false,
                         from_file_index
                     )?);
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
-            }
+            },
+            Expression::LabelCall { inner, id, .. } => {
+                let outer = inner;
+                if let Some(addr) = self.label_addresses.get(id) {
+                    Ok(ExpressionResult::Integer(*addr as i32))
+
+                } else if let Some(inner) = self.inactive_labels.get(id) {
+                    return Err(outer.error(
+                        "Reference to unreachable label".to_string()
+
+                    ).with_reference(inner, "Label is declared inside currently inactive IF branch".to_string()));
+
+                } else {
+                    panic!("Invalid label ID when resolving expression!");
+                }
+            },
+            _ => unreachable!()
         }
     }
 
@@ -467,7 +554,11 @@ impl EvaluatorContext {
                     )?);
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
-            }
+            },
+            Expression::LabelCall { .. } => {
+                unreachable!("Invalid constant expression containing LabelCall");
+            },
+            _ => unreachable!()
         }
     }
 

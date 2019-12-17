@@ -1,4 +1,5 @@
 // External Dependencies ------------------------------------------------------
+use gb_cpu::Register;
 use ordered_float::OrderedFloat;
 
 
@@ -35,6 +36,16 @@ pub enum Expression {
         inner: InnerToken,
         name: Symbol,
         args: Vec<Expression>
+    },
+    LabelCall {
+        inner: InnerToken,
+        id: usize,
+        name: Symbol,
+        args: Vec<Expression>
+    },
+    RegisterArgument {
+        inner: InnerToken,
+        reg: Register
     }
 }
 
@@ -44,7 +55,23 @@ impl Expression {
             Expression::Binary { left, right, .. } => right.is_constant() && left.is_constant(),
             Expression::Unary { right, .. } => right.is_constant(),
             Expression::Value(value) => value.is_constant(),
-            Expression::BuiltinCall { args, .. } => args.iter().all(Expression::is_constant)
+            Expression::BuiltinCall { args, .. } => args.iter().all(Expression::is_constant),
+            Expression::LabelCall { .. } => false,
+            Expression::RegisterArgument { .. } => true
+        }
+    }
+
+    pub fn is_register(&self) -> bool {
+        match self {
+            Expression::RegisterArgument { .. } => true,
+            _ => false
+        }
+    }
+
+    pub fn is_call(&self) -> bool {
+        match self {
+            Expression::LabelCall { .. } => true,
+            _ => false
         }
     }
 

@@ -97,7 +97,7 @@ impl Logger {
     }
 
     pub fn clearline(&mut self) {
-        self.output.pop();;
+        self.output.pop();
     }
 
     pub fn to_string(&self) -> String {
