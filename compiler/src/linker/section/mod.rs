@@ -660,7 +660,7 @@ impl Section {
         // Check for final gap between last range and end of section
         if next_address != self.end_address || current_range_bytes > 0 {
             if current_range_bytes > 0 || current_name.is_some() {
-                ranges.push((true, current_name.clone(), next_address - current_range_bytes, next_address));
+                ranges.push((true, current_name, next_address - current_range_bytes, next_address));
             }
             if next_address < self.end_address + 1{
                 ranges.push((false, None, next_address, self.end_address + 1));

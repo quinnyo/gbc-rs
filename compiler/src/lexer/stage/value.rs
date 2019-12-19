@@ -425,8 +425,7 @@ impl ValueStage {
     ) -> Result<ValueToken, SourceError> {
 
         // Parse optional label arguments
-        let mut argument_list = None;
-        if tokens.peek_is(MacroTokenType::OpenParen, None) {
+        let argument_list = if tokens.peek_is(MacroTokenType::OpenParen, None) {
             tokens.expect(MacroTokenType::OpenParen, None, "when parsing label definition")?;
 
             let mut arguments = Vec::with_capacity(2);
@@ -454,8 +453,11 @@ impl ValueStage {
                     return Err(token.error("Only registers are allowed inside label argument".to_string()));
                 }
             }
-            argument_list = Some(arguments);
-        }
+            Some(arguments)
+
+        } else {
+            None
+        };
 
         if argument_list.is_some() || tokens.peek_is(MacroTokenType::Colon, None) {
 

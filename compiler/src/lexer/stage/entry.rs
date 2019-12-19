@@ -671,7 +671,7 @@ impl EntryStage {
                     // inc a
                     EntryToken::Instruction(inner.clone(), 0x3C),
                     // ld [someLabel],a
-                    EntryToken::InstructionWithArg(inner.clone(), 0xEA, expr),
+                    EntryToken::InstructionWithArg(inner, 0xEA, expr),
                 ]
             },
             Symbol::Decx => {
@@ -684,7 +684,7 @@ impl EntryStage {
                     // dec a
                     EntryToken::Instruction(inner.clone(), 0x3D),
                     // ld [someLabel],a
-                    EntryToken::InstructionWithArg(inner.clone(), 0xEA, expr),
+                    EntryToken::InstructionWithArg(inner, 0xEA, expr),
                 ]
             },
 
@@ -773,7 +773,7 @@ impl EntryStage {
                     // push de
                     EntryToken::Instruction(inner.clone(), 0xD5),
                     // push hl
-                    EntryToken::Instruction(inner.clone(), 0xE5)
+                    EntryToken::Instruction(inner, 0xE5)
                 ]
             },
             Symbol::Popx => {
@@ -785,7 +785,7 @@ impl EntryStage {
                     // pop bc
                     EntryToken::Instruction(inner.clone(), 0xC1),
                     // pop af
-                    EntryToken::Instruction(inner.clone(), 0xF1)
+                    EntryToken::Instruction(inner, 0xF1)
                 ]
             },
 
@@ -839,7 +839,7 @@ impl EntryStage {
             // sub low
             instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + low.instruction_offset()));
             // ld high,a
-            instructions.push(EntryToken::Instruction(inner.clone(), 0x47 + double.instruction_offset()));
+            instructions.push(EntryToken::Instruction(inner, 0x47 + double.instruction_offset()));
 
         // subw hl|de|bc,a|b|c|d|e|h|l|$ff
         } else {
@@ -892,7 +892,7 @@ impl EntryStage {
             instructions.push(EntryToken::InstructionWithArg(inner.clone(), 0xDE, Expression::Value(ExpressionValue::Integer(0))));
 
             // ld high,a
-            instructions.push(EntryToken::Instruction(inner.clone(), 0x47 + double.instruction_offset()));
+            instructions.push(EntryToken::Instruction(inner, 0x47 + double.instruction_offset()));
 
         }
 
@@ -936,13 +936,13 @@ impl EntryStage {
                     Ok(match shifts {
                         1 => vec![
                             // srl / sla a
-                            EntryToken::Instruction(inner.clone(), shift_op)
+                            EntryToken::Instruction(inner, shift_op)
                         ],
                         2 => vec![
                             // srl / sla a
                             EntryToken::Instruction(inner.clone(), shift_op),
                             // srl / sla a
-                            EntryToken::Instruction(inner.clone(), shift_op)
+                            EntryToken::Instruction(inner, shift_op)
                         ],
                         3 => vec![
                             // rrca / rlca
@@ -950,13 +950,13 @@ impl EntryStage {
                             // rrca / rlca
                             EntryToken::Instruction(inner.clone(), acc_shift),
                             // rrca / rlca
-                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            EntryToken::Instruction(inner, acc_shift),
                             // and
                             and_instruction
                         ],
                         4 => vec![
                             // swap a
-                            EntryToken::Instruction(inner.clone(), 311),
+                            EntryToken::Instruction(inner, 311),
                             // and
                             and_instruction
                         ],
@@ -964,7 +964,7 @@ impl EntryStage {
                             // swap a
                             EntryToken::Instruction(inner.clone(), 311),
                             // rrca / rlca
-                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            EntryToken::Instruction(inner, acc_shift),
                             // and
                             and_instruction
                         ],
@@ -974,7 +974,7 @@ impl EntryStage {
                             // rrca / rlca
                             EntryToken::Instruction(inner.clone(), acc_shift),
                             // rrca / rlca
-                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            EntryToken::Instruction(inner, acc_shift),
                             // and
                             and_instruction
                         ],
@@ -986,7 +986,7 @@ impl EntryStage {
                             // rrca / rlca
                             EntryToken::Instruction(inner.clone(), acc_shift),
                             // rrca / rlca
-                            EntryToken::Instruction(inner.clone(), acc_shift),
+                            EntryToken::Instruction(inner, acc_shift),
                             // and
                             and_instruction
                         ],
@@ -1284,7 +1284,7 @@ impl EntryStage {
                     MetaLDXASourceMemoryLookup::MemoryLookup(source) => {
                         vec![
                             EntryToken::InstructionWithArg(inner.clone(), 0xFA, source),
-                            EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                            EntryToken::InstructionWithArg(inner, 0xEA, target)
                         ]
                     },
 
@@ -1294,14 +1294,14 @@ impl EntryStage {
                             vec![
                                 // ld a,[hli]
                                 EntryToken::Instruction(inner.clone(), 0x2A),
-                                EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                                EntryToken::InstructionWithArg(inner, 0xEA, target)
                             ]
 
                         } else {
                             vec![
                                 // ld a,[hld]
                                 EntryToken::Instruction(inner.clone(), 0x3A),
-                                EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                                EntryToken::InstructionWithArg(inner, 0xEA, target)
                             ]
                         }
                     },
@@ -1310,7 +1310,7 @@ impl EntryStage {
                     MetaLDXASourceMemoryLookup::Expression(expr) => {
                         vec![
                             EntryToken::InstructionWithArg(inner.clone(), 0x3E, expr),
-                            EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                            EntryToken::InstructionWithArg(inner, 0xEA, target)
                         ]
                     },
 
@@ -1325,13 +1325,13 @@ impl EntryStage {
                         if reg != Register::Accumulator {
                             vec![
                                 EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()),
-                                EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                                EntryToken::InstructionWithArg(inner, 0xEA, target)
                             ]
 
                         // ldxa [someLabel],a
                         } else {
                             vec![
-                                EntryToken::InstructionWithArg(inner.clone(), 0xEA, target)
+                                EntryToken::InstructionWithArg(inner, 0xEA, target)
                             ]
                         }
                     }
@@ -1370,13 +1370,13 @@ impl EntryStage {
                         if reg != Register::Accumulator {
                             vec![
                                 EntryToken::InstructionWithArg(inner.clone(), 0xFA, target),
-                                EntryToken::Instruction(inner.clone(), 0x47 + reg.instruction_offset_into_a())
+                                EntryToken::Instruction(inner, 0x47 + reg.instruction_offset_into_a())
                             ]
 
                         // ldxa a,[someLabel]
                         } else {
                             vec![
-                                EntryToken::InstructionWithArg(inner.clone(), 0xFA, target)
+                                EntryToken::InstructionWithArg(inner, 0xFA, target)
                             ]
                         }
                     },
@@ -1409,14 +1409,14 @@ impl EntryStage {
                                 vec![
                                     // ld a,[hli]
                                     EntryToken::Instruction(inner.clone(), 0x2A),
-                                    EntryToken::Instruction(inner.clone(), op)
+                                    EntryToken::Instruction(inner, op)
                                 ]
 
                             } else {
                                 vec![
                                     // ld a,[hld]
                                     EntryToken::Instruction(inner.clone(), 0x3A),
-                                    EntryToken::Instruction(inner.clone(), op)
+                                    EntryToken::Instruction(inner, op)
                                 ]
                             }
 
@@ -1424,13 +1424,13 @@ impl EntryStage {
                         } else if name == Register::HLIncrement {
                             vec![
                                 // ld a,[hli]
-                                EntryToken::Instruction(inner.clone(), 0x2A)
+                                EntryToken::Instruction(inner, 0x2A)
                             ]
 
                         } else {
                             vec![
                                 // ld a,[hld]
-                                EntryToken::Instruction(inner.clone(), 0x3A)
+                                EntryToken::Instruction(inner, 0x3A)
                             ]
                         }
                     }
@@ -1472,7 +1472,7 @@ impl EntryStage {
                         if reg != Register::Accumulator {
                             vec![
                                 // ld a,reg
-                                EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()),
+                                EntryToken::Instruction(inner, 0x78 + reg.instruction_offset()),
                                 target_instruction
                             ]
 
@@ -1498,7 +1498,7 @@ impl EntryStage {
                         // ld      h,[hl]
                         EntryToken::Instruction(inner.clone(), 0x66),
                         // ld      l,a
-                        EntryToken::Instruction(inner.clone(), 0x6F),
+                        EntryToken::Instruction(inner, 0x6F),
                     ]
 
                 // bc|de|hl,[someLabel]

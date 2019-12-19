@@ -33,6 +33,7 @@ pub struct UsageInformation {
 }
 
 impl UsageInformation {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             constants: HashMap::new(),
@@ -305,10 +306,10 @@ impl EvaluatorContext {
 
                 if let Some(signature) = signature {
                     if signature.len() != args.len() {
-                        return Err(outer.error(
+                        Err(outer.error(
                             "Invalid number of arguments for label call".to_string()
 
-                        ).with_reference(inner, format!("Label takes {} arguments, but {} were supplied", signature.len(), args.len())));
+                        ).with_reference(inner, format!("Label takes {} arguments, but {} were supplied", signature.len(), args.len())))
 
                     } else {
                         Ok(signature.iter().zip(args.iter()).map(|(reg, expr)| {
@@ -318,10 +319,10 @@ impl EvaluatorContext {
                     }
 
                 } else if !args.is_empty() {
-                    return Err(outer.error(
+                    Err(outer.error(
                         "Invalid number of arguments for label call".to_string()
 
-                    ).with_reference(inner, "Label takes no arguments".to_string()));
+                    ).with_reference(inner, "Label takes no arguments".to_string()))
 
                 } else {
                     Ok(Vec::new())
@@ -441,10 +442,10 @@ impl EvaluatorContext {
                     Ok(ExpressionResult::Integer(*addr as i32))
 
                 } else if let Some(inner) = self.inactive_labels.get(id) {
-                    return Err(outer.error(
+                    Err(outer.error(
                         "Reference to unreachable label".to_string()
 
-                    ).with_reference(inner, "Label is declared inside currently inactive IF branch".to_string()));
+                    ).with_reference(inner, "Label is declared inside currently inactive IF branch".to_string()))
 
                 } else {
                     panic!("Invalid label ID when resolving expression!");
