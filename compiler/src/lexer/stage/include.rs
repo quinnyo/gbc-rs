@@ -330,10 +330,10 @@ impl IncludeStage {
                     Symbol::DS8 | Symbol::EQU | Symbol::FOR |
                     Symbol::DS16 | Symbol::BANK |
                     Symbol::THEN | Symbol::ELSE | Symbol::ENDIF |
-                    Symbol::MACRO | Symbol::USING | Symbol::BLOCK | Symbol::STRUCT |
+                    Symbol::MACRO | Symbol::USING | Symbol::BLOCK | Symbol::NAMESPACE |
                     Symbol::ENDFOR | Symbol::REPEAT | Symbol::BINARY | Symbol::DEFAULT | Symbol::SECTION | Symbol::GLOBAL |
                     Symbol::INCLUDE | Symbol::VOLATILE |
-                    Symbol::ENDMACRO | Symbol::ENDBLOCK | Symbol::ENDSTRUCT => {
+                    Symbol::ENDMACRO | Symbol::ENDBLOCK | Symbol::ENDNAMESPACE => {
                         Ok(Some(IncludeToken::Reserved(name)))
                     },
                     // ROM Segments
@@ -451,15 +451,7 @@ impl IncludeStage {
                 Ok(Some(IncludeToken::TokenGroup(index_token, tokens)))
             },
             // Operator
-            '-'  => {
-                if let Some('>') = gen.peek() {
-                    let t = gen.collect_double();
-                    Ok(Some(IncludeToken::Member(t)))
-
-                } else {
-                    Ok(Some(IncludeToken::Operator(gen.collect_single())))
-                }
-            },
+            '-'  => Ok(Some(IncludeToken::Operator(gen.collect_single()))),
             '!' | '&' | '*' | '/' | '=' | '|' | '+' | '~' | '<' | '>' | '^' => {
                 Ok(Some(IncludeToken::Operator(gen.collect_single())))
             },
@@ -471,7 +463,14 @@ impl IncludeStage {
                 Ok(None)
             },
             // Punctation
-            ':' => Ok(Some(IncludeToken::Colon(gen.collect_single()))),
+            ':' => {
+                if let Some(':') = gen.peek() {
+                    Ok(Some(IncludeToken::Member(gen.collect_double())))
+
+                } else {
+                    Ok(Some(IncludeToken::Colon(gen.collect_single())))
+                }
+            },
             '.' => Ok(Some(IncludeToken::Point(gen.collect_single()))),
             ',' => Ok(Some(IncludeToken::Comma(gen.collect_single()))),
             '(' => Ok(Some(IncludeToken::OpenParen(gen.collect_single()))),
@@ -921,8 +920,8 @@ mod test {
             Reserved,
             "DB", "DW", "BW", "IF", "TO", "IN",
             "FOR", "DS8", "DS16", "EQU", "BANK", "THEN", "ELSE",
-            "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "GLOBAL", "STRUCT",
-            "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "ENDBLOCK", "ENDSTRUCT"
+            "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "GLOBAL", "NAMESPACE",
+            "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "ENDBLOCK", "ENDNAMESPACE"
         );
     }
 
@@ -1045,6 +1044,8 @@ mod test {
         assert_eq!(include_lexer(","), vec![tk!(Comma, 0, 1, ",")]);
         assert_eq!(include_lexer("."), vec![tk!(Point, 0, 1, ".")]);
         assert_eq!(include_lexer(":"), vec![tk!(Colon, 0, 1, ":")]);
+        assert_eq!(include_lexer("::"), vec![tk!(Member, 0, 2, "::")]);
+        assert_eq!(include_lexer(":::"), vec![tk!(Member, 0, 2, "::"), tk!(Colon, 2, 3, ":")]);
         assert_eq!(include_lexer("()"), vec![
             tk!(OpenParen, 0, 1, "("),
             tk!(CloseParen, 1, 2, ")")
@@ -1068,7 +1069,6 @@ mod test {
             tk!(Operator, 11, 12, "/"),
             tk!(Operator, 12, 13, "^"),
         ]);
-        assert_eq!(include_lexer("->"), vec![tk!(Member, 0, 2, "->")]);
     }
 
     #[test]

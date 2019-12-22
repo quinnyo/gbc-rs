@@ -17,13 +17,13 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 // Modules --------------------------------------------------------------------
 mod label_resolver;
-use self::label_resolver::{LabelResolver, ParentLabelIndex, ChildLabelIndex, StructIndex};
+use self::label_resolver::{LabelResolver, ParentLabelIndex, ChildLabelIndex, NamespaceIndex};
 
 
 // Types ----------------------------------------------------------------------
 type MacroCallIndex = Option<usize>;
-type StructMap = HashMap<StructIndex, (InnerToken, HashMap<String, (InnerToken, usize)>)>;
-type StuctData<'a> = (StructIndex, bool, &'a InnerToken);
+type NamespaceMap = HashMap<NamespaceIndex, (InnerToken, HashMap<String, (InnerToken, usize)>)>;
+type NamespaceData<'a> = (NamespaceIndex, bool, &'a InnerToken);
 
 
 // Value Specific Tokens ------------------------------------------------------
@@ -93,13 +93,13 @@ impl LexerStage for ValueStage {
     ) -> Result<Vec<Self::Output>, SourceError> {
         let mut parent_labels: HashMap<ParentLabelIndex, (InnerToken, usize)> = HashMap::with_capacity(512);
         let mut parent_labels_names: Vec<Symbol> = Vec::with_capacity(64);
-        let mut structs: StructMap = HashMap::with_capacity(16);
+        let mut namespaces: NamespaceMap = HashMap::with_capacity(16);
         let mut unique_label_id = 0;
         let mut tokens = Self::parse_tokens(
             &mut parent_labels,
             &mut parent_labels_names,
             &mut unique_label_id,
-            &mut structs,
+            &mut namespaces,
             false,
             tokens,
             true,
@@ -117,11 +117,11 @@ impl ValueStage {
         parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
         parent_labels_names: &mut Vec<Symbol>,
         unique_label_id: &mut usize,
-        structs: &mut StructMap,
+        namespaces: &mut NamespaceMap,
         is_argument: bool,
         tokens: Vec<MacroToken>,
         resolve_labels: bool,
-        struct_data: Option<StuctData>
+        namespace_data: Option<NamespaceData>
 
     ) -> Result<Vec<ValueToken>, SourceError> {
 
@@ -131,12 +131,12 @@ impl ValueStage {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
 
-            let mut is_global_struct = false;
+            let mut is_global_namespace = false;
             let token = if token.is_symbol(Symbol::GLOBAL) {
-                // Handle global struct declarations
-                if tokens.peek_is(MacroTokenType::StructStatement, None) {
-                    let st = tokens.expect(MacroTokenType::StructStatement, None, "when parsing GLOBAL declaration")?;
-                    is_global_struct = true;
+                // Handle global namespace declarations
+                if tokens.peek_is(MacroTokenType::NamespaceStatement, None) {
+                    let st = tokens.expect(MacroTokenType::NamespaceStatement, None, "when parsing GLOBAL declaration")?;
+                    is_global_namespace = true;
                     st
 
                 } else {
@@ -165,36 +165,36 @@ impl ValueStage {
                 MacroToken::CloseBracket(inner) => ValueToken::CloseBracket(inner),
 
                 // Convert Statements
-                MacroToken::StructStatement(outer, st) => {
+                MacroToken::NamespaceStatement(outer, st) => {
 
-                    let (is_global_struct, inner) = if let Some((_, is_global, parent)) = struct_data {
-                        // Concatenate existing struct path
+                    let (is_global_namespace, inner) = if let Some((_, is_global, parent)) = namespace_data {
+                        // Concatenate existing namespace path
                         let mut inner = outer.clone();
-                        inner.value = format!("{}->{}", parent.value, st.name.inner().value).into();
+                        inner.value = format!("{}::{}", parent.value, st.name.inner().value).into();
                         (is_global, inner)
 
                     } else {
-                        (is_global_struct, st.name.inner().clone())
+                        (is_global_namespace, st.name.inner().clone())
                     };
 
-                    // Insert new top level structs
-                    let struct_id = LabelResolver::struct_id(&inner, false, if !is_global_struct {
+                    // Insert new top level namespaces
+                    let namespace_id = LabelResolver::namespace_id(&inner, false, if !is_global_namespace {
                         Some(inner.file_index)
 
                     } else {
                         None
                     });
 
-                    if let Some((existing, _)) = structs.get(&struct_id) {
+                    if let Some((existing, _)) = namespaces.get(&namespace_id) {
                         return Err(inner.error(format!(
-                            "A struct with the name \"{}\" was already defined.",
+                            "A namespace with the name \"{}\" was already defined.",
                             inner.value
 
-                        )).with_reference(existing, "Original definition of struct was"));
+                        )).with_reference(existing, "Original definition of namespace was"));
 
                     } else {
-                        structs.insert(
-                            struct_id.clone(),
+                        namespaces.insert(
+                            namespace_id.clone(),
                             (inner.clone(), HashMap::with_capacity(8))
                         );
                     }
@@ -203,11 +203,11 @@ impl ValueStage {
                         parent_labels,
                         parent_labels_names,
                         unique_label_id,
-                        structs,
+                        namespaces,
                         false,
                         st.body,
                         false,
-                        Some((struct_id, is_global_struct, &inner))
+                        Some((namespace_id, is_global_namespace, &inner))
                     )?;
                     value_tokens.append(&mut body);
                     continue;
@@ -216,24 +216,24 @@ impl ValueStage {
                     let mut value_branches = Vec::with_capacity(branches.len());
                     for branch in branches {
                         value_branches.push(branch.into_other(|tokens| {
-                            Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, tokens, false, None)
+                            Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, tokens, false, None)
                         })?);
                     }
                     ValueToken::IfStatement(inner, value_branches)
                 },
                 MacroToken::ForStatement(inner, for_statement) => {
-                    let mut binding = Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, vec![*for_statement.binding], true, None)?;
+                    let mut binding = Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, vec![*for_statement.binding], true, None)?;
                     ValueToken::ForStatement(inner, ForStatement {
                         binding: Box::new(binding.remove(0)),
-                        from: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, for_statement.from, true, None)?,
-                        to: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, for_statement.to, true, None)?,
-                        body: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, for_statement.body, false, None)?
+                        from: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, for_statement.from, true, None)?,
+                        to: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, for_statement.to, true, None)?,
+                        body: Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, for_statement.body, false, None)?
                     })
                 },
                 MacroToken::BlockStatement(inner, block) => {
                     ValueToken::BlockStatement(inner, match block {
-                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, body, false, None)?),
-                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, structs, false, body, false, None)?)
+                        BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, body, false, None)?),
+                        BlockStatement::Volatile(body) => BlockStatement::Volatile(Self::parse_tokens(parent_labels, parent_labels_names, unique_label_id, namespaces, false, body, false, None)?)
                     })
                 },
 
@@ -257,7 +257,7 @@ impl ValueStage {
                             parent_labels,
                             parent_labels_names,
                             unique_label_id,
-                            structs,
+                            namespaces,
                             true,
                             tokens,
                             true,
@@ -273,7 +273,7 @@ impl ValueStage {
                             parent_labels,
                             parent_labels_names,
                             unique_label_id,
-                            structs,
+                            namespaces,
                             true,
                             tokens,
                             true,
@@ -296,10 +296,10 @@ impl ValueStage {
                     )?
                 },
                 MacroToken::Name(inner) => {
-                    if let Some(ref data) = struct_data {
-                        Self::parse_struct_field(
+                    if let Some(ref data) = namespace_data {
+                        Self::parse_namespace_member(
                             &mut tokens,
-                            structs,
+                            namespaces,
                             &data,
                             unique_label_id,
                             inner
@@ -326,8 +326,8 @@ impl ValueStage {
                     &mut child_labels,
                     inner
                 )?,
-                MacroToken::Lookup(inner, fields) => {
-                    ValueToken::Lookup(inner, fields)
+                MacroToken::Lookup(inner, members) => {
+                    ValueToken::Lookup(inner, members)
                 },
                 // Offsets
                 MacroToken::Offset(inner) => ValueToken::Offset {
@@ -369,41 +369,41 @@ impl ValueStage {
 
         // Convert name tokens into corresponding parent label references
         if resolve_labels {
-            LabelResolver::convert_parent_label_refs(&parent_labels, &structs, &mut value_tokens)?;
+            LabelResolver::convert_parent_label_refs(&parent_labels, &namespaces, &mut value_tokens)?;
         }
 
         Ok(value_tokens)
     }
 
-    fn parse_struct_field(
+    fn parse_namespace_member(
         tokens: &mut TokenIterator<MacroToken>,
-        structs: &mut StructMap,
-        struct_data: &StuctData,
+        namespaces: &mut NamespaceMap,
+        namespace_data: &NamespaceData,
         unique_label_id: &mut usize,
         mut inner: InnerToken
 
     ) -> Result<ValueToken, SourceError> {
         if tokens.peek_is(MacroTokenType::Colon, None) {
 
-            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing struct field definition")?.into_inner();
-            let (sid, _, parent) = struct_data;
-            let struct_fields = &mut structs.get_mut(sid).unwrap().1;
+            let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing namespace member definition")?.into_inner();
+            let (sid, _, parent) = namespace_data;
+            let namespace_members = &mut namespaces.get_mut(sid).unwrap().1;
 
-            // Check if the field already exists
-            let field_id = format!("{}->{}", parent.value, inner.value);
-            if let Some((existing, _)) = struct_fields.get(&field_id) {
+            // Check if the member already exists
+            let member_id = format!("{}::{}", parent.value, inner.value);
+            if let Some((existing, _)) = namespace_members.get(&member_id) {
                 Err(inner.error(format!(
-                    "A field with the name \"{}\" was already defined within the current struct.",
+                    "A member with the name \"{}\" was already defined within the current namespace.",
                     inner.value
 
-                )).with_reference(existing, "Original definition of field was"))
+                )).with_reference(existing, "Original definition of member was"))
 
             } else {
-                // Add field to struct
+                // Add member to namespace
                 *unique_label_id += 1;
-                inner.value = field_id.clone().into();
+                inner.value = member_id.clone().into();
                 inner.end_index = colon.end_index;
-                struct_fields.insert(field_id, (inner.clone(), *unique_label_id));
+                namespace_members.insert(member_id, (inner.clone(), *unique_label_id));
                 Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, None))
             }
 
@@ -1598,112 +1598,112 @@ mod test {
         ]);
     }
 
-    // Struct Statements ------------------------------------------------------
+    // Namespace Statements ---------------------------------------------------
     #[test]
-    fn test_struct_statement_local() {
-        let lexer = value_lexer("STRUCT foo field: DB ENDSTRUCT\nfoo->field");
+    fn test_namespace_statement_local() {
+        let lexer = value_lexer("NAMESPACE foo field: DB ENDNAMESPACE\nfoo::field");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itk!(11, 17, "foo->field"), 1, None),
-            ValueToken::Reserved(itk!(18, 20, "DB")),
-            ValueToken::ParentLabelRef(itk!(31, 41, "foo->field"), 1)
+            ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None),
+            ValueToken::Reserved(itk!(21, 23, "DB")),
+            ValueToken::ParentLabelRef(itk!(37, 47, "foo::field"), 1)
         ]);
     }
 
     #[test]
-    fn test_struct_statement_constants() {
-        let lexer = value_lexer("STRUCT foo field: DS SIZE ENDSTRUCT");
+    fn test_namespace_statement_constants() {
+        let lexer = value_lexer("NAMESPACE foo field: DS SIZE ENDNAMESPACE");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itk!(11, 17, "foo->field"), 1, None),
-            ValueToken::Reserved(itk!(18, 20, "DS")),
-            ValueToken::Name(itk!(21, 25, "SIZE"))
+            ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None),
+            ValueToken::Reserved(itk!(21, 23, "DS")),
+            ValueToken::Name(itk!(24, 28, "SIZE"))
         ]);
     }
 
     #[test]
-    fn test_struct_statement_local_error() {
-        let e = value_lexer_child_error("INCLUDE 'child.gb.s'\nSTRUCT foo field: DB ENDSTRUCT", "foo->field");
-        assert_eq!(e, "In file \"child.gb.s\" on line 1, column 1: Reference to unknown struct \"foo\".\n\nfoo->field\n^--- Here\n\nincluded from file \"main.gb.s\" on line 1, column 9".to_string());
+    fn test_namespace_statement_local_error() {
+        let e = value_lexer_child_error("INCLUDE 'child.gb.s'\nNAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
+        assert_eq!(e, "In file \"child.gb.s\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field\n^--- Here\n\nincluded from file \"main.gb.s\" on line 1, column 9".to_string());
     }
 
     #[test]
-    fn test_struct_statement_global() {
-        let lexer = value_lexer_child("INCLUDE 'child.gb.s'\nGLOBAL STRUCT foo field: DB ENDSTRUCT", "foo->field");
+    fn test_namespace_statement_global() {
+        let lexer = value_lexer_child("INCLUDE 'child.gb.s'\nGLOBAL NAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelRef(itf!(0, 10, "foo->field", 1), 1),
-            ValueToken::ParentLabelDef(itk!(39, 45, "foo->field"), 1, None),
-            ValueToken::Reserved(itk!(46, 48, "DB"))
+            ValueToken::ParentLabelRef(itf!(0, 10, "foo::field", 1), 1),
+            ValueToken::ParentLabelDef(itk!(42, 48, "foo::field"), 1, None),
+            ValueToken::Reserved(itk!(49, 51, "DB"))
         ]);
     }
 
     #[test]
-    fn test_struct_statement_macro() {
-        let lexer = value_lexer("MACRO m(@name) STRUCT @name field: DB ENDSTRUCT foo->field ENDMACRO m(foo)");
+    fn test_namespace_statement_macro() {
+        let lexer = value_lexer("MACRO m(@name) NAMESPACE @name field: DB ENDNAMESPACE foo::field ENDMACRO m(foo)");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itkm!(28, 34, "foo->field", 0), 1, None),
-            ValueToken::Reserved(itkm!(35, 37, "DB", 0)),
-            ValueToken::ParentLabelRef(itkm!(48, 58, "foo->field", 0), 1)
+            ValueToken::ParentLabelDef(itkm!(31, 37, "foo::field", 0), 1, None),
+            ValueToken::Reserved(itkm!(38, 40, "DB", 0)),
+            ValueToken::ParentLabelRef(itkm!(54, 64, "foo::field", 0), 1)
         ]);
     }
 
     #[test]
-    fn test_struct_statement_nested() {
-        let lexer = value_lexer("STRUCT foo STRUCT inner bar: DB\nENDSTRUCT\nENDSTRUCT\nfoo->inner->bar");
+    fn test_namespace_statement_nested() {
+        let lexer = value_lexer("NAMESPACE foo NAMESPACE inner bar: DB\nENDNAMESPACE\nENDNAMESPACE\nfoo::inner::bar");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itk!(24, 28, "foo->inner->bar"), 1, None),
-            ValueToken::Reserved(itk!(29, 31, "DB")),
-            ValueToken::ParentLabelRef(itk!(52, 67, "foo->inner->bar"), 1)
+            ValueToken::ParentLabelDef(itk!(30, 34, "foo::inner::bar"), 1, None),
+            ValueToken::Reserved(itk!(35, 37, "DB")),
+            ValueToken::ParentLabelRef(itk!(64, 79, "foo::inner::bar"), 1)
         ]);
     }
 
     #[test]
-    fn test_struct_statement_error_lookup() {
+    fn test_namespace_statement_error_lookup() {
         assert_eq!(
-            value_lexer_error("foo->field"),
-            "In file \"main.gb.s\" on line 1, column 1: Reference to unknown struct \"foo\".\n\nfoo->field\n^--- Here".to_string()
+            value_lexer_error("foo::field"),
+            "In file \"main.gb.s\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field\n^--- Here".to_string()
         );
         assert_eq!(
-            value_lexer_error("foo->field->bar"),
-            "In file \"main.gb.s\" on line 1, column 1: Reference to unknown struct \"foo\".\n\nfoo->field->bar\n^--- Here".to_string()
-        );
-    }
-
-    #[test]
-    fn test_struct_statement_error_field_lookup() {
-        assert_eq!(
-            value_lexer_error("STRUCT foo ENDSTRUCT\nfoo->bar"),
-            "In file \"main.gb.s\" on line 2, column 1: Reference to unknown field \"bar\".\n\nfoo->bar\n^--- Here\n\nin struct defined in file \"main.gb.s\" on line 1, column 8:\n\nSTRUCT foo ENDSTRUCT\n       ^--- Here".to_string()
+            value_lexer_error("foo::field::bar"),
+            "In file \"main.gb.s\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field::bar\n^--- Here".to_string()
         );
     }
 
     #[test]
-    fn test_struct_statement_error_field_lookup_nested() {
+    fn test_namespace_statement_error_member_lookup() {
         assert_eq!(
-            value_lexer_error("STRUCT foo STRUCT inner ENDSTRUCT ENDSTRUCT\nfoo->inner->bar"),
-            "In file \"main.gb.s\" on line 2, column 1: Reference to unknown field \"bar\".\n\nfoo->inner->bar\n^--- Here\n\nin struct defined in file \"main.gb.s\" on line 1, column 12:\n\nSTRUCT foo STRUCT inner ENDSTRUCT ENDSTRUCT\n           ^--- Here".to_string()
+            value_lexer_error("NAMESPACE foo ENDNAMESPACE\nfoo::bar"),
+            "In file \"main.gb.s\" on line 2, column 1: Reference to unknown member \"bar\".\n\nfoo::bar\n^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
         );
     }
 
     #[test]
-    fn test_struct_statement_error_duplicate() {
+    fn test_namespace_statement_error_member_lookup_nested() {
         assert_eq!(
-            value_lexer_error("STRUCT foo ENDSTRUCT STRUCT foo ENDSTRUCT"),
-            "In file \"main.gb.s\" on line 1, column 29: A struct with the name \"foo\" was already defined.\n\nSTRUCT foo ENDSTRUCT STRUCT foo ENDSTRUCT\n                            ^--- Here\n\nOriginal definition of struct was in file \"main.gb.s\" on line 1, column 8:\n\nSTRUCT foo ENDSTRUCT STRUCT foo ENDSTRUCT\n       ^--- Here".to_string()
+            value_lexer_error("NAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\nfoo::inner::bar"),
+            "In file \"main.gb.s\" on line 2, column 1: Reference to unknown member \"bar\".\n\nfoo::inner::bar\n^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 15:\n\nNAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\n              ^--- Here".to_string()
         );
     }
 
     #[test]
-    fn test_struct_statement_error_duplicate_field() {
+    fn test_namespace_statement_error_duplicate() {
         assert_eq!(
-            value_lexer_error("STRUCT foo field: DB field: DB ENDSTRUCT"),
-            "In file \"main.gb.s\" on line 1, column 22: A field with the name \"field\" was already defined within the current struct.\n\nSTRUCT foo field: DB field: DB ENDSTRUCT\n                     ^--- Here\n\nOriginal definition of field was in file \"main.gb.s\" on line 1, column 12:\n\nSTRUCT foo field: DB field: DB ENDSTRUCT\n           ^--- Here".to_string()
+            value_lexer_error("NAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE"),
+            "In file \"main.gb.s\" on line 1, column 38: A namespace with the name \"foo\" was already defined.\n\nNAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE\n                                     ^--- Here\n\nOriginal definition of namespace was in file \"main.gb.s\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
         );
     }
 
     #[test]
-    fn test_struct_statement_error_child_label() {
+    fn test_namespace_statement_error_duplicate_member() {
         assert_eq!(
-            value_lexer_error("STRUCT foo field: DB .child: DB ENDSTRUCT"),
-            "In file \"main.gb.s\" on line 1, column 22: Unexpected definition of child label \"child\" without parent.\n\nSTRUCT foo field: DB .child: DB ENDSTRUCT\n                     ^--- Here".to_string()
+            value_lexer_error("NAMESPACE foo field: DB field: DB ENDNAMESPACE"),
+            "In file \"main.gb.s\" on line 1, column 25: A member with the name \"field\" was already defined within the current namespace.\n\nNAMESPACE foo field: DB field: DB ENDNAMESPACE\n                        ^--- Here\n\nOriginal definition of member was in file \"main.gb.s\" on line 1, column 15:\n\nNAMESPACE foo field: DB field: DB ENDNAMESPACE\n              ^--- Here".to_string()
+        );
+    }
+
+    #[test]
+    fn test_namespace_statement_error_child_label() {
+        assert_eq!(
+            value_lexer_error("NAMESPACE foo field: DB .child: DB ENDNAMESPACE"),
+            "In file \"main.gb.s\" on line 1, column 25: Unexpected definition of child label \"child\" without parent.\n\nNAMESPACE foo field: DB .child: DB ENDNAMESPACE\n                        ^--- Here".to_string()
         );
     }
 

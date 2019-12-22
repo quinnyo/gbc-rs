@@ -34,8 +34,8 @@ pub enum Symbol {
     BLOCK,
     ENDBLOCK,
 
-    STRUCT,
-    ENDSTRUCT,
+    NAMESPACE,
+    ENDNAMESPACE,
 
     MACRO,
     ENDMACRO,
@@ -204,8 +204,8 @@ impl Symbol {
             Symbol::BLOCK    => "BLOCK",
             Symbol::ENDBLOCK => "ENDBLOCK",
 
-            Symbol::STRUCT   => "STRUCT",
-            Symbol::ENDSTRUCT=> "ENDSTRUCT",
+            Symbol::NAMESPACE   => "NAMESPACE",
+            Symbol::ENDNAMESPACE=> "ENDNAMESPACE",
 
             Symbol::MACRO    => "MACRO",
             Symbol::ENDMACRO => "ENDMACRO",
@@ -386,8 +386,8 @@ impl From<String> for Symbol {
             "BLOCK"     => Symbol::BLOCK,
             "ENDBLOCK"  => Symbol::ENDBLOCK,
 
-            "STRUCT"    => Symbol::STRUCT,
-            "ENDSTRUCT" => Symbol::ENDSTRUCT,
+            "NAMESPACE"    => Symbol::NAMESPACE,
+            "ENDNAMESPACE" => Symbol::ENDNAMESPACE,
 
             "MACRO"     => Symbol::MACRO,
             "ENDMACRO"  => Symbol::ENDMACRO,
