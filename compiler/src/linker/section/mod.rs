@@ -2512,14 +2512,49 @@ mod test {
     // Structs ----------------------------------------------------------------
     #[test]
     fn test_struct_label_calls() {
-        let l = linker("STRUCT foo\nSECTION WRAM0\nfield: DB\nSECTION ROM0\nbar:\nld a,[foo::field]\nret\nENDSTRUCT\ncall foo::bar");
+        let l = linker("NAMESPACE foo\nSECTION WRAM0\nfield: DB\nSECTION ROM0\nbar:\nld a,[foo::field]\nret\nENDNAMESPACE\ncall foo::bar");
         assert_eq!(linker_section_entries(l), vec![
             vec![
-                // TODO fill with expected
-            ]
+                (0, EntryData::Label {
+                id: 2,
+                is_local: false,
+                name: "foo::bar".to_string()
+            }),
+            (3, EntryData::Instruction {
+                op_code: 250,
+                expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(62, 72, "foo::field"), 1))),
+                bytes: vec![250, 0, 192],
+                volatile: false,
+                debug_only: false
+            }),
+            (1, EntryData::Instruction {
+                op_code: 201,
+                expression: None,
+                bytes: vec![201],
+                volatile: false,
+                debug_only: false
+            }),
+            (3, EntryData::Instruction {
+                op_code: 205,
+                expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(96, 104, "foo::bar"), 2))),
+                bytes: vec![205, 0, 0],
+                volatile: false,
+                debug_only: false
+            })],
+            vec![(0, EntryData::Label {
+                id: 1,
+                is_local: false,
+                name: "foo::field".to_string()
+
+            }), (1, EntryData::Data {
+                alignment: DataAlignment::Byte,
+                endianess: DataEndianess::Little,
+                expressions: None,
+                bytes: None,
+                debug_only: false
+            })]
         ]);
     }
-
 
     // Using Blocks -----------------------------------------------------------
     #[test]
