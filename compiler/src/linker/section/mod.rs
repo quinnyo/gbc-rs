@@ -2515,7 +2515,7 @@ mod test {
         let l = linker("STRUCT foo\nSECTION WRAM0\nfield: DB\nSECTION ROM0\nbar:\nld a,[foo::field]\nret\nENDSTRUCT\ncall foo::bar");
         assert_eq!(linker_section_entries(l), vec![
             vec![
-                // TODO fill
+                // TODO fill with expected
             ]
         ]);
     }

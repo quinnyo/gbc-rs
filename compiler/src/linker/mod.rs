@@ -318,10 +318,10 @@ impl Linker {
             // Expand and verify tokens inside using statements
             } else if let EntryToken::UsingStatement(inner, cmd, tokens) = token {
 
-                let mut data_tokens = Vec::new();
+                let mut data_tokens = Vec::with_capacity(16);
                 Self::parse_entries(context, usage, tokens, true, false, &mut data_tokens, inactive_labels_only)?;
 
-                let mut body_tokens = Vec::new();
+                let mut body_tokens = Vec::with_capacity(16);
                 for (_, token) in data_tokens {
                     match token {
                         EntryToken::Data { is_constant, .. } => {

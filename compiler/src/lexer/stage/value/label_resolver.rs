@@ -134,7 +134,7 @@ impl LabelResolver {
                         Some(ValueToken::ParentLabelRef(inner, *id))
 
                     } else {
-                        // TODO suggest similiar members in other structs?
+                        // TODO suggest similiar members in other namespaces?
                         return Err(inner.error(
                             format!(
                                 "Reference to unknown member \"{}\".",
@@ -145,7 +145,7 @@ impl LabelResolver {
                     }
 
                 } else {
-                    // TODO suggest structs with similiar names
+                    // TODO suggest namespaces with similiar names
                     return Err(inner.error(format!("Reference to unknown namespace \"{}\".", members[0].value)));
                 }
 
