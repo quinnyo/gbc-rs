@@ -1038,7 +1038,7 @@ mod test {
     // Constant Evaluation ----------------------------------------------------
     #[test]
     fn test_section_entry_constant_eval() {
-        let l = linker("int EQU 1\nfloat EQU 3.14\nstring EQU 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
+        let l = linker("CONST int 1\nCONST float 3.14\nCONST string 'Hello World'\nSECTION ROM0\nDB int\nDB FLOOR(float)\nDS string");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1068,7 +1068,7 @@ mod test {
 
     #[test]
     fn test_section_entry_constant_eval_referenced() {
-        let l = linker("A EQU B\nB EQU C\nC EQU 2\nSECTION ROM0\nDB A\nDB B\nDB C");
+        let l = linker("CONST A B\nCONST B C\nCONST C 2\nSECTION ROM0\nDB A\nDB B\nDB C");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1098,7 +1098,7 @@ mod test {
 
     #[test]
     fn test_section_entry_constant_eval_referenced_local() {
-        let l = linker("_A EQU _B\n_B EQU _C\n_C EQU 2\nSECTION ROM0\nDB _A\nDB _B\nDB _C");
+        let l = linker("CONST _A _B\nCONST _B _C\nCONST _C 2\nSECTION ROM0\nDB _A\nDB _B\nDB _C");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1128,7 +1128,7 @@ mod test {
 
     #[test]
     fn test_section_entry_constant_eval_default() {
-        let l = linker("A DEFAULT EQU 0\nA EQU 1\nB DEFAULT EQU 2\nC EQU 4\nC DEFAULT EQU 3\nSECTION ROM0\nDB A\nDB B\n DB C");
+        let l = linker("DEFAULT CONST A 0\nCONST A 1\nDEFAULT CONST B 2\nCONST C 4\nDEFAULT CONST C 3\nSECTION ROM0\nDB A\nDB B\n DB C");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1158,7 +1158,7 @@ mod test {
 
     #[test]
     fn test_section_entry_local_constant_eval() {
-        let l = linker("_LOCAL EQU 1\nSECTION ROM0\nDB _LOCAL");
+        let l = linker("CONST _LOCAL 1\nSECTION ROM0\nDB _LOCAL");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1174,7 +1174,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_constant_eval() {
-        let l = linker_child("PARENT EQU CHILD + 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB PARENT", "GLOBAL CHILD EQU 1");
+        let l = linker_child("CONST PARENT CHILD + 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB PARENT", "GLOBAL CONST CHILD 1");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1190,7 +1190,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_no_global_override() {
-        let l = linker_child("FOO EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "FOO EQU 2\nSECTION ROM0\nDB FOO");
+        let l = linker_child("CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "CONST FOO 2\nSECTION ROM0\nDB FOO");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1213,7 +1213,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_global_override_default_export() {
-        let l = linker_child("GLOBAL FOO DEFAULT EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL FOO EQU 2");
+        let l = linker_child("GLOBAL DEFAULT CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1229,7 +1229,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_global_no_override_default_private() {
-        let l = linker_child("FOO DEFAULT EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL FOO EQU 2");
+        let l = linker_child("DEFAULT CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1245,7 +1245,7 @@ mod test {
 
     #[test]
     fn test_section_entry_local_dyn_eval() {
-        let l = linker("A EQU 1\nSECTION ROM0\nglobal:\nDB global + A");
+        let l = linker("CONST A 1\nSECTION ROM0\nglobal:\nDB global + A");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (0, EntryData::Label {
@@ -1259,9 +1259,9 @@ mod test {
                     expressions: Some(vec![
                         (1, Expression::Binary {
                             op: Operator::Plus,
-                            inner: itk!(39, 40, "+"),
-                            left: Box::new(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(32, 38, "global"), 1))),
-                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(41, 42, "A"), Symbol::from("A".to_string()))))
+                            inner: itk!(41, 42, "+"),
+                            left: Box::new(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(34, 40, "global"), 1))),
+                            right: Box::new(Expression::Value(ExpressionValue::ConstantValue(itk!(43, 44, "A"), Symbol::from("A".to_string()))))
                         })
                     ]),
                     bytes: Some(vec![1]),
@@ -1609,7 +1609,7 @@ mod test {
     // Macro Constant Evaluation ----------------------------------------------
     #[test]
     fn test_section_macro_constant_evaluation() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nC EQU 2\nMACRO FOO(@a) DB @a ENDMACRO")), vec![
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nCONST C 2\nMACRO FOO(@a) DB @a ENDMACRO")), vec![
             vec![
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
@@ -1646,7 +1646,7 @@ mod test {
 
     #[test]
     fn test_section_macro_defined_constant_evaluation() {
-        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nMACRO FOO(@a) @a EQU 2 ENDMACRO\n DB C")), vec![
+        assert_eq!(linker_section_entries(linker("SECTION ROM0\nFOO(C)\nMACRO FOO(@a) CONST @a 2 ENDMACRO\n DB C")), vec![
             vec![
                 (1, EntryData::Data {
                     alignment: DataAlignment::Byte,
@@ -2204,7 +2204,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(35, 47, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2277,7 +2277,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(53, 65, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2329,7 +2329,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(44, 56, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2356,7 +2356,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(35, 47, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2382,7 +2382,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(36, 48, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2415,7 +2415,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(35, 47, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2448,7 +2448,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(35, 47, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2488,7 +2488,7 @@ mod test {
                 }),
                 (3, EntryData::Instruction {
                     op_code: 205,
-                    expression: Some(Expression::LabelCall {
+                    expression: Some(Expression::ParentLabelCall {
                         inner: itk!(36, 48, "global_label"),
                         name: Symbol::from("global_label".to_string()),
                         id: 1,
@@ -2554,6 +2554,37 @@ mod test {
                 debug_only: false
             })]
         ]);
+
+        let l = linker("GLOBAL NAMESPACE foo\nSECTION ROM0\nbar(hl):\nENDNAMESPACE\ncall foo::bar($1234)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "foo::bar".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 33,
+                    expression: None,
+                    bytes: vec![33, 52, 18],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::ParentLabelCall {
+                        inner: itk!(61, 69, "foo::bar"),
+                        id: 1,
+                        name: Symbol::from("foo::bar".to_string()),
+                        args: vec![Expression::Value(ExpressionValue::Integer(4660))]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+
     }
 
     // Using Blocks -----------------------------------------------------------

@@ -30,6 +30,7 @@ pub enum Symbol {
     DEFAULT,
     BANK,
     EQU,
+    CONST,
 
     BLOCK,
     ENDBLOCK,
@@ -200,6 +201,7 @@ impl Symbol {
             Symbol::DEFAULT  => "DEFAULT",
             Symbol::BANK     => "BANK",
             Symbol::EQU      => "EQU",
+            Symbol::CONST    => "CONST",
 
             Symbol::BLOCK    => "BLOCK",
             Symbol::ENDBLOCK => "ENDBLOCK",
@@ -382,6 +384,7 @@ impl From<String> for Symbol {
             "DEFAULT"   => Symbol::DEFAULT,
             "BANK"      => Symbol::BANK,
             "EQU"       => Symbol::EQU,
+            "CONST"     => Symbol::CONST,
 
             "BLOCK"     => Symbol::BLOCK,
             "ENDBLOCK"  => Symbol::ENDBLOCK,

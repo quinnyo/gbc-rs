@@ -545,20 +545,20 @@ mod test {
     // Constant Evaluation ----------------------------------------------------
     #[test]
     fn test_error_constant_eval_recursive() {
-        assert_eq!(linker_error("A EQU B\nB EQU C\nC EQU A"), "In file \"main.gb.s\" on line 3, column 7: Recursive declaration of constant \"A\".\n\nC EQU A\n      ^--- Here\n\nInitial declaration was in file \"main.gb.s\" on line 1, column 1:\n\nA EQU B\n^--- Here");
+        assert_eq!(linker_error("CONST A B\nCONST B C\nCONST C A"), "In file \"main.gb.s\" on line 3, column 9: Recursive declaration of constant \"A\".\n\nCONST C A\n        ^--- Here\n\nInitial declaration was in file \"main.gb.s\" on line 1, column 7:\n\nCONST A B\n      ^--- Here");
     }
 
     #[test]
     fn test_error_constant_eval_undeclared() {
-        assert_eq!(linker_error("A EQU B\nB EQU C\nC EQU D"), "In file \"main.gb.s\" on line 3, column 7: Reference to undeclared constant \"D\".\n\nC EQU D\n      ^--- Here");
+        assert_eq!(linker_error("CONST A B\nCONST B C\nCONST C D"), "In file \"main.gb.s\" on line 3, column 9: Reference to undeclared constant \"D\".\n\nCONST C D\n        ^--- Here");
     }
 
     #[test]
     fn test_error_constant_eval_file_local() {
-        assert_eq!(linker_error_child("A EQU B\nINCLUDE 'child.gb.s'", "B EQU 1"), "In file \"main.gb.s\" on line 1, column 7: Reference to undeclared constant \"B\".\n\nA EQU B\n      ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nB EQU 1\n^--- Here");
-        assert_eq!(linker_error_child("A EQU 1 + B\nINCLUDE 'child.gb.s'", "B EQU 1"), "In file \"main.gb.s\" on line 1, column 11: Reference to undeclared constant \"B\".\n\nA EQU 1 + B\n          ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nB EQU 1\n^--- Here");
-        assert_eq!(linker_error_child("A EQU 1\nINCLUDE 'child.gb.s'", "B EQU A"), "In file \"child.gb.s\" on line 1, column 7: Reference to undeclared constant \"A\".\n\nB EQU A\n      ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 1:\n\nA EQU 1\n^--- Here");
-        assert_eq!(linker_error_child("A EQU 1\nINCLUDE 'child.gb.s'", "B EQU 1 + A"), "In file \"child.gb.s\" on line 1, column 11: Reference to undeclared constant \"A\".\n\nB EQU 1 + A\n          ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 1:\n\nA EQU 1\n^--- Here");
+        assert_eq!(linker_error_child("CONST A B\nINCLUDE 'child.gb.s'", "CONST B 1"), "In file \"main.gb.s\" on line 1, column 9: Reference to undeclared constant \"B\".\n\nCONST A B\n        ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A 1 + B\nINCLUDE 'child.gb.s'", "CONST B 1"), "In file \"main.gb.s\" on line 1, column 13: Reference to undeclared constant \"B\".\n\nCONST A 1 + B\n            ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'child.gb.s'", "CONST B A"), "In file \"child.gb.s\" on line 1, column 9: Reference to undeclared constant \"A\".\n\nCONST B A\n        ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'child.gb.s'", "CONST B 1 + A"), "In file \"child.gb.s\" on line 1, column 13: Reference to undeclared constant \"A\".\n\nCONST B 1 + A\n            ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
     }
 
     #[test]
@@ -816,11 +816,11 @@ mod test {
                 })
             ]
         ]);
-        let l = linker("A EQU 0\nSECTION ROM0\nIF A THEN DB 1 ENDIF");
+        let l = linker("CONST A 0\nSECTION ROM0\nIF A THEN DB 1 ENDIF");
         assert_eq!(linker_section_entries(l), vec![
             vec![]
         ]);
-        let l = linker("A EQU 1\nSECTION ROM0\nIF A THEN DB 1 ENDIF");
+        let l = linker("CONST A 1\nSECTION ROM0\nIF A THEN DB 1 ENDIF");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -929,7 +929,7 @@ mod test {
 
     #[test]
     fn test_if_statement_constant_declare() {
-        let l = linker("SECTION ROM0\nIF 1 THEN A EQU 1 ENDIF\nIF A THEN DB 2 ENDIF");
+        let l = linker("SECTION ROM0\nIF 1 THEN CONST A 1 ENDIF\nIF A THEN DB 2 ENDIF");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1075,7 +1075,7 @@ mod test {
 
     #[test]
     fn test_error_for_statement_inner_constant_declaration() {
-        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1ENDFOR"), "In file \"main.gb.s\" on line 2, column 24: Constant declaration is not allowed inside of a FOR statement body.\n\nFOR x IN 0 TO 2 REPEAT foo EQU x + 1ENDFOR\n                       ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT CONST foo x + 1ENDFOR"), "In file \"main.gb.s\" on line 2, column 30: Constant declaration is not allowed inside of a FOR statement body.\n\nFOR x IN 0 TO 2 REPEAT CONST foo x + 1ENDFOR\n                             ^--- Here");
     }
 
     #[test]

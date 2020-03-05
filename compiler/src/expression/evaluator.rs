@@ -296,8 +296,8 @@ impl EvaluatorContext {
         usage: &mut UsageInformation
 
     ) -> Result<Vec<(Register, Expression)>, SourceError> {
-        // Expression must be a valid LabelCall here
-        if let Expression::LabelCall { inner, id, args, .. } = expression {
+        // Expression must be a valid ParentLabelCall here
+        if let Expression::ParentLabelCall { inner, id, args, .. } = expression {
             if let Some((outer, signature)) = self.callable_labels.get(id) {
 
                 if self.linter_enabled {
@@ -436,7 +436,7 @@ impl EvaluatorContext {
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
             },
-            Expression::LabelCall { inner, id, .. } => {
+            Expression::ParentLabelCall { inner, id, .. } => {
                 let outer = inner;
                 if let Some(addr) = self.label_addresses.get(id) {
                     Ok(ExpressionResult::Integer(*addr as i32))
@@ -556,8 +556,8 @@ impl EvaluatorContext {
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
             },
-            Expression::LabelCall { .. } => {
-                unreachable!("Invalid constant expression containing LabelCall");
+            Expression::ParentLabelCall { .. } => {
+                unreachable!("Invalid constant expression containing ParentLabelCall");
             },
             _ => unreachable!()
         }

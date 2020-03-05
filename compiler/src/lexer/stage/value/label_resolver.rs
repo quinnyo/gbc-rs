@@ -94,11 +94,11 @@ impl LabelResolver {
 
             } else if let ValueToken::Lookup(_, members) = token {
 
-                let member_path: Vec<String> = members.iter().map(|f| f.value.to_string()).collect();
+                let member_path: Vec<String> = members.iter().map(|f| f.inner().value.to_string()).collect();
                 let mut namespace_path = member_path.clone();
 
                 // Find Namespace
-                let mut inner = members[0].clone();
+                let mut inner = members[0].inner().clone();
                 let mut namespace_data = None;
                 while !namespace_path.is_empty() {
                     namespace_path.pop();
@@ -123,22 +123,27 @@ impl LabelResolver {
                 }
 
                 // Found a namespace with the same name
-                if let Some((struct_inner, struct_members)) = namespace_data {
+                if let Some((struct_inner, namespace_members)) = namespace_data {
 
                     // Lookup member in namespace
                     let member_path = member_path.join("::");
-                    if let Some((_, id)) = struct_members.get(&member_path) {
-                        let mut inner = members[0].clone();
+                    if let Some((_, id)) = namespace_members.get(&member_path) {
+                        let mut inner = members[0].inner().clone();
                         inner.value = member_path.into();
-                        inner.end_index = members.last().unwrap().end_index;
-                        Some(ValueToken::ParentLabelRef(inner, *id))
+                        inner.end_index = members.last().unwrap().inner().end_index;
+                        if let ValueToken::ParentLabelCall(_, _, args) = members.last_mut().unwrap() {
+                            Some(ValueToken::ParentLabelCall(inner, *id, args.take()))
+
+                        } else {
+                            Some(ValueToken::ParentLabelRef(inner, *id))
+                        }
 
                     } else {
                         // TODO suggest similiar members in other namespaces?
                         return Err(inner.error(
                             format!(
                                 "Reference to unknown member \"{}\".",
-                                members.last().unwrap().value
+                                members.last().unwrap().inner().value
                             )
 
                         ).with_reference(struct_inner, "in namespace defined"));
@@ -146,13 +151,14 @@ impl LabelResolver {
 
                 } else {
                     // TODO suggest namespaces with similiar names
-                    return Err(inner.error(format!("Reference to unknown namespace \"{}\".", members[0].value)));
+                    return Err(inner.error(format!("Reference to unknown namespace \"{}\".", members[0].inner().value)));
                 }
 
             } else {
                 None
             };
 
+            // Replace Lookup Token with a simple ParentLabelRef or ParentLabelCall
             if let Some(reference) = reference {
                 *token = reference;
 
@@ -161,7 +167,7 @@ impl LabelResolver {
                     Self::convert_parent_label_refs(parent_labels, structs, arg_tokens)?
                 }
 
-            } else if let ValueToken::LabelCall(inner, ref mut label_id, arguments) = token {
+            } else if let ValueToken::ParentLabelCall(inner, ref mut label_id, Some(arguments)) = token {
 
                 // Macro Internal Lookup
                 *label_id = if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
@@ -176,7 +182,7 @@ impl LabelResolver {
                     *id
 
                 } else {
-                    unreachable!("Invalid label call ID.")
+                    0//unreachable!("Invalid label call ID.");
                 };
 
                 for arg_tokens in arguments {

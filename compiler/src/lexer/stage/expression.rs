@@ -21,7 +21,7 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 enum ArgumentType {
     None,
     BuiltinCall,
-    LabelCall
+    ParentLabelCall
 }
 
 
@@ -148,16 +148,20 @@ impl ExpressionStage {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
-            if token.is(ValueTokenType::GlobalName) {
-                if let Some(c) = Self::parse_constant(&token, &mut tokens, true)? {
+            if token.is_symbol(Symbol::GLOBAL) {
+                let token = tokens.get("Unexpected end of input after GLOBAL keyword, expected either a label or a CONST declaration.")?;
+                if let Some(c) = Self::parse_constant_new(&token, &mut tokens, true)? {
                     expression_tokens.push(c);
 
                 } else {
-                    return Err(token.error("Incomplete GLOBAL declaration, expected a EQU keyword instead.".to_string()));
+                    return Err(token.error("Incomplete GLOBAL declaration, expected a CONST keyword instead.".to_string()));
                 }
 
-            } else if let Some(c) = Self::parse_constant(&token, &mut tokens, false)? {
+            } else if let Some(c) = Self::parse_constant_new(&token, &mut tokens, false)? {
                 expression_tokens.push(c);
+
+            } else if token.is(ValueTokenType::GlobalName) {
+                return Err(token.error("Incomplete GLOBAL declaration, expected a CONST keyword before name.".to_string()));
 
             } else {
                 expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, argument_type, linter_enabled)?);
@@ -166,23 +170,20 @@ impl ExpressionStage {
         Ok(expression_tokens)
     }
 
-    fn parse_constant(
+    fn parse_constant_new(
         token: &ValueToken,
         tokens: &mut TokenIterator<ValueToken>,
         is_exported: bool
 
     ) -> Result<Option<ExpressionToken>, SourceError> {
-        let is_name = token.is(ValueTokenType::Name) || token.is(ValueTokenType::GlobalName);
-        if is_name && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::DEFAULT)) {
-            let def = tokens.expect(ValueTokenType::Reserved, Some(Symbol::DEFAULT), "while parsing DEFAULT declaration.")?;
-            if tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
-                Ok(Some(ExpressionToken::Constant(token.inner().clone(), true, !is_exported)))
+        // [GLOBAL] [DEFAULT] CONST XYZ
+        if token.is_symbol(Symbol::DEFAULT) {
+            tokens.expect(ValueTokenType::Reserved, Some(Symbol::CONST), "while parsing CONST declaration")?;
+            let token = tokens.expect(ValueTokenType::Name, None, "while parsing CONST declaration")?;
+            Ok(Some(ExpressionToken::Constant(token.inner().clone(), true, !is_exported)))
 
-            } else {
-                Err(def.error("Incomplete DEFAULT declaration, expected a EQU keyword instead.".to_string()))
-            }
-
-        } else if is_name && tokens.peek_is(ValueTokenType::Reserved, Some(Symbol::EQU)) {
+        } else if token.is_symbol(Symbol::CONST) {
+            let token = tokens.expect(ValueTokenType::Name, None, "while parsing CONST declaration")?;
             Ok(Some(ExpressionToken::Constant(token.inner().clone(), false, !is_exported)))
 
         } else {
@@ -239,7 +240,7 @@ impl ExpressionStage {
             }
 
         // LabelCalls must be standlone and cannot be part of other expressions
-        } else if current_typ == ValueTokenType::LabelCall {
+        } else if current_typ == ValueTokenType::ParentLabelCall {
             let inner = token.inner().clone();
             let expr = ExpressionParser::parse_tokens(vec![token], linter_enabled)?;
             Ok(ExpressionToken::Expression(inner, expr))
@@ -248,7 +249,7 @@ impl ExpressionStage {
             // Forward all non-expression tokens
             ExpressionToken::try_from(token, linter_enabled)
 
-        } else if argument_type == ArgumentType::LabelCall && current_typ == ValueTokenType::Register {
+        } else if argument_type == ArgumentType::ParentLabelCall && current_typ == ValueTokenType::Register {
             let inner = token.inner().clone();
             let reg = Register::from(inner.value.as_str());
             Ok(ExpressionToken::Expression(inner.clone(), Expression::RegisterArgument {
@@ -434,12 +435,12 @@ impl ExpressionParser {
                         args
                     })
                 },
-                Some(ValueToken::LabelCall(inner, id, arguments)) => {
+                Some(ValueToken::ParentLabelCall(inner, id, Some(arguments))) => {
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
-                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::LabelCall, self.linter_support)?);
+                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::ParentLabelCall, self.linter_support)?);
                     }
-                    Ok(Expression::LabelCall {
+                    Ok(Expression::ParentLabelCall {
                         name: inner.value.clone(),
                         id,
                         inner,
@@ -575,37 +576,33 @@ mod test {
 
     #[test]
     fn test_constants() {
-        assert_eq!(tfe("foo EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 3, "foo"), false, true),
-            ExpressionToken::Reserved(itk!(4, 7, "EQU"))
+        assert_eq!(tfe("CONST foo"), vec![
+            ExpressionToken::Constant(itk!(6, 9, "foo"), false, true)
         ]);
-        assert_eq!(tfe("GLOBAL foo EQU"), vec![
-            ExpressionToken::Constant(itk!(7, 10, "foo"), false, false),
-            ExpressionToken::Reserved(itk!(11, 14, "EQU"))
+        assert_eq!(tfe("GLOBAL CONST foo"), vec![
+            ExpressionToken::Constant(itk!(13, 16, "foo"), false, false)
         ]);
     }
 
     #[test]
     fn test_error_constants_export() {
-        assert_eq!(expr_lexer_error("GLOBAL foo"), "In file \"main.gb.s\" on line 1, column 8: Incomplete GLOBAL declaration, expected a EQU keyword instead.\n\nGLOBAL foo\n       ^--- Here");
-        assert_eq!(expr_lexer_error("GLOBAL foo DEFAULT"), "In file \"main.gb.s\" on line 1, column 12: Incomplete DEFAULT declaration, expected a EQU keyword instead.\n\nGLOBAL foo DEFAULT\n           ^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL foo"), "In file \"main.gb.s\" on line 1, column 8: Incomplete GLOBAL declaration, expected a CONST keyword before name.\n\nGLOBAL foo\n       ^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL DEFAULT foo"), "In file \"main.gb.s\" on line 1, column 16: Unexpected token \"Name\" while parsing CONST declaration, expected \"CONST\" instead.\n\nGLOBAL DEFAULT foo\n               ^--- Here");
     }
 
     #[test]
     fn test_constants_defaults() {
-        assert_eq!(tfe("foo DEFAULT EQU"), vec![
-            ExpressionToken::Constant(itk!(0, 3, "foo"), true, true),
-            ExpressionToken::Reserved(itk!(12, 15, "EQU"))
+        assert_eq!(tfe("DEFAULT CONST foo"), vec![
+            ExpressionToken::Constant(itk!(14, 17, "foo"), true, true)
         ]);
-        assert_eq!(tfe("GLOBAL foo DEFAULT EQU"), vec![
-            ExpressionToken::Constant(itk!(7, 10, "foo"), true, false),
-            ExpressionToken::Reserved(itk!(19, 22, "EQU"))
+        assert_eq!(tfe("GLOBAL DEFAULT CONST foo"), vec![
+            ExpressionToken::Constant(itk!(21, 24, "foo"), true, false)
         ]);
     }
 
     #[test]
     fn test_error_constants_defaults() {
-        assert_eq!(expr_lexer_error("foo DEFAULT"), "In file \"main.gb.s\" on line 1, column 5: Incomplete DEFAULT declaration, expected a EQU keyword instead.\n\nfoo DEFAULT\n    ^--- Here");
+        assert_eq!(expr_lexer_error("DEFAULT foo"), "In file \"main.gb.s\" on line 1, column 9: Unexpected token \"Name\" while parsing CONST declaration, expected \"CONST\" instead.\n\nDEFAULT foo\n        ^--- Here");
     }
 
     #[test]
@@ -684,6 +681,12 @@ mod test {
         ]);
     }
 
+
+    #[test]
+    fn test_error_global_standalone() {
+        assert_eq!(expr_lexer_error("GLOBAL"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input after GLOBAL keyword, expected either a label or a CONST declaration.\n\nGLOBAL\n^--- Here");
+    }
+
     // Label Calls ------------------------------------------------------------
     #[test]
     fn test_label_call() {
@@ -696,7 +699,7 @@ mod test {
             ExpressionToken::Instruction(itk!(17, 21, "call")),
             ExpressionToken::Expression(
                 itk!(22, 34, "global_label"),
-                Expression::LabelCall {
+                Expression::ParentLabelCall {
                     inner: itk!(22, 34, "global_label"),
                     id: 1,
                     name: Symbol::from("global_label".to_string()),

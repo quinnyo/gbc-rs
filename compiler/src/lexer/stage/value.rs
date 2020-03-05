@@ -41,11 +41,11 @@ lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
     OpenBracket(()),
     CloseBracket(()),
     BuiltinCall((Vec<Vec<ValueToken>>)),
-    LabelCall((usize, Vec<Vec<ValueToken>>)),
+    ParentLabelCall((usize, Option<Vec<Vec<ValueToken>>>)),
     IfStatement((Vec<IfStatementBranch<ValueToken>>)),
     ForStatement((ForStatement<ValueToken>)),
     BlockStatement((BlockStatement<ValueToken>)),
-    Lookup((Vec<InnerToken>)),
+    Lookup((Vec<ValueToken>)),
     ParentLabelDef((usize, Option<Vec<Register>>)),
     ParentLabelRef((usize)),
     ChildLabelDef((usize, Option<usize>)),
@@ -139,11 +139,14 @@ impl ValueStage {
                     is_global_namespace = true;
                     st
 
-                } else {
+                } else if tokens.peek_is(MacroTokenType::Name, None) {
                     // Pre-Combine "GLOBAL Name" Token Pairs to allow for global label
                     // parsing and to simplify later lexer stages
                     let name = tokens.expect(MacroTokenType::Name, None, "when parsing GLOBAL declaration")?;
                     MacroToken::GlobalName(name.into_inner())
+
+                } else {
+                    token
                 }
 
             } else {
@@ -266,7 +269,7 @@ impl ValueStage {
                     }
                     ValueToken::BuiltinCall(inner, value_args)
                 },
-                MacroToken::LabelCall(inner, args) => {
+                MacroToken::ParentLabelCall(inner, args) => {
                     let mut value_args = Vec::with_capacity(args.len());
                     for tokens in args {
                         value_args.push(Self::parse_tokens(
@@ -280,7 +283,7 @@ impl ValueStage {
                             None
                         )?);
                     }
-                    ValueToken::LabelCall(inner, 0, value_args)
+                    ValueToken::ParentLabelCall(inner, 0, Some(value_args))
                 },
                 // Labels
                 MacroToken::GlobalName(inner) => {
@@ -326,8 +329,17 @@ impl ValueStage {
                     &mut child_labels,
                     inner
                 )?,
-                MacroToken::Lookup(inner, members) => {
-                    ValueToken::Lookup(inner, members)
+                MacroToken::Lookup(inner, tokens) => {
+                    ValueToken::Lookup(inner, Self::parse_tokens(
+                        parent_labels,
+                        parent_labels_names,
+                        unique_label_id,
+                        namespaces,
+                        false,
+                        tokens,
+                        true,
+                        None
+                    )?)
                 },
                 // Offsets
                 MacroToken::Offset(inner) => ValueToken::Offset {
@@ -383,7 +395,9 @@ impl ValueStage {
         mut inner: InnerToken
 
     ) -> Result<ValueToken, SourceError> {
-        if tokens.peek_is(MacroTokenType::Colon, None) {
+
+        let argument_list = Self::parse_label_argument_list(tokens)?;
+        if argument_list.is_some() || tokens.peek_is(MacroTokenType::Colon, None) {
 
             let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing namespace member definition")?.into_inner();
             let (sid, _, parent) = namespace_data;
@@ -404,7 +418,8 @@ impl ValueStage {
                 inner.value = member_id.clone().into();
                 inner.end_index = colon.end_index;
                 namespace_members.insert(member_id, (inner.clone(), *unique_label_id));
-                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, None))
+
+                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, argument_list))
             }
 
         } else {
@@ -425,40 +440,7 @@ impl ValueStage {
     ) -> Result<ValueToken, SourceError> {
 
         // Parse optional label arguments
-        let argument_list = if tokens.peek_is(MacroTokenType::OpenParen, None) {
-            tokens.expect(MacroTokenType::OpenParen, None, "when parsing label definition")?;
-
-            let mut arguments = Vec::with_capacity(2);
-            while let Some(token) = tokens.next() {
-                if token.is(MacroTokenType::Register) {
-                    let reg = Register::from(token.inner().value.as_str());
-                    if reg.is_loadable() {
-                        if arguments.contains(&reg) {
-                            return Err(token.error("Duplicate register in label argument list".to_string()));
-                        }
-                        arguments.push(reg);
-
-                    } else {
-                        return Err(token.error("Invalid register in label argument list".to_string()));
-                    }
-                    continue;
-
-                } else if token.is(MacroTokenType::Comma) {
-                    continue;
-
-                } else if token.is(MacroTokenType::CloseParen) {
-                    break;
-
-                } else {
-                    return Err(token.error("Only registers are allowed inside label argument".to_string()));
-                }
-            }
-            Some(arguments)
-
-        } else {
-            None
-        };
-
+        let argument_list = Self::parse_label_argument_list(tokens)?;
         if argument_list.is_some() || tokens.peek_is(MacroTokenType::Colon, None) {
 
             let colon = tokens.expect(MacroTokenType::Colon, None, "when parsing label definition")?.into_inner();
@@ -494,6 +476,46 @@ impl ValueStage {
 
         } else {
             Ok(ValueToken::Name(inner))
+        }
+    }
+
+    fn parse_label_argument_list(
+        tokens: &mut TokenIterator<MacroToken>
+
+    ) -> Result<Option<Vec<Register>>, SourceError> {
+
+        if tokens.peek_is(MacroTokenType::OpenParen, None) {
+            tokens.expect(MacroTokenType::OpenParen, None, "when parsing label definition")?;
+
+            let mut arguments = Vec::with_capacity(2);
+            while let Some(token) = tokens.next() {
+                if token.is(MacroTokenType::Register) {
+                    let reg = Register::from(token.inner().value.as_str());
+                    if reg.is_loadable() {
+                        if arguments.contains(&reg) {
+                            return Err(token.error("Duplicate register in label argument list".to_string()));
+                        }
+                        arguments.push(reg);
+
+                    } else {
+                        return Err(token.error("Invalid register in label argument list".to_string()));
+                    }
+                    continue;
+
+                } else if token.is(MacroTokenType::Comma) {
+                    continue;
+
+                } else if token.is(MacroTokenType::CloseParen) {
+                    break;
+
+                } else {
+                    return Err(token.error("Only registers are allowed inside label argument".to_string()));
+                }
+            }
+            Ok(Some(arguments))
+
+        } else {
+            Ok(None)
         }
     }
 
@@ -865,10 +887,10 @@ mod test {
             1,
             Some(vec![])
 
-        ), ValueToken::LabelCall(
+        ), ValueToken::ParentLabelCall(
             itk!(16, 28, "parent_label"),
             1,
-            vec![]
+            Some(vec![])
         )]);
     }
 
@@ -1421,11 +1443,6 @@ mod test {
     #[test]
     fn test_error_colon_standlone() {
         assert_eq!(value_lexer_error(":"), "In file \"main.gb.s\" on line 1, column 1: Unexpected standalone \":\", expected a \"Name\" token to preceed it.\n\n:\n^--- Here");
-    }
-
-    #[test]
-    fn test_error_global_standalone() {
-        assert_eq!(value_lexer_error("GLOBAL"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing GLOBAL declaration, expected a \"Name\" token instead.\n\nGLOBAL\n^--- Here");
     }
 
     // If Statements ----------------------------------------------------------

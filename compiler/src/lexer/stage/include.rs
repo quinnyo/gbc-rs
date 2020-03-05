@@ -31,7 +31,7 @@ lexer_token!(IncludeToken, IncludeType, (Debug, Eq, PartialEq, Clone), {
     TokenGroupClose(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<IncludeToken>>)),
-    LabelCall((Vec<Vec<IncludeToken>>)),
+    ParentLabelCall((Vec<Vec<IncludeToken>>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -329,7 +329,7 @@ impl IncludeStage {
                     Symbol::DB | Symbol::DW | Symbol::BW | Symbol::DS | Symbol::IF | Symbol::TO | Symbol::IN |
                     Symbol::DS8 | Symbol::EQU | Symbol::FOR |
                     Symbol::DS16 | Symbol::BANK |
-                    Symbol::THEN | Symbol::ELSE | Symbol::ENDIF |
+                    Symbol::THEN | Symbol::ELSE | Symbol::ENDIF | Symbol::CONST |
                     Symbol::MACRO | Symbol::USING | Symbol::BLOCK | Symbol::NAMESPACE |
                     Symbol::ENDFOR | Symbol::REPEAT | Symbol::BINARY | Symbol::DEFAULT | Symbol::SECTION | Symbol::GLOBAL |
                     Symbol::INCLUDE | Symbol::VOLATILE |
@@ -920,7 +920,7 @@ mod test {
             Reserved,
             "DB", "DW", "BW", "IF", "TO", "IN",
             "FOR", "DS8", "DS16", "EQU", "BANK", "THEN", "ELSE",
-            "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "GLOBAL", "NAMESPACE",
+            "CONST", "ENDIF", "MACRO", "ENDFOR", "REPEAT", "USING", "GLOBAL", "NAMESPACE",
             "DEFAULT", "SECTION", "VOLATILE", "ENDMACRO", "ENDBLOCK", "ENDNAMESPACE"
         );
     }

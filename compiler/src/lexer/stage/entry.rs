@@ -52,7 +52,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     VolatileStatement((Vec<EntryToken>))
 
 }, {
-    // Constant + EQU + ConstExpression
+    // Constant + ConstExpression
     Constant {
         is_default => bool,
         is_private => bool,
@@ -227,12 +227,7 @@ impl EntryStage {
 
                 // Constant Declarations
                 ExpressionToken::Constant(inner, is_default, is_private) => {
-                    if tokens.peek_is(ExpressionTokenType::Reserved, Some(Symbol::EQU)) {
-                        Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default, is_private)?
-
-                    } else {
-                        unreachable!("Expression lexer failed to return \"Constant\" token only if followed by EQU");
-                    }
+                    Self::parse_constant_declaration(&mut tokens, &mut fixed_constants, &mut default_constants, inner, is_default, is_private)?
                 },
 
                 // Instructions
@@ -394,7 +389,7 @@ impl EntryStage {
         is_private: bool
 
     ) -> Result<EntryToken, SourceError> {
-        tokens.expect(ExpressionTokenType::Reserved, None, "when parsing constant declaration")?;
+        //tokens.expect(ExpressionTokenType::Reserved, None, "when parsing constant declaration")?;
         let file_index = if is_private {
             Some(inner.file_index)
 
@@ -1731,7 +1726,6 @@ mod test {
     #[test]
     fn test_error_unexpected() {
         assert_eq!(entry_lexer_error("2 + 2"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
-        assert_eq!(entry_lexer_error("EQU"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"EQU\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nEQU\n^--- Here");
         assert_eq!(entry_lexer_error("BANK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"BANK\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nBANK\n^--- Here");
         assert_eq!(entry_lexer_error(","), "In file \"main.gb.s\" on line 1, column 1: Unexpected Comma, expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
         assert_eq!(entry_lexer_error("["), "In file \"main.gb.s\" on line 1, column 1: Unexpected OpenBracket, expected either a constant declaration, directive or instruction instead.\n\n[\n^--- Here");
@@ -1752,39 +1746,39 @@ mod test {
 
     // Constant Declarations --------------------------------------------------
     #[test]
-    fn test_const_declaration_equ() {
-        assert_eq!(tfe("foo EQU 2"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
+    fn test_const_declaration() {
+        assert_eq!(tfe("CONST foo 2"), vec![EntryToken::Constant {
+            inner: itk!(6, 9, "foo"),
             is_default: false,
             is_private: true,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
-        assert_eq!(tfe("GLOBAL foo EQU 2"), vec![EntryToken::Constant {
-            inner: itk!(7, 10, "foo"),
+        assert_eq!(tfe("GLOBAL CONST foo 2"), vec![EntryToken::Constant {
+            inner: itk!(13, 16, "foo"),
             is_default: false,
             is_private: false,
             value: Expression::Value(ExpressionValue::Integer(2))
         }]);
-        assert_eq!(tfe("foo EQU bar"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
+        assert_eq!(tfe("CONST foo bar"), vec![EntryToken::Constant {
+            inner: itk!(6, 9, "foo"),
             is_default: false,
             is_private: true,
             value: Expression::Value(ExpressionValue::ConstantValue(
-                itk!(8, 11, "bar"),
+                itk!(10, 13, "bar"),
                 Symbol::from("bar".to_string())
             ))
         }]);
-        assert_eq!(tfe("foo DEFAULT EQU bar"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
+        assert_eq!(tfe("DEFAULT CONST foo bar"), vec![EntryToken::Constant {
+            inner: itk!(14, 17, "foo"),
             is_default: true,
             is_private: true,
             value: Expression::Value(ExpressionValue::ConstantValue(
-                itk!(16, 19, "bar"),
+                itk!(18, 21, "bar"),
                 Symbol::from("bar".to_string())
             ))
         }]);
-        assert_eq!(tfe("foo EQU 'test'"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
+        assert_eq!(tfe("CONST foo 'test'"), vec![EntryToken::Constant {
+            inner: itk!(6, 9, "foo"),
             is_default: false,
             is_private: true,
             value: Expression::Value(ExpressionValue::String("test".to_string()))
@@ -1793,14 +1787,14 @@ mod test {
 
     #[test]
     fn test_const_default_declaration() {
-        assert_eq!(tfe("foo DEFAULT EQU 1\nfoo EQU 2"), vec![EntryToken::Constant {
-            inner: itk!(0, 3, "foo"),
+        assert_eq!(tfe("DEFAULT CONST foo 1\nCONST foo 2"), vec![EntryToken::Constant {
+            inner: itk!(14, 17, "foo"),
             is_default: true,
             is_private: true,
             value: Expression::Value(ExpressionValue::Integer(1))
 
         }, EntryToken::Constant {
-            inner: itk!(18, 21, "foo"),
+            inner: itk!(26, 29, "foo"),
             is_default: false,
             is_private: true,
             value: Expression::Value(ExpressionValue::Integer(2))
@@ -1809,29 +1803,29 @@ mod test {
 
     #[test]
     fn test_error_const_default_redeclaration() {
-        assert_eq!(entry_lexer_error("foo DEFAULT EQU 1\nfoo DEFAULT EQU 2"), "In file \"main.gb.s\" on line 2, column 1: Re-definition of previously declared constant default \"foo\".\n\nfoo DEFAULT EQU 2\n^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo DEFAULT EQU 1\n^--- Here");
+        assert_eq!(entry_lexer_error("DEFAULT CONST foo 1\nDEFAULT CONST foo 2"), "In file \"main.gb.s\" on line 2, column 15: Re-definition of previously declared constant default \"foo\".\n\nDEFAULT CONST foo 2\n              ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 15:\n\nDEFAULT CONST foo 1\n              ^--- Here");
     }
 
     #[test]
     fn test_error_const_default_double_override() {
-        assert_eq!(entry_lexer_error("foo DEFAULT EQU 1\nfoo EQU 2\nfoo EQU 3"), "In file \"main.gb.s\" on line 3, column 1: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 3\n^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 2, column 1:\n\nfoo EQU 2\n^--- Here");
+        assert_eq!(entry_lexer_error("DEFAULT CONST foo 1\nCONST foo 2\nCONST foo 3"), "In file \"main.gb.s\" on line 3, column 7: Re-definition of previously declared constant \"foo\".\n\nCONST foo 3\n      ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 2, column 7:\n\nCONST foo 2\n      ^--- Here");
     }
 
     #[test]
     fn test_error_const_redeclaration() {
-        assert_eq!(entry_lexer_error("foo EQU 2 foo EQU 2"), "In file \"main.gb.s\" on line 1, column 11: Re-definition of previously declared constant \"foo\".\n\nfoo EQU 2 foo EQU 2\n          ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 1:\n\nfoo EQU 2 foo EQU 2\n^--- Here");
+        assert_eq!(entry_lexer_error("CONST foo 2 CONST foo 2"), "In file \"main.gb.s\" on line 1, column 19: Re-definition of previously declared constant \"foo\".\n\nCONST foo 2 CONST foo 2\n                  ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nCONST foo 2 CONST foo 2\n      ^--- Here");
     }
 
     #[test]
     fn test_error_const_declaration_no_expr() {
-        assert_eq!(entry_lexer_error("foo EQU"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU\n    ^--- Here");
-        assert_eq!(entry_lexer_error("foo EQU DB"), "In file \"main.gb.s\" on line 1, column 9: Unexpected token \"Reserved\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU DB\n        ^--- Here");
-        assert_eq!(entry_lexer_error("global_label:\nfoo EQU global_label"), "In file \"main.gb.s\" on line 2, column 9: Unexpected token \"Expression\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nfoo EQU global_label\n        ^--- Here");
+        assert_eq!(entry_lexer_error("CONST foo"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo\n      ^--- Here");
+        assert_eq!(entry_lexer_error("CONST foo DB"), "In file \"main.gb.s\" on line 1, column 11: Unexpected token \"Reserved\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo DB\n          ^--- Here");
+        assert_eq!(entry_lexer_error("global_label:\nCONST foo global_label"), "In file \"main.gb.s\" on line 2, column 11: Unexpected token \"Expression\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo global_label\n          ^--- Here");
     }
 
     #[test]
     fn test_error_const_declaration_child_global_override() {
-        assert_eq!(entry_lex_child_error("GLOBAL FOO EQU 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL FOO EQU 2"), "In file \"child.gb.s\" on line 1, column 8: Re-definition of previously declared constant \"FOO\".\n\nGLOBAL FOO EQU 2\n       ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 8:\n\nGLOBAL FOO EQU 1\n       ^--- Here");
+        assert_eq!(entry_lex_child_error("GLOBAL CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2"), "In file \"child.gb.s\" on line 1, column 14: Re-definition of previously declared constant \"FOO\".\n\nGLOBAL CONST FOO 2\n             ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 14:\n\nGLOBAL CONST FOO 1\n             ^--- Here");
     }
 
     // Data Declarations ------------------------------------------------------
@@ -2790,7 +2784,7 @@ mod test {
                 1,
                 Some(vec![Register::Accumulator])
             ),
-            EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::LabelCall {
+            EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::ParentLabelCall {
                 inner: itk!(22, 34, "global_label"),
                 id: 1,
                 name: Symbol::from("global_label".to_string()),
@@ -2803,7 +2797,7 @@ mod test {
                 1,
                 Some(vec![Register::Accumulator])
             ),
-            EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::LabelCall {
+            EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::ParentLabelCall {
                 inner: itk!(22, 34, "global_label"),
                 id: 1,
                 name: Symbol::from("global_label".to_string()),

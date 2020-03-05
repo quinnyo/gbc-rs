@@ -132,12 +132,12 @@ lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
     StringLiteral(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<MacroToken>>)),
-    LabelCall((Vec<Vec<MacroToken>>)),
+    ParentLabelCall((Vec<Vec<MacroToken>>)),
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     ForStatement((ForStatement<MacroToken>)),
     BlockStatement((BlockStatement<MacroToken>)),
     NamespaceStatement((NamespaceStatement<MacroToken>)),
-    Lookup((Vec<InnerToken>)),
+    Lookup((Vec<MacroToken>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -169,7 +169,7 @@ impl From<IncludeToken> for MacroToken {
 
                 }).collect()
             ),
-            IncludeToken::LabelCall(inner, args) => MacroToken::LabelCall(
+            IncludeToken::ParentLabelCall(inner, args) => MacroToken::ParentLabelCall(
                 inner,
                 args.into_iter().map(|tokens| {
                     tokens.into_iter().map(MacroToken::from).collect()
@@ -507,14 +507,21 @@ impl MacroStage {
             // Parse Namespace Access
             } else if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::Member, None) {
                 let mut members = Vec::with_capacity(4);
-                let mut name = token;
-                let inner = name.inner().clone();
+                let mut member = token;
+                let inner = member.inner().clone();
                 while tokens.peek_is(IncludeType::Member, None) {
-                    members.push(name.into_inner());
+                    members.push(MacroToken::from(member));
                     tokens.expect(IncludeType::Member, None, "when parsing namespace member access")?;
-                    name = tokens.expect(IncludeType::Name, None, "when parsing namespace member access")?;
+
+                    if tokens.peek_is(IncludeType::ParentLabelCall, None) {
+                        member = tokens.expect(IncludeType::ParentLabelCall, None, "when parsing namespace member access")?;
+                        break;
+
+                    } else {
+                        member = tokens.expect(IncludeType::Name, None, "when parsing namespace member access")?;
+                    }
                 }
-                members.push(name.into_inner());
+                members.push(MacroToken::from(member));
                 tokens_with_statements.push(MacroToken::Lookup(inner, members));
 
             } else if token.is(IncludeType::Member) {
@@ -740,7 +747,7 @@ impl MacroStage {
             )?);
         }
 
-        Ok(IncludeToken::LabelCall(inner, arguments))
+        Ok(IncludeToken::ParentLabelCall(inner, arguments))
     }
 
     fn parse_builtin_call(
@@ -1464,7 +1471,7 @@ mod test {
            MacroToken::Colon(
                 itk!(24, 25, ":")
            ),
-           MacroToken::LabelCall(
+           MacroToken::ParentLabelCall(
                 itk!(26, 38, "parent_label"),
                 vec![
                     vec![MacroToken::NumberLiteral(
