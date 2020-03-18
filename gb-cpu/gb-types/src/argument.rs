@@ -190,13 +190,13 @@ impl Into<LexerArgument> for Argument {
         match self {
             Argument::MemoryLookupByteValue => LexerArgument::MemoryLookupValue,
             Argument::MemoryLookupWordValue => LexerArgument::MemoryLookupValue,
-            Argument::MemoryLookupRegister(r) => LexerArgument::MemoryLookupRegister(r.clone()),
+            Argument::MemoryLookupRegister(r) => LexerArgument::MemoryLookupRegister(r),
             Argument::ByteValue => LexerArgument::Value,
             Argument::SignedByteValue => LexerArgument::Value,
             Argument::WordValue => LexerArgument::Value,
             Argument::ConstantValue(_) => LexerArgument::Value,
-            Argument::Register(r) => LexerArgument::Register(r.clone()),
-            Argument::Flag(f) => LexerArgument::Flag(f.clone()),
+            Argument::Register(r) => LexerArgument::Register(r),
+            Argument::Flag(f) => LexerArgument::Flag(f),
             Argument::Unused => LexerArgument::Value
         }
     }

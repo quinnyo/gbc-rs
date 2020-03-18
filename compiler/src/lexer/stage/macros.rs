@@ -65,7 +65,7 @@ lazy_static! {
 }
 
 
-// Parsing Structs  -----------------------------------------------------------
+// Parsing Namespaces  --------------------------------------------------------
 struct MacroContext<'t> {
     def: &'t MacroDefinition,
     args: Vec<Vec<IncludeToken>>
@@ -112,7 +112,7 @@ pub enum BlockStatement<T: LexerToken> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct StructStatement<T: LexerToken> {
+pub struct NamespaceStatement<T: LexerToken> {
     pub name: Box<T>,
     pub body: Vec<T>
 }
@@ -132,12 +132,12 @@ lexer_token!(MacroToken, MacroTokenType, (Debug, Eq, PartialEq), {
     StringLiteral(()),
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<MacroToken>>)),
-    LabelCall((Vec<Vec<MacroToken>>)),
+    ParentLabelCall((Vec<Vec<MacroToken>>)),
     IfStatement((Vec<IfStatementBranch<MacroToken>>)),
     ForStatement((ForStatement<MacroToken>)),
     BlockStatement((BlockStatement<MacroToken>)),
-    StructStatement((StructStatement<MacroToken>)),
-    Lookup((Vec<InnerToken>)),
+    NamespaceStatement((NamespaceStatement<MacroToken>)),
+    Lookup((Vec<MacroToken>)),
     Comma(()),
     Point(()),
     Colon(()),
@@ -169,7 +169,7 @@ impl From<IncludeToken> for MacroToken {
 
                 }).collect()
             ),
-            IncludeToken::LabelCall(inner, args) => MacroToken::LabelCall(
+            IncludeToken::ParentLabelCall(inner, args) => MacroToken::ParentLabelCall(
                 inner,
                 args.into_iter().map(|tokens| {
                     tokens.into_iter().map(MacroToken::from).collect()
@@ -416,16 +416,16 @@ impl MacroStage {
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
 
-            // Parse struct statements
-            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDSTRUCT) {
-                return Err(token.error(format!("Unexpected \"{}\" token outside of STRUCT statement.", token.symbol())));
+            // Parse namespacxe statements
+            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDNAMESPACE) {
+                return Err(token.error(format!("Unexpected \"{}\" token outside of NAMESPACE statement.", token.symbol())));
 
-            } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::STRUCT) {
+            } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::NAMESPACE) {
                 let inner = token.inner().clone();
-                let name = MacroToken::from(tokens.expect(IncludeType::Name, None, "when parsing STRUCT statement")?);
+                let name = MacroToken::from(tokens.expect(IncludeType::Name, None, "when parsing NAMESPACE statement")?);
 
-                let body = Self::parse_struct_body(&mut tokens)?;
-                tokens_with_statements.push(MacroToken::StructStatement(inner, StructStatement {
+                let body = Self::parse_namespace_body(&mut tokens)?;
+                tokens_with_statements.push(MacroToken::NamespaceStatement(inner, NamespaceStatement {
                     name: Box::new(name),
                     body
                 }));
@@ -504,21 +504,28 @@ impl MacroStage {
                     return Err(token.error("Expected either a USING or VOLATILE keyword to BLOCK directive.".to_string()));
                 }
 
-            // Parse Struct Access
+            // Parse Namespace Access
             } else if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::Member, None) {
-                let mut fields = Vec::with_capacity(4);
-                let mut name = token;
-                let inner = name.inner().clone();
+                let mut members = Vec::with_capacity(4);
+                let mut member = token;
+                let inner = member.inner().clone();
                 while tokens.peek_is(IncludeType::Member, None) {
-                    fields.push(name.into_inner());
-                    tokens.expect(IncludeType::Member, None, "when parsing struct field access")?;
-                    name = tokens.expect(IncludeType::Name, None, "when parsing struct field access")?;
+                    members.push(MacroToken::from(member));
+                    tokens.expect(IncludeType::Member, None, "when parsing namespace member access")?;
+
+                    if tokens.peek_is(IncludeType::ParentLabelCall, None) {
+                        member = tokens.expect(IncludeType::ParentLabelCall, None, "when parsing namespace member access")?;
+                        break;
+
+                    } else {
+                        member = tokens.expect(IncludeType::Name, None, "when parsing namespace member access")?;
+                    }
                 }
-                fields.push(name.into_inner());
-                tokens_with_statements.push(MacroToken::Lookup(inner, fields));
+                members.push(MacroToken::from(member));
+                tokens_with_statements.push(MacroToken::Lookup(inner, members));
 
             } else if token.is(IncludeType::Member) {
-                return Err(token.error("Incomplete struct field access.".to_string()));
+                return Err(token.error("Incomplete namespace member access.".to_string()));
 
             } else {
                 tokens_with_statements.push(MacroToken::from(token));
@@ -740,7 +747,7 @@ impl MacroStage {
             )?);
         }
 
-        Ok(IncludeToken::LabelCall(inner, arguments))
+        Ok(IncludeToken::ParentLabelCall(inner, arguments))
     }
 
     fn parse_builtin_call(
@@ -1063,31 +1070,31 @@ impl MacroStage {
     }
 
 
-    fn parse_struct_body(
+    fn parse_namespace_body(
         tokens: &mut TokenIterator<IncludeToken>
 
     ) -> Result<Vec<MacroToken>, SourceError> {
         let mut body_tokens = Vec::with_capacity(16);
-        let mut struct_depth = 0;
-        while struct_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDSTRUCT)) {
+        let mut namespace_depth = 0;
+        while namespace_depth > 0 || !tokens.peek_is(IncludeType::Reserved, Some(Symbol::ENDNAMESPACE)) {
 
-            let token = tokens.get("Unexpected end of input while parsing STRUCT statement body.")?;
+            let token = tokens.get("Unexpected end of input while parsing NAMESPACE statement body.")?;
             if token.is_symbol(Symbol::GLOBAL) {
-                return Err(token.error("Struct fields cannot be declared GLOBAL individually.".to_string()));
+                return Err(token.error("Namespace members cannot be declared GLOBAL individually.".to_string()));
             }
 
             // Check for nested statements
-            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::STRUCT) {
-                struct_depth += 1;
+            if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::NAMESPACE) {
+                namespace_depth += 1;
 
-            } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDSTRUCT) {
-                struct_depth -= 1;
+            } else if token.is(IncludeType::Reserved) && token.is_symbol(Symbol::ENDNAMESPACE) {
+                namespace_depth -= 1;
             }
 
             body_tokens.push(token);
 
         }
-        tokens.expect(IncludeType::Reserved, Some(Symbol::ENDSTRUCT), "when parsing STRUCT statement body")?;
+        tokens.expect(IncludeType::Reserved, Some(Symbol::ENDNAMESPACE), "when parsing NAMESPACE statement body")?;
 
         // Parse nested statements
         Self::parse_statements(body_tokens)
@@ -1112,7 +1119,7 @@ mod test {
         IfStatementBranch,
         ForStatement,
         BlockStatement,
-        StructStatement
+        NamespaceStatement
     };
 
     fn macro_lexer_error<S: Into<String>>(s: S) -> String {
@@ -1464,7 +1471,7 @@ mod test {
            MacroToken::Colon(
                 itk!(24, 25, ":")
            ),
-           MacroToken::LabelCall(
+           MacroToken::ParentLabelCall(
                 itk!(26, 38, "parent_label"),
                 vec![
                     vec![MacroToken::NumberLiteral(
@@ -2119,66 +2126,66 @@ mod test {
         assert_eq!(macro_lexer_error("ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDBLOCK\" token outside of BLOCK statement.\n\nENDBLOCK\n^--- Here");
     }
 
-    // Struct Statements ------------------------------------------------------
+    // Namespace Statements ---------------------------------------------------
     #[test]
-    fn test_struct_statement() {
-        let lexer = macro_lex("STRUCT foo ENDSTRUCT");
+    fn test_namespace_statement() {
+        let lexer = macro_lex("NAMESPACE foo ENDNAMESPACE");
         assert_eq!(lexer.tokens, vec![
-            MacroToken::StructStatement(itk!(0, 6, "STRUCT"), StructStatement {
-                name: Box::new(MacroToken::Name(itk!(7, 10, "foo"))),
+            MacroToken::NamespaceStatement(itk!(0, 9, "NAMESPACE"), NamespaceStatement {
+                name: Box::new(MacroToken::Name(itk!(10, 13, "foo"))),
                 body: vec![]
             })
         ]);
-        let lexer = macro_lex("STRUCT foo\nfoo: DB\nbar: DB\nENDSTRUCT");
+        let lexer = macro_lex("NAMESPACE foo\nfoo: DB\nbar: DB\nENDNAMESPACE");
         assert_eq!(lexer.tokens, vec![
-            MacroToken::StructStatement(itk!(0, 6, "STRUCT"), StructStatement {
-                name: Box::new(MacroToken::Name(itk!(7, 10, "foo"))),
+            MacroToken::NamespaceStatement(itk!(0, 9, "NAMESPACE"), NamespaceStatement {
+                name: Box::new(MacroToken::Name(itk!(10, 13, "foo"))),
                 body: vec![
-                    MacroToken::Name(itk!(11, 14, "foo")),
-                    MacroToken::Colon(itk!(14, 15, ":")),
-                    MacroToken::Reserved(itk!(16, 18, "DB")),
-                    MacroToken::Name(itk!(19, 22, "bar")),
-                    MacroToken::Colon(itk!(22, 23, ":")),
-                    MacroToken::Reserved(itk!(24, 26, "DB"))
-                ]
-            })
-        ]);
-    }
-
-    #[test]
-    fn test_struct_statement_nested() {
-        let lexer = macro_lex("STRUCT foo prefix: DB STRUCT bar inner: DB ENDSTRUCT outer: DB ENDSTRUCT");
-        assert_eq!(lexer.tokens, vec![
-            MacroToken::StructStatement(itk!(0, 6, "STRUCT"), StructStatement {
-                name: Box::new(MacroToken::Name(itk!(7, 10, "foo"))),
-                body: vec![
-                    MacroToken::Name(itk!(11, 17, "prefix")),
+                    MacroToken::Name(itk!(14, 17, "foo")),
                     MacroToken::Colon(itk!(17, 18, ":")),
                     MacroToken::Reserved(itk!(19, 21, "DB")),
-                    MacroToken::StructStatement(itk!(22, 28, "STRUCT"), StructStatement {
-                        name: Box::new(MacroToken::Name(itk!(29, 32, "bar"))),
-                        body: vec![
-                            MacroToken::Name(itk!(33, 38, "inner")),
-                            MacroToken::Colon(itk!(38, 39, ":")),
-                            MacroToken::Reserved(itk!(40, 42, "DB")),
-                        ]
-                    }),
-                    MacroToken::Name(itk!(53, 58, "outer")),
-                    MacroToken::Colon(itk!(58, 59, ":")),
-                    MacroToken::Reserved(itk!(60, 62, "DB"))
+                    MacroToken::Name(itk!(22, 25, "bar")),
+                    MacroToken::Colon(itk!(25, 26, ":")),
+                    MacroToken::Reserved(itk!(27, 29, "DB"))
                 ]
             })
         ]);
     }
 
     #[test]
-    fn test_error_struct_statement() {
-        assert_eq!(macro_lexer_error("STRUCT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing STRUCT statement, expected a \"Name\" token instead.\n\nSTRUCT\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDSTRUCT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDSTRUCT\" token outside of STRUCT statement.\n\nENDSTRUCT\n^--- Here");
-        assert_eq!(macro_lexer_error("STRUCT foo GLOBAL ENDSTRUCT"), "In file \"main.gb.s\" on line 1, column 12: Struct fields cannot be declared GLOBAL individually.\n\nSTRUCT foo GLOBAL ENDSTRUCT\n           ^--- Here");
-        assert_eq!(macro_lexer_error("->"), "In file \"main.gb.s\" on line 1, column 1: Incomplete struct field access.\n\n->\n^--- Here");
-        assert_eq!(macro_lexer_error("foo->"), "In file \"main.gb.s\" on line 1, column 4: Unexpected end of input when parsing struct field access, expected a \"Name\" token instead.\n\nfoo->\n   ^--- Here");
-        assert_eq!(macro_lexer_error("foo->DB"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Reserved\" when parsing struct field access, expected a \"Name\" token instead.\n\nfoo->DB\n     ^--- Here");
+    fn test_namespace_statement_nested() {
+        let lexer = macro_lex("NAMESPACE foo prefix: DB NAMESPACE bar inner: DB ENDNAMESPACE outer: DB ENDNAMESPACE");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::NamespaceStatement(itk!(0, 9, "NAMESPACE"), NamespaceStatement {
+                name: Box::new(MacroToken::Name(itk!(10, 13, "foo"))),
+                body: vec![
+                    MacroToken::Name(itk!(14, 20, "prefix")),
+                    MacroToken::Colon(itk!(20, 21, ":")),
+                    MacroToken::Reserved(itk!(22, 24, "DB")),
+                    MacroToken::NamespaceStatement(itk!(25, 34, "NAMESPACE"), NamespaceStatement {
+                        name: Box::new(MacroToken::Name(itk!(35, 38, "bar"))),
+                        body: vec![
+                            MacroToken::Name(itk!(39, 44, "inner")),
+                            MacroToken::Colon(itk!(44, 45, ":")),
+                            MacroToken::Reserved(itk!(46, 48, "DB")),
+                        ]
+                    }),
+                    MacroToken::Name(itk!(62, 67, "outer")),
+                    MacroToken::Colon(itk!(67, 68, ":")),
+                    MacroToken::Reserved(itk!(69, 71, "DB"))
+                ]
+            })
+        ]);
+    }
+
+    #[test]
+    fn test_error_namespace_statement() {
+        assert_eq!(macro_lexer_error("NAMESPACE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing NAMESPACE statement, expected a \"Name\" token instead.\n\nNAMESPACE\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDNAMESPACE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDNAMESPACE\" token outside of NAMESPACE statement.\n\nENDNAMESPACE\n^--- Here");
+        assert_eq!(macro_lexer_error("NAMESPACE foo GLOBAL ENDNAMESPACE"), "In file \"main.gb.s\" on line 1, column 15: Namespace members cannot be declared GLOBAL individually.\n\nNAMESPACE foo GLOBAL ENDNAMESPACE\n              ^--- Here");
+        assert_eq!(macro_lexer_error("::"), "In file \"main.gb.s\" on line 1, column 1: Incomplete namespace member access.\n\n::\n^--- Here");
+        assert_eq!(macro_lexer_error("foo::"), "In file \"main.gb.s\" on line 1, column 4: Unexpected end of input when parsing namespace member access, expected a \"Name\" token instead.\n\nfoo::\n   ^--- Here");
+        assert_eq!(macro_lexer_error("foo::DB"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Reserved\" when parsing namespace member access, expected a \"Name\" token instead.\n\nfoo::DB\n     ^--- Here");
     }
 
 }

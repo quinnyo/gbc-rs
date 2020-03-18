@@ -37,7 +37,7 @@ pub enum Expression {
         name: Symbol,
         args: Vec<Expression>
     },
-    LabelCall {
+    ParentLabelCall {
         inner: InnerToken,
         id: usize,
         name: Symbol,
@@ -56,7 +56,7 @@ impl Expression {
             Expression::Unary { right, .. } => right.is_constant(),
             Expression::Value(value) => value.is_constant(),
             Expression::BuiltinCall { args, .. } => args.iter().all(Expression::is_constant),
-            Expression::LabelCall { .. } => false,
+            Expression::ParentLabelCall { .. } => false,
             Expression::RegisterArgument { .. } => true
         }
     }
@@ -70,7 +70,7 @@ impl Expression {
 
     pub fn is_call(&self) -> bool {
         match self {
-            Expression::LabelCall { .. } => true,
+            Expression::ParentLabelCall { .. } => true,
             _ => false
         }
     }

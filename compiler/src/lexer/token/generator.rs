@@ -97,7 +97,6 @@ impl TokenGenerator {
         }
     }
 
-
     pub fn next(&mut self) -> char {
         let c = *self.chars.get(self.state.index).unwrap_or(&'\0');
         self.state.current = c;

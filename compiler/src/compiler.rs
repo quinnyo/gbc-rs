@@ -562,8 +562,8 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nUNUSED EQU 2\nUSED EQU 1\nDB USED", ""),
-            "        Info Linter Report\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 1\n".to_string()
+            compiler_lint(l, c, "SECTION ROM0\nCONST UNUSED 2\nCONST USED 1\nDB USED", ""),
+            "        Info Linter Report\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 7\n".to_string()
         );
     }
 
@@ -572,8 +572,8 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nUNUSED EQU INDIRECT_UNUSED\nINDIRECT_UNUSED EQU 2\nINDIRECT_USED EQU 1\nUSED EQU INDIRECT_USED\nDB USED", ""),
-            "        Info Linter Report\n     Warning Constant \"INDIRECT_UNUSED\" is never used, declared in file \"main.gb.s\" on line 3, column 1\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 1\n".to_string()
+            compiler_lint(l, c, "SECTION ROM0\nCONST UNUSED INDIRECT_UNUSED\nCONST INDIRECT_UNUSED 2\nCONST INDIRECT_USED 1\nCONST USED INDIRECT_USED\nDB USED", ""),
+            "        Info Linter Report\n     Warning Constant \"INDIRECT_UNUSED\" is never used, declared in file \"main.gb.s\" on line 3, column 7\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 7\n".to_string()
         );
     }
 
@@ -592,7 +592,7 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nUSED EQU 2048\nDW USED\nDW 2048", ""),
+            compiler_lint(l, c, "SECTION ROM0\nCONST USED 2048\nDW USED\nDW 2048", ""),
             "        Info Linter Report\n     Warning Fixed integer value ($0800) could be replaced with the constant \"USED\" that shares the same value in file \"main.gb.s\" on line 4, column 4\n".to_string()
         );
     }
@@ -602,8 +602,8 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nGLOBAL USED EQU 2048\nDW USED\nDW SHARED\nGLOBAL SHARED EQU 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
-            "        Info Linter Report\n     Warning Constant \"USED\" should be made non-global or default, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 8\n".to_string()
+            compiler_lint(l, c, "SECTION ROM0\nGLOBAL CONST USED 2048\nDW USED\nDW SHARED\nGLOBAL CONST SHARED 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
+            "        Info Linter Report\n     Warning Constant \"USED\" should be made non-global or default, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 14\n".to_string()
         );
     }
 
@@ -612,8 +612,8 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nGLOBAL SHARED EQU 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
-            "        Info Linter Report\n     Warning Constant \"SHARED\" should be moved to another file, since it is never used at its declaration in file \"main.gb.s\" on line 2, column 8. Constant is only used in file \"child.gb.s\".\n".to_string()
+            compiler_lint(l, c, "SECTION ROM0\nGLOBAL CONST SHARED 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
+            "        Info Linter Report\n     Warning Constant \"SHARED\" should be moved to another file, since it is never used at its declaration in file \"main.gb.s\" on line 2, column 14. Constant is only used in file \"child.gb.s\".\n".to_string()
         );
     }
 
