@@ -252,12 +252,12 @@ impl Linker {
                 }
 
             // Note label definitions for error messages
-            } else if let EntryToken::ParentLabelDef(ref inner, index) = token {
+            } else if let EntryToken::ParentLabelDef(ref inner, label_id, ref args) = token {
                 if inactive_labels_only {
-                    context.declare_label(inner, index, false);
+                    context.declare_label(inner, label_id, args.clone(), false);
 
                 } else {
-                    context.declare_label(inner, index, true);
+                    context.declare_label(inner, label_id, args.clone(), true);
                     remaining_tokens.push((volatile_instructions, token));
                 }
 

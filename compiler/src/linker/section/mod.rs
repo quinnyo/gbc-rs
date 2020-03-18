@@ -10,6 +10,7 @@ use lazy_static::lazy_static;
 use gb_cpu::{self, Argument, Instruction};
 use file_io::FileReader;
 
+
 // Modules --------------------------------------------------------------------
 pub mod entry;
 
@@ -17,7 +18,7 @@ pub mod entry;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken, Symbol};
-use crate::expression::{ExpressionResult, DataExpression};
+use crate::expression::{Expression, ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
 use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
 use self::entry::{EntryData, SectionEntry};
@@ -250,7 +251,70 @@ impl Section {
                 ))
             },
             EntryToken::InstructionWithArg(inner, op_code, expr) => {
+                // sub expressions
                 self.check_rom(&inner, "Instruction")?;
+
+                // Callable expressions are only ever present on call instructions
+                if expr.is_call() {
+                    let registers = context.resolve_call_signature(&expr, usage)?;
+                    for (signature_reg, expr) in registers {
+                        if let Expression::RegisterArgument { inner, reg } = expr  {
+                            if signature_reg.byte_width() != reg.byte_width() {
+                                return Err(inner.error(
+                                    format!(
+                                        "{} byte argument register does not match expected {} byte register in call signature",
+                                        reg.byte_width(),
+                                        signature_reg.byte_width()
+                                    )
+                                ));
+
+                            } else if signature_reg != reg {
+                                if reg.byte_width() == 2 {
+                                    let (sl, sr) = signature_reg.to_pair();
+                                    let (al, ar) = reg.to_pair();
+                                    let op_code = sl.to_load_op_code(Some(al));
+                                    let bytes = Self::instruction_entry(&inner, context, usage, op_code, None, volatile, false)?;
+                                    self.entries.push(SectionEntry::new_with_size(
+                                        self.id,
+                                        inner.clone(),
+                                        instruction::size(op_code),
+                                        bytes
+                                    ));
+                                    let op_code = sr.to_load_op_code(Some(ar));
+                                    let bytes = Self::instruction_entry(&inner, context, usage, op_code, None, volatile, false)?;
+                                    self.entries.push(SectionEntry::new_with_size(
+                                        self.id,
+                                        inner.clone(),
+                                        instruction::size(op_code),
+                                        bytes
+                                    ));
+
+                                } else {
+                                    let op_code = signature_reg.to_load_op_code(Some(reg));
+                                    let bytes = Self::instruction_entry(&inner, context, usage, op_code, None, volatile, false)?;
+                                    self.entries.push(SectionEntry::new_with_size(
+                                        self.id,
+                                        inner.clone(),
+                                        instruction::size(op_code),
+                                        bytes
+                                    ));
+                                }
+                            }
+
+                        } else {
+                            // Load arguments into registers
+                            let op_code = signature_reg.to_load_op_code(None);
+                            let bytes = Self::instruction_entry(&inner, context, usage, op_code, Some(expr), volatile, false)?;
+                            self.entries.push(SectionEntry::new_with_size(
+                                self.id,
+                                inner.clone(),
+                                instruction::size(op_code),
+                                bytes
+                            ))
+                        }
+                    }
+                }
+
                 let bytes = Self::instruction_entry(&inner, context, usage, op_code, Some(expr), volatile, false)?;
                 self.entries.push(SectionEntry::new_with_size(
                     self.id,
@@ -279,7 +343,7 @@ impl Section {
                     bytes
                 ))
             },
-            EntryToken::ParentLabelDef(inner, id) => {
+            EntryToken::ParentLabelDef(inner, id, _) => {
                 let name = inner.value.clone();
                 self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
                     name: name.to_string(),
@@ -690,7 +754,7 @@ impl Section {
                 }
             },
             DataStorage::Buffer(ref length, ref fill) => {
-                let length_or_string = context.resolve_dyn_expression(length, usage, None, inner.file_index)?;
+                let length_or_string = context.resolve_dyn_expression(length, usage, None, false, inner.file_index)?;
                 let fill = context.resolve_opt_dyn_expression(fill, usage, None, inner.file_index)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"
@@ -744,11 +808,11 @@ impl Section {
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner.file_index)?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner.file_index)?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -775,8 +839,9 @@ impl Section {
         if let Some(argument) = instruction::argument(op_code) {
 
             // Handle constant/offset -> op code mapping
+            let is_call_instruction = Instruction::is_call_op_code(op_code);
             if let Some(offsets) = instruction::offsets(op_code) {
-                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid constant argument")?;
+                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid constant argument")?;
                 let mut mapped_op_code = None;
                 for (constant_value, constant_op_code) in offsets {
                     if value == *constant_value as i32 {
@@ -801,11 +866,11 @@ impl Section {
                 let mut arg_bytes: Vec<u8> = match argument {
                     Argument::MemoryLookupByteValue | Argument::ByteValue => {
                         vec![
-                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid byte argument")?
+                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid byte argument")?
                         ]
                     },
                     Argument::MemoryLookupWordValue | Argument::WordValue => {
-                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid word argument")?;
+                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid word argument")?;
                         vec![
                             word as u8,
                             (word >> 8) as u8
@@ -815,12 +880,12 @@ impl Section {
                         // ldsp hl,X
                         if op_code == 248 {
                             vec![
-                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, inner.file_index)?, "Invalid signed byte argument")?
+                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid signed byte argument")?
                             ]
 
                         // jr
                         } else if let Some(end_of_instruction) = end_of_instruction {
-                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), inner.file_index)?, "Invalid address")?;
+                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), is_call_instruction, inner.file_index)?, "Invalid address")?;
                             let target = address as i32 - end_of_instruction;
                             vec![
                                 util::signed_byte_value(inner, target, "").map_err(|mut e| {
@@ -910,6 +975,7 @@ impl Section {
 #[cfg(test)]
 mod test {
     use std::path::PathBuf;
+    use gb_cpu::Register;
     use super::super::test::{
         linker,
         linker_child,
@@ -2092,6 +2158,357 @@ mod test {
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
     }
+
+    // Callable Labels --------------------------------------------------------
+    #[test]
+    fn test_section_callable_labels() {
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label"), "In file \"main.gb.s\" on line 3, column 6: Reference to call-only label\n\ncall global_label\n     ^--- Here\n\nLabel is declared as callable and must be invoked with arguments in file \"main.gb.s\" on line 2, column 1:\n\nglobal_label(a):\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label()"), "In file \"main.gb.s\" on line 2, column 1: Invalid number of arguments for label call\n\nglobal_label(a):\n^--- Here\n\nLabel takes 1 arguments, but 0 were supplied in file \"main.gb.s\" on line 3, column 6:\n\ncall global_label()\n     ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(1, 2)"), "In file \"main.gb.s\" on line 2, column 1: Invalid number of arguments for label call\n\nglobal_label(a):\n^--- Here\n\nLabel takes 1 arguments, but 2 were supplied in file \"main.gb.s\" on line 3, column 6:\n\ncall global_label(1, 2)\n     ^--- Here");
+
+        let l = linker("SECTION ROM0\nglobal_label(a):\njr global_label");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(
+                        itk!(33, 45, "global_label"),
+                        1
+                    ))),
+                    bytes: vec![24, 254],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(a):\ncall global_label(1)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 62,
+                    expression: None,
+                    bytes: vec![62, 1],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(35, 47, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::Value(ExpressionValue::Integer(1))]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
+
+        let l = linker("SECTION ROM0\nglobal_label(a, b, c, d, e, h, l):\ncall global_label(1, 2, 3, 4, 5, 6, 7)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x3E,
+                    expression: None,
+                    bytes: vec![62, 1],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x06,
+                    expression: None,
+                    bytes: vec![0x06, 2],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x0E,
+                    expression: None,
+                    bytes: vec![0x0E, 3],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x16,
+                    expression: None,
+                    bytes: vec![0x16, 4],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x1E,
+                    expression: None,
+                    bytes: vec![0x1E, 5],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x26,
+                    expression: None,
+                    bytes: vec![0x26, 6],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x2E,
+                    expression: None,
+                    bytes: vec![0x2E, 7],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(53, 65, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![
+                            Expression::Value(ExpressionValue::Integer(1)),
+                            Expression::Value(ExpressionValue::Integer(2)),
+                            Expression::Value(ExpressionValue::Integer(3)),
+                            Expression::Value(ExpressionValue::Integer(4)),
+                            Expression::Value(ExpressionValue::Integer(5)),
+                            Expression::Value(ExpressionValue::Integer(6)),
+                            Expression::Value(ExpressionValue::Integer(7))
+                        ]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(hl, de, bc):\ncall global_label(1024, 42, 1)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 0x21,
+                    expression: None,
+                    bytes: vec![0x21, 0, 4],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 0x11,
+                    expression: None,
+                    bytes: vec![0x11, 42, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 0x01,
+                    expression: None,
+                    bytes: vec![0x01, 1, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(44, 56, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![
+                            Expression::Value(ExpressionValue::Integer(1024)),
+                            Expression::Value(ExpressionValue::Integer(42)),
+                            Expression::Value(ExpressionValue::Integer(1))
+                        ]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(a):\ncall global_label(a)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(35, 47, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::RegisterArgument {
+                            inner: itk!(48, 49, "a"),
+                            reg: Register::Accumulator
+                        }]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(hl):\ncall global_label(hl)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(36, 48, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::RegisterArgument {
+                            inner: itk!(49, 51, "hl"),
+                            reg: Register::HL
+                        }]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(a):\ncall global_label(b)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 120,
+                    expression: None,
+                    bytes: vec![120],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(35, 47, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::RegisterArgument {
+                            inner: itk!(48, 49, "b"),
+                            reg: Register::B
+                        }]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(d):\ncall global_label(l)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 85,
+                    expression: None,
+                    bytes: vec![85],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(35, 47, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::RegisterArgument {
+                            inner: itk!(48, 49, "l"),
+                            reg: Register::L
+                        }]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+
+        let l = linker("SECTION ROM0\nglobal_label(bc):\ncall global_label(hl)");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 68,
+                    expression: None,
+                    bytes: vec![68],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 77,
+                    expression: None,
+                    bytes: vec![77],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::LabelCall {
+                        inner: itk!(36, 48, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::RegisterArgument {
+                            inner: itk!(49, 51, "hl"),
+                            reg: Register::HL
+                        }]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(hl)"), "In file \"main.gb.s\" on line 3, column 19: 2 byte argument register does not match expected 1 byte register in call signature\n\ncall global_label(hl)\n                  ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(hl):\ncall global_label(a)"), "In file \"main.gb.s\" on line 3, column 19: 1 byte argument register does not match expected 2 byte register in call signature\n\ncall global_label(a)\n                  ^--- Here");
+
+    }
+
 
     // Using Blocks -----------------------------------------------------------
     #[test]

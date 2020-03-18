@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use gb_cpu::{Register, Flag, Argument, LexerArgument, self};
+use gb_cpu::{Instruction, Register, Flag, Argument, LexerArgument, self};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -42,7 +42,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     InstructionWithArg((u16, DataExpression)),
     DebugInstruction((u16)),
     DebugInstructionWithArg((u16, DataExpression)),
-    ParentLabelDef((usize)),
+    ParentLabelDef((usize, Option<Vec<Register>>)),
     ChildLabelDef((usize)),
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
     IfStatement((Vec<IfStatementBranch>)),
@@ -167,7 +167,7 @@ impl EntryStage {
             let entry = match token {
 
                 // Passthrough Label Defs
-                ExpressionToken::ParentLabelDef(inner, id) => EntryToken::ParentLabelDef(inner, id),
+                ExpressionToken::ParentLabelDef(inner, id, args) => EntryToken::ParentLabelDef(inner, id, args),
                 ExpressionToken::ChildLabelDef(inner, id) => EntryToken::ChildLabelDef(inner, id),
 
                 // If Statements
@@ -562,7 +562,14 @@ impl EntryStage {
 
         } else if let Some(op_code) = layouts.get(&key).cloned() {
             if let Some(expression) = expression {
-                Ok(EntryToken::InstructionWithArg(inner, op_code, expression))
+                if expression.is_call() && !Instruction::is_call_op_code(op_code) {
+                    Err(inner.error(
+                        "Label arguments can only be supplied when using call instructions.".to_string()
+                    ))
+
+                } else {
+                    Ok(EntryToken::InstructionWithArg(inner, op_code, expression))
+                }
 
             } else {
                 Ok(EntryToken::Instruction(inner, op_code))
@@ -855,7 +862,6 @@ impl EntryStage {
                     instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + reg.instruction_offset()));
 
                 } else {
-                    // TODO optimize out any ld a,a etc. instructions (not ld b,b though,since that is a breakpoint)
 
                     // ld a,reg
                     instructions.push(EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()));
@@ -1012,7 +1018,7 @@ impl EntryStage {
     fn parse_meta_byte_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<Register, SourceError> {
         let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
-            if name.width() == 1 {
+            if name.byte_width() == 1 {
                 Ok(name)
 
             } else {
@@ -1613,7 +1619,7 @@ impl EntryStage {
     fn parse_meta_ldxa_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<MetaLDXASourceMemoryLookup, SourceError> {
         let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
-            if name.width() == 1 {
+            if name.byte_width() == 1 {
                 Ok(MetaLDXASourceMemoryLookup::Register(name))
 
             } else if name == Register::HL || name == Register::DE || name == Register::BC {
@@ -1633,7 +1639,7 @@ impl EntryStage {
     fn parse_meta_ldxa_target_register(tokens: &mut TokenIterator<ExpressionToken>) -> Result<MetaLDXATarget, SourceError> {
         let reg = tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction arguments")?;
         if let ExpressionToken::Register { inner, name } = reg {
-            if name.width() == 1 {
+            if name.byte_width() == 1 {
                 Ok(MetaLDXATarget::Register(name))
 
             } else if name == Register::HL || name == Register::DE || name == Register::BC {
@@ -1658,7 +1664,7 @@ impl EntryStage {
 mod test {
     use crate::lexer::{Lexer, Symbol};
     use crate::mocks::{expr_lex, expr_lex_binary, entry_lex_child_error};
-    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement};
+    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement, Register};
     use crate::expression::{Expression, ExpressionValue, Operator};
 
     fn entry_lexer<S: Into<String>>(s: S) -> Lexer<EntryStage> {
@@ -1695,7 +1701,17 @@ mod test {
     fn test_passthrough_global_label_def() {
         assert_eq!(tfe("global_label:"), vec![EntryToken::ParentLabelDef(
             itk!(0, 13, "global_label"),
-            1
+            1,
+            None
+        )]);
+    }
+
+    #[test]
+    fn test_passthrough_global_label_def_with_arguments() {
+        assert_eq!(tfe("global_label(a, hl):"), vec![EntryToken::ParentLabelDef(
+            itk!(0, 20, "global_label"),
+            1,
+            Some(vec![Register::Accumulator, Register::HL])
         )]);
     }
 
@@ -1703,7 +1719,8 @@ mod test {
     fn test_passthrough_local_label_def() {
         assert_eq!(tfe("global_label:\n.local_label:"), vec![EntryToken::ParentLabelDef(
             itk!(0, 13, "global_label"),
-            1
+            1,
+            None
 
         ), EntryToken::ChildLabelDef(
             itk!(14, 27, "local_label"),
@@ -1867,7 +1884,8 @@ mod test {
         }]);
         assert_eq!(tfe("global:\nDB global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
-            1
+            1,
+            None
         ), EntryToken::Data {
             inner: itk!(8, 10, "DB"),
             alignment: DataAlignment::Byte,
@@ -1927,7 +1945,8 @@ mod test {
         }]);
         assert_eq!(tfe("global:\nDW global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
-            1
+            1,
+            None
         ), EntryToken::Data {
             inner: itk!(8, 10, "DW"),
             alignment: DataAlignment::Byte,
@@ -1987,7 +2006,8 @@ mod test {
         }]);
         assert_eq!(tfe("global:\nBW global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
-            1
+            1,
+            None
         ), EntryToken::Data {
             inner: itk!(8, 10, "BW"),
             alignment: DataAlignment::Byte,
@@ -2759,6 +2779,45 @@ mod test {
         assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma after \"ld\" instruction.\n\nld a,\n    ^--- Here");
         assert_eq!(entry_lexer_error("ld a,af"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"a af\" for instruction \"ld\".\n\nld a,af\n^--- Here");
         assert_eq!(entry_lexer_error("push a"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"a\" for instruction \"push\".\n\npush a\n^--- Here");
+    }
+
+    // Label Calls ------------------------------------------------------------
+    #[test]
+    fn test_label_call_instructions() {
+        assert_eq!(tfe("global_label(a):\ncall global_label(1)"), vec![
+            EntryToken::ParentLabelDef(
+                itk!(0, 16, "global_label"),
+                1,
+                Some(vec![Register::Accumulator])
+            ),
+            EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::LabelCall {
+                inner: itk!(22, 34, "global_label"),
+                id: 1,
+                name: Symbol::from("global_label".to_string()),
+                args: vec![Expression::Value(ExpressionValue::Integer(1))]
+            }),
+        ]);
+        assert_eq!(tfe("global_label(a):\ncall global_label(a)"), vec![
+            EntryToken::ParentLabelDef(
+                itk!(0, 16, "global_label"),
+                1,
+                Some(vec![Register::Accumulator])
+            ),
+            EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::LabelCall {
+                inner: itk!(22, 34, "global_label"),
+                id: 1,
+                name: Symbol::from("global_label".to_string()),
+                args: vec![Expression::RegisterArgument {
+                    inner: itk!(35, 36, "a"),
+                    reg: Register::Accumulator
+                }]
+            }),
+        ]);
+    }
+
+    #[test]
+    fn test_error_label_call_instructions() {
+        assert_eq!(entry_lexer_error("global_label(a):\nld a,global_label(1)"), "In file \"main.gb.s\" on line 2, column 1: Label arguments can only be supplied when using call instructions.\n\nld a,global_label(1)\n^--- Here");
     }
 
     // Meta Instructions ------------------------------------------------------

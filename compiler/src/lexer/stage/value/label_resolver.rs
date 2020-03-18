@@ -161,6 +161,28 @@ impl LabelResolver {
                     Self::convert_parent_label_refs(parent_labels, structs, arg_tokens)?
                 }
 
+            } else if let ValueToken::LabelCall(inner, ref mut label_id, arguments) = token {
+
+                // Macro Internal Lookup
+                *label_id = if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
+                    *id
+
+                // File Local Lookup
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, Some(inner.file_index))) {
+                    *id
+
+                // Global Lookup
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, None)) {
+                    *id
+
+                } else {
+                    unreachable!("Invalid label call ID.")
+                };
+
+                for arg_tokens in arguments {
+                    Self::convert_parent_label_refs(parent_labels, structs, arg_tokens)?
+                }
+
             } else if let ValueToken::IfStatement(_, branches) = token {
                 for branch in branches {
                     if let Some(condition) = branch.condition.as_mut() {
@@ -288,7 +310,7 @@ impl LabelResolver {
     ) -> Result<Option<ChildLabelError>, SourceError> {
         for (index, token) in tokens.iter_mut().enumerate() {
             match token {
-                ValueToken::ParentLabelDef(inner, _) if parent_def_allowed => {
+                ValueToken::ParentLabelDef(inner, _, _) if parent_def_allowed => {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(error) = Self::verify_child_label_refs_under_parent(parent_label.take(), child_label_refs) {
                         return Ok(Some(error));

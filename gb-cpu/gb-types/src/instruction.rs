@@ -17,6 +17,12 @@ pub struct Instruction {
 
 impl Instruction {
 
+    pub fn is_call_op_code(op_code: u16) -> bool {
+        op_code == 0xC4 || op_code == 0xD4 ||
+        op_code == 0xCC || op_code == 0xDC ||
+        op_code == 0xCD
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.code == 16 {
             // Pad STOP with a NOP

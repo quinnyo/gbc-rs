@@ -16,6 +16,15 @@ use super::macros::{IfStatementBranch, ForStatement, BlockStatement};
 use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
+// Types ----------------------------------------------------------------------
+#[derive(Copy, Clone, PartialEq)]
+enum ArgumentType {
+    None,
+    BuiltinCall,
+    LabelCall
+}
+
+
 // Expression Specific Tokens -------------------------------------------------
 lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
     // Default, Exported
@@ -33,7 +42,7 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch<ExpressionToken>>)),
     ForStatement((ForStatement<ExpressionToken>)),
     BlockStatement((BlockStatement<ExpressionToken>)),
-    ParentLabelDef((usize)),
+    ParentLabelDef((usize, Option<Vec<Register>>)),
     ChildLabelDef((usize))
 
 }, {
@@ -56,7 +65,7 @@ impl ExpressionToken {
             ValueToken::Comma(inner) => Ok(ExpressionToken::Comma(inner)),
             ValueToken::OpenBracket(inner) => Ok(ExpressionToken::OpenBracket(inner)),
             ValueToken::CloseBracket(inner) => Ok(ExpressionToken::CloseBracket(inner)),
-            ValueToken::ParentLabelDef(inner, id) => Ok(ExpressionToken::ParentLabelDef(inner, id)),
+            ValueToken::ParentLabelDef(inner, id, args) => Ok(ExpressionToken::ParentLabelDef(inner, id, args)),
             ValueToken::ChildLabelDef(inner, id, _) => Ok(ExpressionToken::ChildLabelDef(inner, id)),
             ValueToken::Register { inner, name } => Ok(ExpressionToken::Register {
                 inner,
@@ -70,7 +79,7 @@ impl ExpressionToken {
                 let mut expr_branches = Vec::with_capacity(branches.len());
                 for branch in branches {
                     expr_branches.push(branch.into_other(|tokens| {
-                        ExpressionStage::parse_expression(tokens, false, linter_enabled)
+                        ExpressionStage::parse_expression(tokens, ArgumentType::None, linter_enabled)
                     })?);
                 }
                 Ok(ExpressionToken::IfStatement(
@@ -88,15 +97,15 @@ impl ExpressionToken {
 
                 Ok(ExpressionToken::ForStatement(inner, ForStatement {
                     binding,
-                    from: ExpressionStage::parse_expression(for_statement.from, false, linter_enabled)?,
-                    to: ExpressionStage::parse_expression(for_statement.to, false, linter_enabled)?,
-                    body: ExpressionStage::parse_expression(for_statement.body, false, linter_enabled)?
+                    from: ExpressionStage::parse_expression(for_statement.from, ArgumentType::None, linter_enabled)?,
+                    to: ExpressionStage::parse_expression(for_statement.to, ArgumentType::None, linter_enabled)?,
+                    body: ExpressionStage::parse_expression(for_statement.body, ArgumentType::None, linter_enabled)?
                 }))
             },
             ValueToken::BlockStatement(inner, block) => {
                 Ok(ExpressionToken::BlockStatement(inner, match block {
-                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, false, linter_enabled)?),
-                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, false, linter_enabled)?)
+                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, ArgumentType::None, linter_enabled)?),
+                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, ArgumentType::None, linter_enabled)?)
                 }))
             },
             token => Err(token.error(
@@ -122,7 +131,7 @@ impl LexerStage for ExpressionStage {
         linter_enabled: bool
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let parsed_tokens = Self::parse_expression(tokens, false, linter_enabled)?;
+        let parsed_tokens = Self::parse_expression(tokens, ArgumentType::None, linter_enabled)?;
         Ok(parsed_tokens)
     }
 
@@ -132,7 +141,7 @@ impl ExpressionStage {
 
     fn parse_expression(
         tokens: Vec<ValueToken>,
-        is_argument: bool,
+        argument_type: ArgumentType,
         linter_enabled: bool
 
     ) -> Result<Vec<ExpressionToken>, SourceError> {
@@ -151,7 +160,7 @@ impl ExpressionStage {
                 expression_tokens.push(c);
 
             } else {
-                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, is_argument, linter_enabled)?);
+                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, argument_type, linter_enabled)?);
             }
         }
         Ok(expression_tokens)
@@ -184,7 +193,7 @@ impl ExpressionStage {
     fn parse_expression_tokens(
         tokens: &mut TokenIterator<ValueToken>,
         token: ValueToken,
-        is_argument: bool,
+        argument_type: ArgumentType,
         linter_enabled: bool
 
     ) -> Result<ExpressionToken, SourceError> {
@@ -229,9 +238,23 @@ impl ExpressionStage {
                 Ok(ExpressionToken::Expression(inner, expr))
             }
 
-        } else if !is_argument {
+        // LabelCalls must be standlone and cannot be part of other expressions
+        } else if current_typ == ValueTokenType::LabelCall {
+            let inner = token.inner().clone();
+            let expr = ExpressionParser::parse_tokens(vec![token], linter_enabled)?;
+            Ok(ExpressionToken::Expression(inner, expr))
+
+        } else if argument_type == ArgumentType::None {
             // Forward all non-expression tokens
             ExpressionToken::try_from(token, linter_enabled)
+
+        } else if argument_type == ArgumentType::LabelCall && current_typ == ValueTokenType::Register {
+            let inner = token.inner().clone();
+            let reg = Register::from(inner.value.as_str());
+            Ok(ExpressionToken::Expression(inner.clone(), Expression::RegisterArgument {
+                inner,
+                reg
+            }))
 
         } else {
             Err(token.error(
@@ -240,8 +263,8 @@ impl ExpressionStage {
         }
     }
 
-    fn parse_expression_argument(tokens: Vec<ValueToken>, linter_enabled: bool) -> Result<Expression, SourceError> {
-        let mut expression_tokens = Self::parse_expression(tokens, true, linter_enabled)?;
+    fn parse_expression_argument(tokens: Vec<ValueToken>, argument_type: ArgumentType, linter_enabled: bool) -> Result<Expression, SourceError> {
+        let mut expression_tokens = Self::parse_expression(tokens, argument_type, linter_enabled)?;
         if expression_tokens.len() > 1 {
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
         }
@@ -403,14 +426,26 @@ impl ExpressionParser {
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
-                        args.push(ExpressionStage::parse_expression_argument(tokens, self.linter_support)?);
+                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::BuiltinCall, self.linter_support)?);
                     }
                     Ok(Expression::BuiltinCall {
                         name: inner.value.clone(),
                         inner,
                         args
                     })
-                }
+                },
+                Some(ValueToken::LabelCall(inner, id, arguments)) => {
+                    let mut args = Vec::with_capacity(arguments.len());
+                    for tokens in arguments {
+                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::LabelCall, self.linter_support)?);
+                    }
+                    Ok(Expression::LabelCall {
+                        name: inner.value.clone(),
+                        id,
+                        inner,
+                        args
+                    })
+                },
                 Some(token) => {
                     Err(token.error(format!("Unexpected \"{}\" token in incomplete expression.", token.symbol())))
                 },
@@ -618,7 +653,8 @@ mod test {
         assert_eq!(tfe("global_label:\nfoo + global_label"), vec![
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
-                1
+                1,
+                None
             ),
             ExpressionToken::Expression(
                 itk!(14, 17, "foo"),
@@ -644,6 +680,28 @@ mod test {
             ExpressionToken::ConstExpression(
                 itk!(2, 3, "2"),
                 Expression::Value(ExpressionValue::Integer(2))
+            )
+        ]);
+    }
+
+    // Label Calls ------------------------------------------------------------
+    #[test]
+    fn test_label_call() {
+        assert_eq!(tfe("global_label(a):\ncall global_label(1)"), vec![
+            ExpressionToken::ParentLabelDef(
+                itk!(0, 16, "global_label"),
+                1,
+                Some(vec![Register::Accumulator])
+            ),
+            ExpressionToken::Instruction(itk!(17, 21, "call")),
+            ExpressionToken::Expression(
+                itk!(22, 34, "global_label"),
+                Expression::LabelCall {
+                    inner: itk!(22, 34, "global_label"),
+                    id: 1,
+                    name: Symbol::from("global_label".to_string()),
+                    args: vec![Expression::Value(ExpressionValue::Integer(1))]
+                }
             )
         ]);
     }
@@ -692,7 +750,8 @@ mod test {
         assert_eq!(tfe("global_label:\nCEIL(global_label)"), vec![
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
-                1
+                1,
+                None
             ),
             ExpressionToken::Expression(
                 itk!(14, 18, "CEIL"),
@@ -714,7 +773,8 @@ mod test {
         assert_eq!(tfe("global_label:\n.local_label:\nCEIL(.local_label)"), vec![
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
-                1
+                1,
+                None
             ),
             ExpressionToken::ChildLabelDef(
                 itk!(14, 27, "local_label"),
@@ -745,13 +805,15 @@ mod test {
         assert_eq!(expr_lexer_error("CEIL((4) DB)"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"DB\" token, expected the start of a expression instead.\n\nCEIL((4) DB)\n         ^--- Here");
     }
 
+
     // Label Refs -------------------------------------------------------------
     #[test]
     fn test_label_global_ref() {
         assert_eq!(tfe("global_label:\nglobal_label"), vec![
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
-                1
+                1,
+                None
             ),
             ExpressionToken::Expression(
                 itk!(14, 26, "global_label"),
@@ -767,7 +829,8 @@ mod test {
         assert_eq!(tfe("global_label:\n.local_label:\n.local_label"), vec![
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
-                1
+                1,
+                None
             ),
             ExpressionToken::ChildLabelDef(
                 itk!(14, 27, "local_label"),
