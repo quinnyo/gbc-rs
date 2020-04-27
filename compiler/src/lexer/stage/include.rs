@@ -32,6 +32,7 @@ lexer_token!(IncludeToken, IncludeType, (Debug, Eq, PartialEq, Clone), {
     BinaryFile((Vec<u8>)),
     BuiltinCall((Vec<Vec<IncludeToken>>)),
     ParentLabelCall((Vec<Vec<IncludeToken>>)),
+    ParentLabeLDef((Vec<IncludeToken>)),
     Comma(()),
     Point(()),
     Colon(()),

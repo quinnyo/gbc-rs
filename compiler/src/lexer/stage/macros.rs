@@ -544,47 +544,44 @@ impl MacroStage {
 
     ) -> Result<Vec<IncludeToken>, SourceError> {
 
-        let mut tokens_without_macro_calls = Vec::with_capacity(tokens.len());
-        let mut tokens = TokenIterator::new(tokens);
+        let mut prepass_tokens = Vec::with_capacity(tokens.len());
+
+        // Do a first pass to find callable labels
+        let mut first_tokens = TokenIterator::new(tokens);
         let mut has_global_prefix = false;
-        while let Some(token) = tokens.next() {
-
-            if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::OpenParen, None) {
-
+        while let Some(token) = first_tokens.next() {
+            if token.is(IncludeType::Name) && first_tokens.peek_is(IncludeType::OpenParen, None) {
                 // Builtin
-                let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.symbol(), None) {
-                    def
+                if Self::get_macro_by_name(&builtin_macro_defs, token.symbol(), None).is_some() {
+                    prepass_tokens.push(token);
 
                 // File local lookup
-                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), Some(token.inner().file_index)) {
-                    def
+                } else if Self::get_macro_by_name(&user_macro_defs, token.symbol(), Some(token.inner().file_index)).is_some() {
+                    prepass_tokens.push(token);
 
                 // Global lookup
-                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), None) {
-                    def
+                } else if Self::get_macro_by_name(&user_macro_defs, token.symbol(), None).is_some() {
+                    prepass_tokens.push(token);
 
-                // Parent Label with Optional Arguments or undefined Macro
+                // Callable label definition
                 } else {
 
-                    // Collect raw argument tokens
                     let mut argument_tokens = Vec::with_capacity(8);
-                    while let Some(token) = tokens.next() {
-                        if token.is(IncludeType::CloseParen) {
-                            argument_tokens.push(token);
+                    while let Some(token) = first_tokens.next() {
+                        let close = token.is(IncludeType::CloseParen);
+                        argument_tokens.push(token);
+                        if close {
                             break;
-
-                        } else {
-                            argument_tokens.push(token);
                         }
                     }
 
-                    // Check for label definition and re-insert arguments tokens into stream
-                    if tokens.peek_is(IncludeType::Colon, None) {
-                        tokens_without_macro_calls.push(token.clone());
-                        tokens_without_macro_calls.append(&mut argument_tokens);
+                    if first_tokens.peek_is(IncludeType::Colon, None) {
+                        let mut def_tokens = vec![token.clone()];
+                        def_tokens.append(&mut argument_tokens);
 
                         // Define callable label
                         let inner = token.into_inner();
+                        prepass_tokens.push(IncludeToken::ParentLabeLDef(inner.clone(), def_tokens));
                         user_macro_defs.push(MacroDefinition {
                             parameters: Vec::new(),
                             body: Vec::new(),
@@ -599,10 +596,42 @@ impl MacroStage {
                             is_exported: has_global_prefix,
                             is_label: true
                         });
-                        continue;
-                    }
 
-                    // Not found
+                    } else {
+                        prepass_tokens.push(token);
+                        prepass_tokens.append(&mut argument_tokens);
+                    }
+                }
+
+            } else {
+                has_global_prefix = token.is_symbol(Symbol::GLOBAL);
+                prepass_tokens.push(token);
+            }
+        }
+
+        let mut tokens_without_macro_calls = Vec::with_capacity(prepass_tokens.len());
+        let mut tokens = TokenIterator::new(prepass_tokens);
+        while let Some(token) = tokens.next() {
+
+            if let IncludeToken::ParentLabeLDef(_, mut def_tokens) = token {
+                tokens_without_macro_calls.append(&mut def_tokens);
+
+            } else if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::OpenParen, None) {
+
+                // Builtin
+                let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.symbol(), None) {
+                    def
+
+                // File local lookup
+                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), Some(token.inner().file_index)) {
+                    def
+
+                // Global lookup
+                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), None) {
+                    def
+
+                // Not found
+                } else {
                     let error = token.error(format!("Invocation of undefined macro \"{}\"", token.symbol()));
                     if let Some(def) = Self::get_macro_by_name_all(&user_macro_defs, token.symbol()) {
                         return Err(error.with_reference(&def.name, "A non-global macro with the same name is defined"));
@@ -612,6 +641,7 @@ impl MacroStage {
                     }
                 };
 
+                // Parse arguments
                 let arg_tokens = Self::parse_macro_call_arguments(&mut tokens)?;
                 if !macro_def.is_label && arg_tokens.len() != macro_def.parameters.len() {
                     return Err(token.error(format!(
@@ -701,7 +731,7 @@ impl MacroStage {
                 }
 
             } else {
-                has_global_prefix = token.is_symbol(Symbol::GLOBAL);
+                //has_global_prefix = token.is_symbol(Symbol::GLOBAL);
                 tokens_without_macro_calls.push(token);
             }
         }
@@ -2175,6 +2205,66 @@ mod test {
                     MacroToken::Reserved(itk!(69, 71, "DB"))
                 ]
             })
+        ]);
+    }
+
+    #[test]
+    fn test_callable_label_lookbehind() {
+        let lexer = macro_lex("label(a):\nlabel(a)");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::Name(
+                itk!(0, 5, "label")
+            ),
+            MacroToken::OpenParen(
+                itk!(5, 6, "(")
+            ),
+            MacroToken::Register(
+                itk!(6, 7, "a")
+            ),
+            MacroToken::CloseParen(
+                itk!(7, 8, ")")
+            ),
+            MacroToken::Colon(
+                itk!(8, 9, ":")
+            ),
+            MacroToken::ParentLabelCall(
+                itk!(10, 15, "label"),
+                vec![
+                    vec![MacroToken::Register(
+                       itk!(16, 17, "a")
+                    )]
+                ]
+           ),
+        ]);
+    }
+
+    #[test]
+    fn test_callable_label_lookahead() {
+        let lexer = macro_lex("label(a)\nlabel(a):");
+        assert_eq!(lexer.tokens, vec![
+            MacroToken::ParentLabelCall(
+                itk!(0, 5, "label"),
+                vec![
+                    vec![MacroToken::Register(
+                       itk!(6, 7, "a")
+                    )]
+                ]
+            ),
+            MacroToken::Name(
+                itk!(9, 14, "label")
+            ),
+            MacroToken::OpenParen(
+                itk!(14, 15, "(")
+            ),
+            MacroToken::Register(
+                itk!(15, 16, "a")
+            ),
+            MacroToken::CloseParen(
+                itk!(16, 17, ")")
+            ),
+            MacroToken::Colon(
+                itk!(17, 18, ":")
+            )
         ]);
     }
 

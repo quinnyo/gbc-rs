@@ -148,9 +148,9 @@ impl Compiler {
 
             }).collect::<Vec<String>>().join("\n");
             io.write_file(&output_file, symbols).map_err(|err| {
-                (CompilationError::from_string(
+                CompilationError::from_string(
                     format!("Failed to write symbol map to file \"{}\"", err.path.display())
-                ))
+                )
             })?;
             logger.status("Written", format!("symbol map to \"{}\".", output_file.display()));
         }
@@ -178,9 +178,9 @@ impl Compiler {
         let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
             io.write_binary_file(&output_file, generator.buffer).map_err(|err| {
-                (CompilationError::from_string(
+                CompilationError::from_string(
                     format!("Failed to write ROM to file \"{}\"", err.path.display())
-                ))
+                )
             })?;
             logger.status("Written", format!("ROM to \"{}\".", output_file.display()));
         }
