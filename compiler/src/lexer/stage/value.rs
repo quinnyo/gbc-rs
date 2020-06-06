@@ -1688,7 +1688,7 @@ mod test {
     fn test_namespace_statement_error_member_lookup() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo ENDNAMESPACE\nfoo::bar"),
-            "In file \"main.gb.s\" on line 2, column 1: Reference to unknown member \"bar\".\n\nfoo::bar\n^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
+            "In file \"main.gb.s\" on line 2, column 6: Reference to unknown member \"bar\".\n\nfoo::bar\n     ^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
         );
     }
 
@@ -1696,7 +1696,7 @@ mod test {
     fn test_namespace_statement_error_member_lookup_nested() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\nfoo::inner::bar"),
-            "In file \"main.gb.s\" on line 2, column 1: Reference to unknown member \"bar\".\n\nfoo::inner::bar\n^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 15:\n\nNAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\n              ^--- Here".to_string()
+            "In file \"main.gb.s\" on line 2, column 13: Reference to unknown member \"bar\".\n\nfoo::inner::bar\n            ^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 15:\n\nNAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\n              ^--- Here".to_string()
         );
     }
 

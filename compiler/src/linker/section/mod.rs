@@ -2509,9 +2509,9 @@ mod test {
 
     }
 
-    // Structs ----------------------------------------------------------------
+    // Namespaces -------------------------------------------------------------
     #[test]
-    fn test_struct_label_calls() {
+    fn test_namespace_label_calls() {
         let l = linker("NAMESPACE foo\nSECTION WRAM0\nfield: DB\nSECTION ROM0\nbar:\nld a,[foo::field]\nret\nENDNAMESPACE\ncall foo::bar");
         assert_eq!(linker_section_entries(l), vec![
             vec![

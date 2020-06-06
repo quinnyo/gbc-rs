@@ -140,10 +140,11 @@ impl LabelResolver {
 
                     } else {
                         // TODO suggest similiar members in other namespaces?
-                        return Err(inner.error(
+                        let field_inner = members.last().unwrap().inner();
+                        return Err(field_inner.error(
                             format!(
                                 "Reference to unknown member \"{}\".",
-                                members.last().unwrap().inner().value
+                                field_inner.value
                             )
 
                         ).with_reference(struct_inner, "in namespace defined"));
