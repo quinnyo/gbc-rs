@@ -142,18 +142,18 @@ INCLUDE BINARY "src/tiles.png" USING "image2gb --some-palette -i"
 In addition to the usual constant declarations of:
 
 ```asm
-FOO EQU 1
-BAR EQUS "Hello World"
+CONST FOO 1
+CONST BAR "Hello World"
 ```
 
 gbc supports `DEFAULT` declarations which can be later overwritten with a standard declaration:
 
 ```asm
 ; Inside of the library file
-LIBRARY_RAM_ADDRESS DEFAULT EQU $D000
+CONST DEFAULT LIBRARY_RAM_ADDRESS $D000
 
 ; In the actual project which already has other things reside at $D000
-LIBRARY_RAM_ADDRESS EQU $D100
+CONST LIBRARY_RAM_ADDRESS $D100
 ```
 
 ### Blocks
@@ -244,19 +244,19 @@ FOR i IN 0 TO 10 REPEAT
 ENDFOR
 ```
 
-### STRUCT statements
+### NAMESPACE statements
 
 Labels can be grouped into `STRUCTS` in order to reduce code complexity:
 
 ```asm
-; Create a struct "foo" with two fields
-STRUCT foo
+; Create a NAMESPACE "foo" with two fields
+NAMESPACE foo
     field: DB
     value: DB
-ENDSTRUCT
+ENDNAMESPACE
 
 ; Load the address of the first field into hl
-ld      hl,foo->field
+ld      hl,foo::field
 ```
 
 
