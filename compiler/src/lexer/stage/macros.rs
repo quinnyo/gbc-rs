@@ -169,13 +169,7 @@ impl From<IncludeToken> for MacroToken {
 
                 }).collect()
             ),
-            IncludeToken::ParentLabelCall(inner, args) => MacroToken::ParentLabelCall(
-                inner,
-                args.into_iter().map(|tokens| {
-                    tokens.into_iter().map(MacroToken::from).collect()
-
-                }).collect()
-            ),
+            //IncludeToken::ParentLabelCall(inner, args) => MacroToken::ParentLabelCall(inner, args),
             IncludeToken::Comma(inner) => MacroToken::Comma(inner),
             IncludeToken::Point(inner) => MacroToken::Point(inner),
             IncludeToken::Colon(inner) => MacroToken::Colon(inner),
@@ -507,25 +501,39 @@ impl MacroStage {
             // Parse Namespace Access
             } else if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::Member, None) {
                 let mut members = Vec::with_capacity(4);
-                let mut member = token;
-                let inner = member.inner().clone();
+                let inner = token.inner().clone();
+                members.push(MacroToken::from(token));
                 while tokens.peek_is(IncludeType::Member, None) {
-                    members.push(MacroToken::from(member));
                     tokens.expect(IncludeType::Member, None, "when parsing namespace member access")?;
-
                     if tokens.peek_is(IncludeType::ParentLabelCall, None) {
-                        member = tokens.expect(IncludeType::ParentLabelCall, None, "when parsing namespace member access")?;
-                        break;
+                        if let IncludeToken::ParentLabelCall(inner, args) = tokens.expect(IncludeType::ParentLabelCall, None, "when parsing namespace member access")? {
+                            let mut macro_args = Vec::with_capacity(args.len());
+                            for arg_tokens in args {
+                                macro_args.push(MacroStage::parse_statements(arg_tokens)?);
+                            }
+                            members.push(MacroToken::ParentLabelCall(inner, macro_args));
+                            break;
+
+                        } else {
+                            unreachable!();
+                        }
 
                     } else {
-                        member = tokens.expect(IncludeType::Name, None, "when parsing namespace member access")?;
+                        members.push(MacroToken::from(tokens.expect(IncludeType::Name, None, "when parsing namespace member access")?));
                     }
                 }
-                members.push(MacroToken::from(member));
                 tokens_with_statements.push(MacroToken::Lookup(inner, members));
 
             } else if token.is(IncludeType::Member) {
                 return Err(token.error("Incomplete namespace member access.".to_string()));
+
+            // Callable labels
+            } else if let IncludeToken::ParentLabelCall(inner, args) = token {
+                let mut macro_args = Vec::with_capacity(args.len());
+                for arg_tokens in args {
+                    macro_args.push(MacroStage::parse_statements(arg_tokens)?);
+                }
+                tokens_with_statements.push(MacroToken::ParentLabelCall(inner, macro_args));
 
             } else {
                 tokens_with_statements.push(MacroToken::from(token));

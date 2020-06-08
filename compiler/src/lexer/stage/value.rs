@@ -1626,6 +1626,17 @@ mod test {
         ]);
     }
 
+    // TODO fill in test data
+    // #[test]
+    // fn test_namespace_statement_callable_label_parameter() {
+    //     let lexer = value_lexer("NAMESPACE foo field: DB ENDNAMESPACE\ncall callable_label(foo::field)\ncallable_label(a):\nret");
+    //     assert_eq!(lexer.tokens, vec![
+    //         ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None),
+    //         ValueToken::Reserved(itk!(21, 23, "DB")),
+    //         ValueToken::ParentLabelRef(itk!(37, 47, "foo::field"), 1)
+    //     ]);
+    // }
+
     #[test]
     fn test_namespace_statement_constants() {
         let lexer = value_lexer("NAMESPACE foo field: DS SIZE ENDNAMESPACE");
