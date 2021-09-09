@@ -304,7 +304,7 @@ impl Parser {
 
     fn gb_frequency(key: usize) -> u32 {
         let f = Self::note_frequency(key);
-        (2048 - ((4194304 / f) >> 5))
+        2048 - ((4194304 / f) >> 5)
     }
 
     pub fn note_frequency(key: usize) -> u32 {

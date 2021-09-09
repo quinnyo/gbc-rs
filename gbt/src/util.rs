@@ -19,6 +19,35 @@ pub struct Indicies {
 
 
 // Helpers --------------------------------------------------------------------
+pub fn indicies_to_logo_bytes(indicies: Indicies) -> Vec<u8> {
+    let (w, h) = (indicies.width, indicies.height);
+    let mut bits = Vec::new();
+
+    // Re-arrange into 4x4 cells
+    for ty in 0..h / 4 {
+        for tx in 0..w / 4 {
+            let ox = tx * 4;
+            let oy = ty * 4;
+            for y in 0..4 {
+                for x in 0..4 {
+                    let i = indicies.pixels[(oy + y) * w + ox + x];
+                    bits.push(i);
+                }
+            }
+        }
+    }
+
+    // Convert into bytes of 4x2 pixel cells
+    let mut bytes = Vec::new();
+    for bits in bits.chunks(8) {
+        let mut byte = 0;
+        for (i, b) in bits.into_iter().enumerate() {
+            byte |= b << (7 - i);
+        }
+        bytes.push(byte);
+    }
+    bytes
+}
 
 pub fn indicies_to_tiles(indicies: Indicies) -> Vec<[u8; 16]> {
     // See: http://www.huderlem.com/demos/gameboy2bpp.html
@@ -172,6 +201,16 @@ pub fn image_to_indicies(buffer: RgbaImage, color_palette: &[[u8; 4]]) -> Result
 }
 
 pub fn to_palette(color_palette: Vec<&str>) -> Vec<[u8; 4]> {
+    color_palette.iter().map(|c| [
+        u8::from_str_radix(&c[0..2], 16).unwrap_or(0),
+        u8::from_str_radix(&c[2..4], 16).unwrap_or(0),
+        u8::from_str_radix(&c[4..6], 16).unwrap_or(0),
+        255
+
+    ]).collect()
+}
+
+pub fn to_bit_palette(color_palette: Vec<&str>) -> Vec<[u8; 4]> {
     color_palette.iter().map(|c| [
         u8::from_str_radix(&c[0..2], 16).unwrap_or(0),
         u8::from_str_radix(&c[2..4], 16).unwrap_or(0),
