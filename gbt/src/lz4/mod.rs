@@ -7,7 +7,6 @@ mod command;
 use self::command::*;
 
 
-
 // LZ4 alike compression ------------------------------------------------------
 pub fn compress(data: &[u8], eom: bool) -> (Vec<u8>, f32) {
     let commands = Encoder::analyze(data, eom);
@@ -39,6 +38,8 @@ pub fn analyze(data: &[u8]) {
     println!("=== Stats ===");
     println!("Bytes: {} / {}", output.len(), data.len());
     println!("Ratio: {:.2}\n", ratio);
+    // println!("{:?}", data);
+    // println!("{:?}", output);
 
     let mut stats: Vec<(&str, usize, i32, usize, usize, i32, i32)> = stats
         .into_iter()
@@ -136,9 +137,6 @@ mod test {
         compress_inline(vec![1], vec![
             0, 1
         ]);
-        compress_inline(vec![1, 1], vec![
-            1, 1, 1
-        ]);
         compress_inline(vec![1, 2, 3, 4], vec![
             3,
             1, 2, 3, 4
@@ -155,6 +153,16 @@ mod test {
     }
 
     #[test]
+    fn test_compress_double_byte() {
+        compress_inline(vec![0, 0], vec![
+            128
+        ]);
+        compress_inline(vec![63, 63], vec![
+            191
+        ]);
+    }
+
+    #[test]
     fn test_compress_repeat_zero() {
         compress_inline(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vec![
             47
@@ -165,11 +173,11 @@ mod test {
     fn test_compress_repeat() {
         // Min Repeat
         compress_inline(vec![1, 1, 1], vec![
-            129,
+            193,
             1
         ]);
         compress_inline(vec![1, 1, 1, 1], vec![
-            130,
+            194,
             1
         ]);
 
@@ -187,10 +195,11 @@ mod test {
             1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1,
 
-            1, 1
+            1, 1, 1
 
         ], vec![
-            191,
+            255,
+            1,
             1,
             0,
             1
@@ -201,7 +210,7 @@ mod test {
     fn test_compress_repeat_dual() {
         // Min Repeat
         compress_inline(vec![1, 2, 1, 2], vec![
-            192,
+            224,
             1,
             2
         ]);
@@ -237,7 +246,7 @@ mod test {
         ], vec![
             255,
             1, 2,
-            1,
+            255,
             1, 2
         ]);
     }
@@ -272,10 +281,10 @@ mod test {
             5, 0, 1, 2, 3, 2, 1
         ]);
         compress_inline(vec![
-            0, 1, 2, 3, 3, 2, 1
+            0, 1, 2, 87, 87, 2, 1
 
         ], vec![
-            3, 0, 1, 2, 3, 96, 254
+            3, 0, 1, 2, 87, 96, 254
         ]);
 
         compress_inline(vec![

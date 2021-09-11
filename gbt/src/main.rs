@@ -16,7 +16,6 @@ mod mmp;
 mod logo;
 mod picture;
 mod sgb;
-mod hgb;
 mod tiles;
 mod util;
 
@@ -293,26 +292,14 @@ fn main() {
         }
 
     } else if let Some(matches) = matches.subcommand_matches("compress") {
-        if matches.occurrences_of("EXPERIMENTAL") > 0 {
-            if let Err(err) = compress::convert_ex(
-                matches.value_of("INPUT_FILE").map(|f| PathBuf::from(f)),
-                matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f))
+        if let Err(err) = compress::convert(
+            matches.value_of("INPUT_FILE").map(|f| PathBuf::from(f)),
+            matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f)),
+            matches.occurrences_of("INFO") > 0
 
-            ) {
-                eprintln!("       {} {}", "Error".bright_red(), err);
-                process::exit(1)
-            }
-
-        } else {
-            if let Err(err) = compress::convert(
-                matches.value_of("INPUT_FILE").map(|f| PathBuf::from(f)),
-                matches.value_of("OUTPUT_FILE").map(|f| PathBuf::from(f)),
-                matches.occurrences_of("INFO") > 0
-
-            ) {
-                eprintln!("       {} {}", "Error".bright_red(), err);
-                process::exit(1)
-            }
+        ) {
+            eprintln!("       {} {}", "Error".bright_red(), err);
+            process::exit(1)
         }
     }
 }

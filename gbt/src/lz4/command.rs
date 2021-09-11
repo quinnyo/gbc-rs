@@ -3,40 +3,31 @@ use std::cmp;
 
 
 // Constants ------------------------------------------------------------------
-pub const MAX_LITERAL_LENGTH: u8 = 32;
-pub const MAX_REPEAT_COUNT: i32 = 65;
+pub const MAX_LITERAL_LENGTH: u8 = 16;
+pub const MAX_REPEAT_COUNT: i32 = 33;
+pub const MAX_REPEAT_ZERO_COUNT: i32 = 16;
 pub const MIN_REPEAT_LENGTH: i32 = 2;
 pub const MAX_COPY_LENGTH: i32 = 34;
 pub const MIN_COPY_LENGTH: i32 = 3;
 pub const MAX_COPY_OFFSET: i32 = 254;
 
-// 10ll_llll  RepeatSingle
-// 11ll_llll  RepeatDual
+// 10ll_llll  DoubleByte
+// 110l_llll  RepeatSingle
+// 111l_llll  RepeatDual
 // 010l_llll  Copy
 // 011l_llll  Reverse Copy
 // 0010_llll  RepeatZero
-// 0011_0000  End of Stream
-// 000l_llll  Literal
+// 0011_uuuu  End of Stream
+// 0001_0000  SingleLiteral
+// 0000_llll  Literal
 pub trait Command: std::fmt::Debug {
     fn serialize(&self) -> Vec<u8>;
-    fn end(&self) -> usize {
-        unimplemented!();
-    }
-    fn saved(&self) -> i32 {
-        unimplemented!();
-    }
-    fn name(&self) -> &str {
-        unimplemented!();
-    }
-    fn len(&self) -> usize {
-        unimplemented!();
-    }
-    fn offset(&self) -> i32 {
-        unimplemented!();
-    }
-    fn info(&self){
-        unimplemented!();
-    }
+    fn end(&self) -> usize;
+    fn saved(&self) -> i32;
+    fn name(&self) -> &str;
+    fn len(&self) -> usize;
+    fn offset(&self) -> i32;
+    fn info(&self);
 }
 
 #[derive(Debug)]
@@ -77,11 +68,21 @@ impl Literal {
 
 impl Command for Literal {
     fn serialize(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        // 00 0l_llll, 1-32 literals
-        bytes.push((self.desc.length - 1) & 0x1F);
-        bytes.extend(&self.data);
-        bytes
+        if self.data.len() == 1 && self.data[0] < 16 {
+            // 0001_llll
+            vec![0b0001_0000 | self.data[0]]
+
+        } else {
+            let mut bytes = Vec::new();
+            // 0000_llll, 1-16 literals
+            bytes.push((self.desc.length - 1) & 0x0F);
+            bytes.extend(&self.data);
+            bytes
+        }
+    }
+
+    fn end(&self) -> usize {
+        unimplemented!();
     }
 
     fn saved(&self) -> i32 {
@@ -110,6 +111,10 @@ pub struct EndMarker;
 impl Command for EndMarker {
     fn serialize(&self) -> Vec<u8> {
         vec![0x30]
+    }
+
+    fn end(&self) -> usize {
+        unimplemented!();
     }
 
     fn saved(&self) -> i32 {
@@ -255,7 +260,6 @@ impl RepeatZero {
 }
 
 impl Command for RepeatZero {
-
     fn serialize(&self) -> Vec<u8> {
         // 0010_llll
         // repeat the zero byte 2-17 times
@@ -306,11 +310,10 @@ impl RepeatSingle {
 }
 
 impl Command for RepeatSingle {
-
     fn serialize(&self) -> Vec<u8> {
-        // 100 00000
-        // repeat the next byte 2-65 times
-        vec![0x80 | (self.desc.length as u8 & 0x3F), self.data]
+        // 110 00000
+        // repeat the next byte 2-33 times
+        vec![0x80 | 0x40 | (self.desc.length as u8 & 0x1F), self.data]
     }
 
     fn end(&self) -> usize {
@@ -359,11 +362,10 @@ impl RepeatDual {
 }
 
 impl Command for RepeatDual {
-
     fn serialize(&self) -> Vec<u8> {
-        // 11ll_llll
-        // repeat the next 2 bytes 2-65 times
-        vec![0xC0 | (self.desc.length as u8 & 0x3F), self.data, self.data_two]
+        // 111l_llll
+        // repeat the next 2 bytes 2-33 times
+        vec![0x80 | 0x40 | 0x20 | (self.desc.length as u8 & 0x1F), self.data, self.data_two]
     }
 
     fn end(&self) -> usize {
@@ -392,6 +394,57 @@ impl Command for RepeatDual {
 }
 
 
+#[derive(Debug)]
+struct DoubleByte {
+    desc: Descriptor,
+    data: u8,
+    end: usize
+}
+
+impl DoubleByte {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(length: u8, saved: i32, data: u8, end: usize) -> Box<dyn Command> {
+        Box::new(Self {
+            desc: Descriptor::new(length, saved, 1),
+            data,
+            end
+        })
+    }
+}
+
+impl Command for DoubleByte {
+    fn serialize(&self) -> Vec<u8> {
+        // 10vv_vvvv
+        // double a value between 0..=63
+        vec![0x80 | (self.data as u8 & 0x3F)]
+    }
+
+    fn end(&self) -> usize {
+        self.end
+    }
+
+    fn len(&self) -> usize {
+        self.desc.length as usize
+    }
+
+    fn offset(&self) -> i32 {
+        0
+    }
+
+    fn saved(&self) -> i32 {
+        self.desc.saved
+    }
+
+    fn name(&self) -> &str {
+        "<DoubleByte>"
+    }
+
+    fn info(&self) {
+        //println!("<DoubleByte @{}>", self.desc.length + 2);
+    }
+}
+
+
 // Intermediate Types ---------------------------------------------------------
 pub struct Repeat;
 impl Repeat {
@@ -415,20 +468,23 @@ impl Repeat {
     }
 
     fn find_single(data: &[u8], index: i32) -> Option<Box<dyn Command>> {
-
         let repeat = Repeat::find_single_repeat(data, index, index + MAX_REPEAT_COUNT);
-        if let Some(repeat) = repeat {
+        if let Some(mut repeat) = repeat {
+            if repeat > MAX_REPEAT_COUNT {
+                repeat = MAX_REPEAT_COUNT;
+            }
             let saved = repeat - 2;
             let length = repeat - MIN_REPEAT_LENGTH;
+            if saved <= 0 {
+                if data[index as usize] < 64 {
+                    Some(DoubleByte::new(1, 1, data[index as usize], (index + 2) as usize))
 
-            if repeat > MAX_REPEAT_COUNT {
-                None
-
-            } else if saved <= 0 {
-                None
+                } else {
+                    None
+                }
 
             // repeat the zero byte 2-17 times
-            } else if data[index as usize] == 0 && length < 16 {
+            } else if data[index as usize] == 0 && length < MAX_REPEAT_ZERO_COUNT {
                 Some(RepeatZero::new(length as u8, saved, (index + repeat) as usize))
 
             // repeat the next byte 2-65 times
@@ -439,22 +495,20 @@ impl Repeat {
         } else {
             None
         }
-
     }
 
     fn find_dual(data: &[u8], index: i32) -> Option<Box<dyn Command>> {
 
-        if let Some(repeat) = Repeat::find_multi_repeat(data, index, 2) {
+        if let Some(mut repeat) = Repeat::find_multi_repeat(data, index, 2) {
+            if repeat > MAX_REPEAT_COUNT {
+                repeat = MAX_REPEAT_COUNT;
+            }
             let saved = repeat * 2 - 3;
             let length = repeat - MIN_REPEAT_LENGTH;
-
-            if repeat > MAX_REPEAT_COUNT {
+            if saved < 0 {
                 None
 
             // repeat the next 2 bytes 2-65 times
-            } else if saved < 0 {
-                None
-
             } else {
                 Some(RepeatDual::new(
                     length as u8,
