@@ -126,45 +126,55 @@ mod test {
 
     use super::compress;
 
-    fn compress_inline(input: Vec<u8>, expected: Vec<u8>) {
-        let result = compress(&input, false);
-        assert_eq!(result.0, expected);
+    macro_rules! test_compress {
+        ($input:expr, $expected:expr) => {
+            let result = compress(&$input, false);
+            assert_eq!(result.0, $expected);
+        }
+    }
+
+    #[test]
+    fn test_compress_single_literal() {
+        test_compress!(vec![0], vec![
+            16
+        ]);
+        test_compress!(vec![15], vec![
+            31
+        ]);
     }
 
     #[test]
     fn test_compress_literal() {
-        // Literal
-        compress_inline(vec![1], vec![
-            0, 1
+        test_compress!(vec![16], vec![
+            0, 16
         ]);
-        compress_inline(vec![1, 2, 3, 4], vec![
+        test_compress!(vec![1, 2, 3, 4], vec![
             3,
             1, 2, 3, 4
         ]);
-        // Max Literal
-        compress_inline(vec![
+        test_compress!(vec![
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
             20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32
 
         ], vec![
-            31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-            0, 32
+            15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 32
         ]);
     }
 
     #[test]
     fn test_compress_double_byte() {
-        compress_inline(vec![0, 0], vec![
+        test_compress!(vec![0, 0], vec![
             128
         ]);
-        compress_inline(vec![63, 63], vec![
+        test_compress!(vec![63, 63], vec![
             191
         ]);
     }
 
     #[test]
     fn test_compress_repeat_zero() {
-        compress_inline(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vec![
+        test_compress!(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vec![
             47
         ]);
     }
@@ -172,17 +182,17 @@ mod test {
     #[test]
     fn test_compress_repeat() {
         // Min Repeat
-        compress_inline(vec![1, 1, 1], vec![
+        test_compress!(vec![1, 1, 1], vec![
             193,
             1
         ]);
-        compress_inline(vec![1, 1, 1, 1], vec![
+        test_compress!(vec![1, 1, 1, 1], vec![
             194,
             1
         ]);
 
         // Max Repeat
-        compress_inline(vec![
+        test_compress!(vec![
             1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1,
 
@@ -201,22 +211,21 @@ mod test {
             255,
             1,
             1,
-            0,
-            1
+            17
         ]);
     }
 
     #[test]
     fn test_compress_repeat_dual() {
         // Min Repeat
-        compress_inline(vec![1, 2, 1, 2], vec![
+        test_compress!(vec![1, 2, 1, 2], vec![
             224,
             1,
             2
         ]);
 
         // Max Repeat
-        compress_inline(vec![
+        test_compress!(vec![
             1, 2, 1, 2, 1, 2, 1, 2,
             1, 2, 1, 2, 1, 2, 1, 2,
 
@@ -254,12 +263,12 @@ mod test {
     #[test]
     fn test_compress_copy() {
         // Min Copy
-        compress_inline(vec![
+        test_compress!(vec![
             0, 1, 2, 3, 1, 2
         ], vec![
             5, 0, 1, 2, 3, 1, 2
         ]);
-        compress_inline(vec![
+        test_compress!(vec![
             0, 1, 2, 3, 1, 2, 3
 
         ], vec![
@@ -275,19 +284,19 @@ mod test {
     #[test]
     fn test_compress_reverse_copy() {
         // Min Copy
-        compress_inline(vec![
+        test_compress!(vec![
             0, 1, 2, 3, 2, 1
         ], vec![
             5, 0, 1, 2, 3, 2, 1
         ]);
-        compress_inline(vec![
+        test_compress!(vec![
             0, 1, 2, 87, 87, 2, 1
 
         ], vec![
             3, 0, 1, 2, 87, 96, 254
         ]);
 
-        compress_inline(vec![
+        test_compress!(vec![
             0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2
 
         ], vec![
