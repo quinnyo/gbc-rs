@@ -1353,7 +1353,6 @@ mod test {
     fn test_error_child_label_def() {
         assert_eq!(value_lexer_error(".4"), "In file \"main.gb.s\" on line 1, column 2: Unexpected token \"NumberLiteral\" when parsing child label, expected a \"Name\" token instead.\n\n.4\n ^--- Here");
     }
-
     #[test]
     fn test_operators() {
         assert_eq!(tfv(">>"), vec![vtko!(Operator::ShiftRight, 0, 2, ">")]);

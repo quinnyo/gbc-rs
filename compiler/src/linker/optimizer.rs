@@ -117,7 +117,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, strip_debug: bo
 
         // We replace the existing entries inline so we don't need to
         // pop from the old vector which would be much slower
-        mem::replace(entries, entries_with_optimizations);
+        let _ = mem::replace(entries, entries_with_optimizations);
         true
 
     } else {
@@ -150,6 +150,21 @@ fn optimize_instructions(
         // ld b,b
         (0x40, _, _) if strip_debug => {
             Some((0, vec![]))
+        },
+
+        // ld a,d8
+        // ld [hl],a
+        // ->
+        // ld [hl],d8
+        (0x3E, Some((0x77, _, _, _)), _) => {
+            println!("{:?} {:?}", expression, bytes);
+            Some((1, vec![EntryData::Instruction {
+                op_code: 0x36,
+                expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),
+                bytes: instruction::bytes(0x36),
+                volatile: false,
+                debug_only: false
+            }]))
         },
 
         /*
@@ -415,6 +430,22 @@ mod test {
         ]);
     }
 
+
+    #[test]
+    fn test_optimize_lda_d8_ldhl_a_to_ldhl_d8() {
+        let l = linker_optimize("SECTION ROM0\nld a,5\nld [hl],a");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 54,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(5))),
+                    bytes: vec![54, 5],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
 
     #[test]
     fn test_optimize_lda0_to_xora() {
