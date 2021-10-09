@@ -169,6 +169,7 @@ pub enum Symbol {
     Vsync,
     Pushx,
     Popx,
+    Djnz,
 
     Raw(String)
 }
@@ -340,6 +341,7 @@ impl Symbol {
             Symbol::Vsync    => "vsync",
             Symbol::Pushx    => "pushx",
             Symbol::Popx     => "popx",
+            Symbol::Djnz     => "djnz",
 
             Symbol::Raw(s) => s.as_str()
         }
@@ -524,6 +526,7 @@ impl From<String> for Symbol {
             "vsync"     =>  Symbol::Vsync,
             "pushx"     =>  Symbol::Pushx,
             "popx"      =>  Symbol::Popx,
+            "djnz"      =>  Symbol::Djnz,
 
             // Variables
             _           => Symbol::Raw(s)

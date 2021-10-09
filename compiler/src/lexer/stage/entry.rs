@@ -784,6 +784,17 @@ impl EntryStage {
                 ]
             },
 
+            // DJNZ emulation
+            Symbol::Djnz => {
+                let expr = Self::parse_meta_label(tokens)?;
+                vec![
+                    // dec b
+                    EntryToken::Instruction(inner.clone(), 0x05),
+                    // jr nz,.some_label
+                    EntryToken::InstructionWithArg(inner, 0xC2, expr)
+                ]
+            },
+
             // VBlank Wait Shorthand
             Symbol::Vsync => {
                 vec![
@@ -825,15 +836,15 @@ impl EntryStage {
                 }
             }
 
-            // add a,low
+            // add a,low; 4
             instructions.push(EntryToken::Instruction(inner.clone(), 0x80 + low.instruction_offset()));
-            // ld low,a
+            // ld low,a; 4
             instructions.push(EntryToken::Instruction(inner.clone(), 0x4F + double.instruction_offset()));
-            // adc high
+            // adc high; 4
             instructions.push(EntryToken::Instruction(inner.clone(), 0x88 + high.instruction_offset()));
-            // sub low
+            // sub low; 4
             instructions.push(EntryToken::Instruction(inner.clone(), 0x90 + low.instruction_offset()));
-            // ld high,a
+            // ld high,a; 4
             instructions.push(EntryToken::Instruction(inner, 0x47 + double.instruction_offset()));
 
         // subw hl|de|bc,a|b|c|d|e|h|l|$ff
@@ -1070,6 +1081,16 @@ impl EntryStage {
         }
     }
 
+    fn parse_meta_label(tokens: &mut TokenIterator<ExpressionToken>) -> Result<DataExpression, SourceError> {
+        let expr = tokens.get("Unexpected end of input while parsing instruction label argument.")?;
+        if let ExpressionToken::ConstExpression(_, expr) | ExpressionToken::Expression(_, expr) = expr {
+            Ok(expr)
+
+        } else {
+            Err(expr.error(format!("Unexpected \"{}\", expected a expression as the label argument instead.", expr.symbol())))
+        }
+    }
+
     fn parse_bracket_expr(tokens: &mut TokenIterator<ExpressionToken>, msg: &str, optional_value: bool) -> Result<OptionalDataExpression, SourceError> {
         tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), msg)?;
         if optional_value && tokens.peek_is(ExpressionTokenType::CloseBracket, None) {
@@ -1174,6 +1195,7 @@ impl EntryStage {
             if tokens.peek_is(ExpressionTokenType::ConstExpression, None) {
                 let data = tokens.expect(ExpressionTokenType::ConstExpression, None, "when parsing data storage directive")?;
                 if let ExpressionToken::ConstExpression(_, data_expr) = data {
+                    // TODO parse optional data layout
                     Ok(EntryToken::Data {
                         inner,
                         alignment,
@@ -1188,6 +1210,7 @@ impl EntryStage {
                 }
 
             } else {
+                // TODO parse optional data layout
                 Ok(EntryToken::Data {
                     inner,
                     alignment,
@@ -1431,6 +1454,33 @@ impl EntryStage {
                     }
                 }
             },
+            // [hl],de
+            // [hl],bc
+            MetaLDXATarget::HL(Register::HL) => {
+                if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::BC)) {
+                    tokens.expect(ExpressionTokenType::Register, Some(Symbol::BC), "while parsing instruction register argument")?;
+                    vec![
+                        // ld      [hl],c
+                        EntryToken::Instruction(inner.clone(), 0x71),
+                        // inc     l
+                        EntryToken::Instruction(inner.clone(), 0x2C),
+                        // ld      [hl],b
+                        EntryToken::Instruction(inner, 0x70),
+                    ]
+
+                } else {
+                    tokens.expect(ExpressionTokenType::Register, Some(Symbol::DE), "while parsing instruction register argument")?;
+                    vec![
+                        // ld      [hl],e
+                        EntryToken::Instruction(inner.clone(), 0x73),
+                        // inc     l
+                        EntryToken::Instruction(inner.clone(), 0x2C),
+                        // ld      [hl],d
+                        EntryToken::Instruction(inner, 0x72),
+                    ]
+                }
+            },
+
             // [hld|hli] - XX
             MetaLDXATarget::HL(target) => {
                 let target_instruction = if target == Register::HLIncrement {
@@ -1518,27 +1568,42 @@ impl EntryStage {
                 }
             },
             MetaLDXATarget::RegisterDouble(Register::BC) => {
-                // bc,[someLabel]
                 if tokens.peek_is(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket)) {
                     tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
 
-                    let source = Self::parse_meta_bracket_label(tokens)?;
-                    let (high, low) = Register::BC.to_pair();
-                    vec![
-                        // ld a,[someLabel]
-                        EntryToken::InstructionWithArg(inner.clone(), 0xFA, source.clone()),
-                        // ld low,a
-                        EntryToken::Instruction(inner.clone(), 0x47 + low.instruction_offset_into_a()),
-                        // ld a,[someLabel+1]
-                        EntryToken::InstructionWithArg(inner.clone(), 0xFA, Expression::Binary {
-                            inner: inner.clone(),
-                            op: Operator::Plus,
-                            left: Box::new(source),
-                            right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-                        }),
-                        // ld high,a
-                        EntryToken::Instruction(inner, 0x47 + high.instruction_offset_into_a())
-                    ]
+                    // bc,[hl]
+                    if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HL)) {
+                        tokens.expect(ExpressionTokenType::Register, Some(Symbol::HL), "while parsing instruction register argument")?;
+                        tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction register argument")?;
+                        vec![
+                            // ld      c,[hl]
+                            EntryToken::Instruction(inner.clone(), 0x4E),
+                            // inc     l
+                            EntryToken::Instruction(inner.clone(), 0x2C),
+                            // ld      b,[hl]
+                            EntryToken::Instruction(inner, 0x46),
+                        ]
+
+                    // bc,[someLabel]
+                    } else {
+                        let source = Self::parse_meta_bracket_label(tokens)?;
+                        let (high, low) = Register::BC.to_pair();
+                        vec![
+                            // ld a,[someLabel]
+                            EntryToken::InstructionWithArg(inner.clone(), 0xFA, source.clone()),
+                            // ld low,a
+                            EntryToken::Instruction(inner.clone(), 0x47 + low.instruction_offset_into_a()),
+                            // ld a,[someLabel+1]
+                            EntryToken::InstructionWithArg(inner.clone(), 0xFA, Expression::Binary {
+                                inner: inner.clone(),
+                                op: Operator::Plus,
+                                left: Box::new(source),
+                                right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
+                            }),
+                            // ld high,a
+                            EntryToken::Instruction(inner, 0x47 + high.instruction_offset_into_a())
+                        ]
+                    }
 
                 } else if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::DE)) {
                     tokens.expect(ExpressionTokenType::Register, Some(Symbol::DE), "while parsing instruction register argument")?;
@@ -1560,27 +1625,42 @@ impl EntryStage {
                 }
             },
             MetaLDXATarget::RegisterDouble(Register::DE) => {
-                // de,[someLabel]
                 if tokens.peek_is(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket)) {
                     tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
 
-                    let source = Self::parse_meta_bracket_label(tokens)?;
-                    let (high, low) = Register::DE.to_pair();
-                    vec![
-                        // ld a,[someLabel]
-                        EntryToken::InstructionWithArg(inner.clone(), 0xFA, source.clone()),
-                        // ld low,a
-                        EntryToken::Instruction(inner.clone(), 0x47 + low.instruction_offset_into_a()),
-                        // ld a,[someLabel+1]
-                        EntryToken::InstructionWithArg(inner.clone(), 0xFA, Expression::Binary {
-                            inner: inner.clone(),
-                            op: Operator::Plus,
-                            left: Box::new(source),
-                            right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
-                        }),
-                        // ld high,a
-                        EntryToken::Instruction(inner, 0x47 + high.instruction_offset_into_a())
-                    ]
+                    // de,[hl]
+                    if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HL)) {
+                        tokens.expect(ExpressionTokenType::Register, Some(Symbol::HL), "while parsing instruction register argument")?;
+                        tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction register argument")?;
+                        vec![
+                            // ld      e,[hl]
+                            EntryToken::Instruction(inner.clone(), 0x5E),
+                            // inc     l
+                            EntryToken::Instruction(inner.clone(), 0x2C),
+                            // ld      d,[hl]
+                            EntryToken::Instruction(inner, 0x56),
+                        ]
+
+                    // de,[someLabel]
+                    } else {
+                        let source = Self::parse_meta_bracket_label(tokens)?;
+                        let (high, low) = Register::DE.to_pair();
+                        vec![
+                            // ld a,[someLabel]
+                            EntryToken::InstructionWithArg(inner.clone(), 0xFA, source.clone()),
+                            // ld low,a
+                            EntryToken::Instruction(inner.clone(), 0x47 + low.instruction_offset_into_a()),
+                            // ld a,[someLabel+1]
+                            EntryToken::InstructionWithArg(inner.clone(), 0xFA, Expression::Binary {
+                                inner: inner.clone(),
+                                op: Operator::Plus,
+                                left: Box::new(source),
+                                right: Box::new(Expression::Value(ExpressionValue::Integer(1)))
+                            }),
+                            // ld high,a
+                            EntryToken::Instruction(inner, 0x47 + high.instruction_offset_into_a())
+                        ]
+                    }
 
                 } else if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::BC)) {
                     tokens.expect(ExpressionTokenType::Register, Some(Symbol::BC), "while parsing instruction register argument")?;
@@ -1686,6 +1766,11 @@ impl EntryStage {
                 tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
                 tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
                 Ok(MetaLDXATarget::HL(Register::HLDecrement))
+
+            } else if tokens.peek_is(ExpressionTokenType::Register, Some(Symbol::HL)) {
+                tokens.expect(ExpressionTokenType::Register, None, "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
+                Ok(MetaLDXATarget::HL(Register::HL))
 
             } else {
                 Ok(MetaLDXATarget::MemoryLookup(Self::parse_meta_bracket_label(tokens)?))
@@ -2941,6 +3026,14 @@ mod test {
     }
 
     #[test]
+    fn test_meta_instruction_djnz() {
+        assert_eq!(tfe("djnz $2000"), vec![
+            EntryToken::Instruction(itk!(0, 4, "djnz"), 0x05),
+            EntryToken::InstructionWithArg(itk!(0, 4, "djnz"), 0xC2, Expression::Value(ExpressionValue::Integer(8192)))
+        ]);
+    }
+
+    #[test]
     fn test_meta_instruction_neg() {
         assert_eq!(tfe("neg"), vec![
             EntryToken::Instruction(itk!(0, 3, "neg"), 47),
@@ -3587,6 +3680,42 @@ mod test {
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x2A),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x66),
             EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x6F)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_ldxa_de_register_memory_hl() {
+        assert_eq!(tfe("ldxa de,[hl]"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x5E),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x2C),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x56)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_ldxa_bc_register_memory_hl() {
+        assert_eq!(tfe("ldxa bc,[hl]"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x4E),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x2C),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x46)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_ldxa_register_memory_hl_de() {
+        assert_eq!(tfe("ldxa [hl],de"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x73),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x2C),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x72)
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_ldxa_register_memory_hl_bc() {
+        assert_eq!(tfe("ldxa [hl],bc"), vec![
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x71),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x2C),
+            EntryToken::Instruction(itk!(0, 4, "ldxa"), 0x70)
         ]);
     }
 

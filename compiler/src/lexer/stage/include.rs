@@ -361,7 +361,7 @@ impl IncludeStage {
                     },
                     // gbasm "meta" Instructions
                     Symbol::Msg | Symbol::Brk | Symbol::Mul | Symbol::Div | Symbol::Neg | Symbol::Incx | Symbol::Decx | Symbol::Addw | Symbol::Subw | Symbol::Ldxa |
-                    Symbol::Retx | Symbol::Vsync | Symbol::Pushx | Symbol::Popx => {
+                    Symbol::Retx | Symbol::Vsync | Symbol::Pushx | Symbol::Popx | Symbol::Djnz => {
                         Ok(Some(IncludeToken::MetaInstruction(name)))
                     },
                     // All other names

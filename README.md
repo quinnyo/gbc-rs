@@ -413,11 +413,66 @@ Shorthand for popping all registers from the stack:
 popx
 ```
 
+#### **djnz**
+
+Emulates the standard looping instruction of the Z80:
+
+```asm
+; dec b
+; jr  nz,.label
+djnz  .label
+```
+
 #### **ldxa**
+
+Extended memory loads using no intermediate registers:
+
+```asm
+; ld  b,d
+; ld  c,e
+ldxa  bc,de
+
+; ld  b,h
+; ld  c,l
+ldxa  bc,hl
+
+; ld  d,b
+; ld  e,c
+ldxa  de,bc
+
+; ld  d,h
+; ld  e,l
+ldxa  de,hl
+
+; ld  [hl],e
+; inc l
+; ld  [hl],d
+ldxa  [hl],de
+
+; ld  [hl],c
+; inc l
+; ld  [hl],b
+ldxa  [hl],bc
+
+; ld  e,[hl]
+; inc l
+; ld  d,[hl]
+ldxa  de,[hl]
+
+; ld  c,[hl]
+; inc l
+; ld  b,[hl]
+ldxa  bc,[hl]
+```
 
 Extended memory loads using the `Accumulator` as an intermediate register (destroying its contents):
 
 ```asm
+; ld  a,[hli]
+; ld  h,[hl]
+; ld  l,a
+ldxa  hl,[hl]
+
 ; ld  a,[hli]
 ; ld  R,a
 ldxa  b,[hli]
