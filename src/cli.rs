@@ -3,7 +3,7 @@ use clap::{Arg, App, SubCommand};
 
 pub fn app<'a>() -> App<'a, 'a> {
     App::new("gbc")
-        .version("0.5")
+        .version("0.7.3")
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
         .about("GameBoy Compiler")
         .subcommand(

@@ -249,6 +249,7 @@ impl ExpressionStage {
             // Forward all non-expression tokens
             ExpressionToken::try_from(token, linter_enabled)
 
+        // Registers in LabelCalls
         } else if argument_type == ArgumentType::ParentLabelCall && current_typ == ValueTokenType::Register {
             let inner = token.inner().clone();
             let reg = Register::from(inner.value.as_str());
@@ -256,6 +257,21 @@ impl ExpressionStage {
                 inner,
                 reg
             }))
+
+        // Memory Locations in LabelCalls
+        } else if argument_type == ArgumentType::ParentLabelCall && current_typ == ValueTokenType::OpenBracket {
+            let token = tokens.get("while parsing memory location argument")?;
+            let expr = Self::parse_expression_tokens(tokens, token, ArgumentType::None, linter_enabled)?;
+            tokens.expect(ValueTokenType::CloseBracket, None, "while parsing memory location argument")?;
+            if let ExpressionToken::ConstExpression(inner, expr) | ExpressionToken::Expression(inner, expr) = expr {
+                Ok(ExpressionToken::Expression(inner.clone(), Expression::MemoryArgument {
+                    inner,
+                    value: Box::new(expr)
+                }))
+
+            } else {
+                unreachable!()
+            }
 
         } else {
             Err(token.error(
@@ -528,10 +544,12 @@ mod test {
     use crate::expression::{Expression, ExpressionValue, Operator};
     use super::{ExpressionStage, ExpressionToken, InnerToken, Register, Flag, IfStatementBranch, ForStatement, BlockStatement};
 
+    #[track_caller]
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
         Lexer::<ExpressionStage>::from_lexer(value_lex(s), false).expect("ExpressionLexer failed")
     }
 
+    #[track_caller]
     fn expr_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
         Lexer::<ExpressionStage>::from_lexer(value_lex(s), false).err().unwrap().to_string()
@@ -704,6 +722,30 @@ mod test {
                     id: 1,
                     name: Symbol::from("global_label".to_string()),
                     args: vec![Expression::Value(ExpressionValue::Integer(1))]
+                }
+            )
+        ]);
+    }
+
+    #[test]
+    fn test_label_call_memory() {
+        assert_eq!(tfe("global_label(a):\ncall global_label([1])"), vec![
+            ExpressionToken::ParentLabelDef(
+                itk!(0, 16, "global_label"),
+                1,
+                Some(vec![Register::Accumulator])
+            ),
+            ExpressionToken::Instruction(itk!(17, 21, "call")),
+            ExpressionToken::Expression(
+                itk!(22, 34, "global_label"),
+                Expression::ParentLabelCall {
+                    inner: itk!(22, 34, "global_label"),
+                    id: 1,
+                    name: Symbol::from("global_label".to_string()),
+                    args: vec![Expression::MemoryArgument {
+                        inner: itk!(36, 37, "1"),
+                        value: Box::new(Expression::Value(ExpressionValue::Integer(1)))
+                    }]
                 }
             )
         ]);

@@ -573,9 +573,63 @@ ldxa  hl,[$0000]
 ; ld  [hli],a
 ldxa  [hli],[$0000]
 
+; ld  a,[bc]
+; ld  [hli],a
+ldxa  [hli],[bc]
+
+; ld  a,[de]
+; ld  [hli],a
+ldxa  [hli],[de]
+
 ; ld  a,[$0000]
 ; ld  [hld],a
 ldxa  [hld],[$0000]
+
+; ld  a,[bc]
+; ld  [hld],a
+ldxa  [hld],[bc]
+
+; ld  a,[de]
+; ld  [hld],a
+ldxa  [hld],[de]
+
+; ld  a,R
+; ld  [bc],a
+ldxa  [bc],b
+ldxa  [bc],c
+ldxa  [bc],d
+ldxa  [bc],e
+ldxa  [bc],h
+ldxa  [bc],l
+ldxa  [bc],$80
+ldxa  [bc],[$0000]
+ldxa  [bc],[hli]
+ldxa  [bc],[hld]
+ldxa  [bc],[bc]
+ldxa  [bc],[de]
+ldxa  [bc],[hl]
+ldxa  [bc],bc
+ldxa  [bc],de
+ldxa  [bc],hl
+
+; ld  a,R
+; ld  [de],a
+ldxa  [de],b
+ldxa  [de],c
+ldxa  [de],d
+ldxa  [de],e
+ldxa  [de],h
+ldxa  [de],l
+ldxa  [de],$80
+ldxa  [de],[$0000]
+ldxa  [de],[hli]
+ldxa  [de],[hld]
+ldxa  [de],[bc]
+ldxa  [de],[de]
+ldxa  [de],[hl]
+ldxa  [de],bc
+ldxa  [de],de
+ldxa  [de],hl
 ```
 
 ## License

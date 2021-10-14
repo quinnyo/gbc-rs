@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
-use gb_cpu::{self, Argument, Instruction};
+use gb_cpu::{self, Argument, Instruction, Register};
 use file_io::FileReader;
 
 
@@ -299,6 +299,35 @@ impl Section {
                                         bytes
                                     ));
                                 }
+                            }
+
+                        } else if let Expression::MemoryArgument { inner, value } = expr  {
+                            if signature_reg.byte_width() == 1 {
+                                let op_code = 0xFA;
+                                let bytes = Self::instruction_entry(&inner, context, usage, op_code, Some(*value), volatile, false)?;
+                                self.entries.push(SectionEntry::new_with_size(
+                                    self.id,
+                                    inner.clone(),
+                                    instruction::size(op_code),
+                                    bytes
+                                ));
+
+                                let op_code = signature_reg.to_load_op_code(Some(Register::Accumulator));
+                                let bytes = Self::instruction_entry(&inner, context, usage, op_code, None, volatile, false)?;
+                                self.entries.push(SectionEntry::new_with_size(
+                                    self.id,
+                                    inner.clone(),
+                                    instruction::size(op_code),
+                                    bytes
+                                ));
+
+                            } else {
+                                return Err(inner.error(
+                                    format!(
+                                        "{} byte argument register cannot load from a memory address",
+                                        signature_reg.byte_width()
+                                    )
+                                ));
                             }
 
                         } else {
@@ -2504,6 +2533,46 @@ mod test {
             ]
         ]);
 
+        let l = linker("SECTION ROM0\nglobal_label(a):\ncall global_label([$4000])");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 250,
+                    expression: None,
+                    bytes: vec![250, 0, 64],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 127,
+                    expression: None,
+                    bytes: vec![127],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 205,
+                    expression: Some(Expression::ParentLabelCall {
+                        inner: itk!(35, 47, "global_label"),
+                        name: Symbol::from("global_label".to_string()),
+                        id: 1,
+                        args: vec![Expression::MemoryArgument {
+                            inner: itk!(49, 54, "$4000"),
+                            value: Box::new(Expression::Value(ExpressionValue::Integer(0x4000)))
+                        }]
+                    }),
+                    bytes: vec![205, 0, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+            ]
+        ]);
+
         assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(hl)"), "In file \"main.gb.s\" on line 3, column 19: 2 byte argument register does not match expected 1 byte register in call signature\n\ncall global_label(hl)\n                  ^--- Here");
         assert_eq!(linker_error("SECTION ROM0\nglobal_label(hl):\ncall global_label(a)"), "In file \"main.gb.s\" on line 3, column 19: 1 byte argument register does not match expected 2 byte register in call signature\n\ncall global_label(a)\n                  ^--- Here");
 
@@ -2584,7 +2653,6 @@ mod test {
                 })
             ]
         ]);
-
     }
 
     // Using Blocks -----------------------------------------------------------

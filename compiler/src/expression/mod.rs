@@ -46,6 +46,10 @@ pub enum Expression {
     RegisterArgument {
         inner: InnerToken,
         reg: Register
+    },
+    MemoryArgument {
+        inner: InnerToken,
+        value: Box<Expression>
     }
 }
 
@@ -57,7 +61,8 @@ impl Expression {
             Expression::Value(value) => value.is_constant(),
             Expression::BuiltinCall { args, .. } => args.iter().all(Expression::is_constant),
             Expression::ParentLabelCall { .. } => false,
-            Expression::RegisterArgument { .. } => true
+            Expression::RegisterArgument { .. } => true,
+            Expression::MemoryArgument { value, .. } => value.is_constant()
         }
     }
 

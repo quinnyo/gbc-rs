@@ -89,6 +89,7 @@ lazy_static! {
 
 
 // Structs --------------------------------------------------------------------
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct CartType {
     pub mapper: String,
@@ -143,6 +144,7 @@ impl CartType {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub struct ROMInfo {
     // 0x104..=0x133
