@@ -12,9 +12,8 @@ use file_io::{FileReader, FileWriter, Logger};
 // Internal Dependencies ------------------------------------------------------
 use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
-use crate::linker::{Completion, Lookup, Linker, SegmentUsage};
-use crate::lexer::stage::include::IncludeToken;
-use crate::lexer::{Lexer, LexerFile, LexerToken, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
+use crate::linker::{Linker, SegmentUsage};
+use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 
 
 // Structs --------------------------------------------------------------------
@@ -102,35 +101,9 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn complete<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf, local_file: PathBuf) -> Result<Vec<Completion>, CompilationError> {
-        colored::control::set_override(!self.no_color);
+    pub fn create_linker<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
         let entry_lexer = self.parse(logger, io, file)?;
-        let linker = self.link(logger, io, entry_lexer)?;
-        Ok(linker.to_completion_list(local_file))
-    }
-
-    pub fn lookup<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf, symbol_name: String) -> Result<Option<Lookup>, CompilationError> {
-        colored::control::set_override(!self.no_color);
-        let entry_lexer = self.parse(logger, io, file)?;
-        let linker = self.link(logger, io, entry_lexer)?;
-        Ok(linker.to_lookup_result(symbol_name))
-    }
-
-    pub fn tokenize<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf, line: usize, col: usize) -> Result<Option<(IncludeToken, LexerFile)>, CompilationError> {
-        colored::control::set_override(!self.no_color);
-        let mut files = Vec::new();
-        let tokens = IncludeStage::tokenize_single(io, &file, &mut files).map_err(|e| CompilationError::new("file inclusion", e))?;
-        if let Some(index) = files.first().map(|f| f.get_index(line, col)) {
-            for t in tokens {
-                if index >= t.inner().start_index && index < t.inner().end_index {
-                    return Ok(Some((t, files.remove(0))));
-                }
-            }
-            Ok(None)
-
-        } else {
-            Ok(None)
-        }
+        self.link(logger, io, entry_lexer)
     }
 }
 

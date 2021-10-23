@@ -98,7 +98,7 @@ lazy_static! {
 }
 
 // Section Abstraction --------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Section {
     pub id: usize,
     name: String,

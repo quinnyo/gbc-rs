@@ -7,6 +7,7 @@ use super::InnerToken;
 
 
 // Lexer File Abstraction -----------------------------------------------------
+#[derive(Clone)]
 pub struct LexerFile {
     pub index: usize,
     pub path: PathBuf,

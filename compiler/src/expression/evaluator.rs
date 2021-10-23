@@ -25,7 +25,7 @@ pub struct EvaluatorConstant {
     expression: DataExpression,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UsageInformation {
     pub constants: HashMap<ConstantIndex, HashSet<(usize, usize)>>,
     pub labels: HashMap<usize, HashSet<(usize, usize)>>,
@@ -69,7 +69,7 @@ impl UsageInformation {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EvaluatorContext {
     pub constants: HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
     pub raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,

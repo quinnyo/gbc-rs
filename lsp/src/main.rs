@@ -1,52 +1,69 @@
-// STD Dependencies -----------------------------------------------------------
-use std::sync::Mutex;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-
 // External Dependencies ------------------------------------------------------
-use file_io::Logger;
-use compiler::linker::Completion;
-use project::{ProjectConfig, ProjectReader};
 use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-
+use serde::{Serialize, Deserialize};
+use serde_json::{Map, Value};
 
 
 // Internal Dependencies ------------------------------------------------------
-use compiler::linker::Lookup;
-use compiler::lexer::LexerToken;
+use compiler::linker::Completion;
 
 
-#[derive(Debug, Default)]
-struct State {
-    documents: HashMap<String, String>
+// Modules --------------------------------------------------------------------
+mod state;
+use self::state::State;
+
+
+// Types ----------------------------------------------------------------------
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum InlayKind {
+    TypeHint,
+    ParameterHint,
+    ChainingHint,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InlayHint {
+    pub range: Range,
+    pub kind: InlayKind,
+    pub label: String,
+}
+
+pub enum ServerStatusNotification {}
+
+impl Notification for ServerStatusNotification {
+    type Params = ServerStatusParams;
+    const METHOD: &'static str = "experimental/serverStatus";
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub struct ServerStatusParams {
+    pub quiescent: bool,
+    pub message: Option<String>,
+}
+
+// Backend Implementation -----------------------------------------------------
 struct Backend {
     client: Client,
-    state: Mutex<RefCell<State>>
+    state: State
 }
 
 impl Backend {
+    //#[rpc(name = "gbc-analyzer/inlayHints")]
+    //async fn inlay_hints(&self, params: InlayHintsParams) -> Result<Vec<InlayHint>> {
+    //    let file = params.text_document.uri.path();
+    //    log::info!(&format!("Inlay Hints {}", file));
+    //    Ok(Vec::new())
+    //}
+
     fn do_completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
         log::info!(&format!("Complete {} {}:{}", file, pos.position.line, pos.position.character));
 
-        // TODO cache if files remain unchanged
-        let mut logger = Logger::new();
-        logger.set_silent();
-        let config = ProjectConfig::load(
-            &mut logger,
-            // TODO Overlay modified files from LSP
-            &ProjectReader::from_absolute(PathBuf::from(file))
-        );
-        log::info!(&format!("Config {:?}", config));
-        if let Ok(completions) = ProjectConfig::complete(&config, &mut logger, file) {
+        if let Ok(completions) = self.state.completions(file, pos.position.line as usize, pos.position.character as usize) {
             Ok(Some(CompletionResponse::Array(completions.into_iter().map(|item| {
                 match item {
                     Completion::GlobalLabel { name, info } => CompletionItem {
@@ -107,7 +124,6 @@ impl Backend {
                         tags: None
                     },
                 }
-                //CompletionItem::new_simple("Hello".to_string(), "Some detail".to_string(read))
             }).collect())))
 
         } else {
@@ -115,43 +131,12 @@ impl Backend {
         }
     }
 
-    fn lookup_symbol(&self, file: &str, line: usize, col: usize) -> Result<Option<(Lookup, Range)>> {
-        // TODO cache if files remain unchanged
-        let mut logger = Logger::new();
-        logger.set_silent();
-        let config = ProjectConfig::load(
-            &mut logger,
-            // TODO Overlay modified files from LSP
-            &ProjectReader::from_absolute(PathBuf::from(file))
-        );
-        log::info!(&format!("Config {:?}", config));
-        if let Ok(Some((token, file))) = ProjectConfig::tokenize(&config, &mut logger, file, line, col) {
-            let token = token.inner();
-            if let Ok(Some(lookup)) = ProjectConfig::lookup(&config, &mut logger, token.value.to_string()) {
-                let (sl, sc) = file.get_line_and_col(token.start_index);
-                let (el, ec) = file.get_line_and_col(token.end_index);
-                let range = Range {
-                    start: Position {
-                        line: sl as u32,
-                        character: sc as u32
-                    },
-                    end: Position {
-                        line: el as u32,
-                        character: ec as u32
-                    }
-                };
-                return Ok(Some((lookup, range)))
-            }
-        }
-        Ok(None)
-    }
-
     fn do_hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let pos = params.text_document_position_params;
         let file = pos.text_document.uri.path();
         log::info!(&format!("Hover {} {}:{}", file, pos.position.line, pos.position.character));
 
-        if let Ok(Some((lookup, range))) = self.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
+        if let Ok(Some((lookup, range))) = self.state.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
             Ok(Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::from_markdown(
                     format!("# {}\n\n{}\n\nDefined in {}:{}:{}", lookup.name, lookup.description, lookup.path, lookup.start.0 + 1, lookup.start.1 + 1)
@@ -169,7 +154,7 @@ impl Backend {
         let file = pos.text_document.uri.path();
         log::info!(&format!("Goto Definition {} {}:{}", file, pos.position.line, pos.position.character));
 
-        if let Ok(Some((lookup, _))) = self.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
+        if let Ok(Some((lookup, _))) = self.state.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
             Ok(Some(GotoDefinitionResponse::Scalar(Location {
                 uri: Url::from_file_path(lookup.path).unwrap(),
                 range: Range {
@@ -194,8 +179,10 @@ impl Backend {
         let file = pos.text_document.uri.path();
         log::info!(&format!("References {} {}:{}", file, pos.position.line, pos.position.character));
 
-        if let Ok(Some((lookup, _))) = self.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
+        if let Ok(Some((lookup, _))) = self.state.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
             Ok(Some(lookup.references.into_iter().map(|(path, line, col, eline, ecol)| {
+                // TODO check if we can actual expression entry range instead of the parent
+                // instruction entry (check code in section.rs and the xyz.start_index)
                 Location {
                     uri: Url::from_file_path(path).unwrap(),
                     range: Range {
@@ -215,7 +202,6 @@ impl Backend {
             Ok(None)
         }
     }
-
 }
 
 #[tower_lsp::async_trait]
@@ -242,9 +228,11 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::Info, "initialized!")
-            .await;
+        self.client.send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
+            quiescent: true,
+            message: Some("Ready".to_string())
+
+            }).await;
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -253,50 +241,86 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         log::info!(&format!("Opened {}", params.text_document.uri.path()));
-        if let Ok(state) = self.state.lock() {
-            let mut state = state.borrow_mut();
-            state.documents.insert(params.text_document.uri.path().to_string(), params.text_document.text);
-        }
+        self.state.open_document(params.text_document.uri.path(), &params.text_document.text);
+        /*
+        self.client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+            token: NumberOrString::Number(0)
+
+            }).await;
+        self.client
+            .show_progress_begin(NumberOrString::Number(0), "Initializing")
+            .await;
+        self.client
+            .show_progress_end(NumberOrString::Number(0), "Initialized")
+            .await;*/
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         log::info!(&format!("Changed {}", params.text_document.uri.path()));
-        if let Ok(state) = self.state.lock() {
-            let mut state = state.borrow_mut();
-            if let Some(change) = params.content_changes.first() {
-                state.documents.insert(params.text_document.uri.path().to_string(), change.text.clone());
-            }
+        if let Some(change) = params.content_changes.first() {
+            self.state.change_document(params.text_document.uri.path(), &change.text);
         }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         log::info!(&format!("Saved {}", params.text_document.uri.path()));
+        self.state.save_document(params.text_document.uri.path());
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         log::info!(&format!("Closed {}", params.text_document.uri.path()));
-        if let Ok(state) = self.state.lock() {
-            let mut state = state.borrow_mut();
-            state.documents.remove(params.text_document.uri.path());
-        }
+        self.state.close_document(params.text_document.uri.path());
+    }
+
+    // TODO symbols()
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        self.do_hover(params)
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.do_completion(params)
     }
 
     async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
         self.do_goto_definition(params)
     }
 
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        self.do_hover(params)
-    }
-
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         self.do_references(params)
     }
 
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        self.do_completion(params)
+    async fn experimental_any(&self, params: Value) -> Result<Option<Value>> {
+        if let Value::Object(map) = params {
+            if let Some(Value::Object(text_document)) = map.get("textDocument") {
+                if let Some(Value::String(path)) = text_document.get("uri") {
+                    log::info!(&format!("ExperimentalAny {}", Url::parse(path).unwrap().path()));
+
+                    let mut hints = Vec::new();
+                    hints.push(InlayHint {
+                        range: Range {
+                            start: Position {
+                                line: 0,
+                                character: 0
+                            },
+                            end: Position {
+                                line: 0,
+                                character: 1
+                            }
+                        },
+                        kind: InlayKind::TypeHint,
+                        label: "XYZ".to_string()
+                    });
+
+                    let hints = serde_json::to_value(&hints).unwrap();
+                    return Ok(Some(hints))
+                }
+            }
+        }
+        Ok(None)
     }
 }
+
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -306,10 +330,11 @@ async fn main() {
 
     let (service, messages) = LspService::new(|client| Backend {
         client,
-        state: Mutex::new(RefCell::new(State::default()))
+        state: State::new()
     });
     Server::new(stdin, stdout)
         .interleave(messages)
         .serve(service)
         .await;
 }
+

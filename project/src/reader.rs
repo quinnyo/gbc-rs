@@ -4,6 +4,8 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::{Error as IOError, Read, Write};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
@@ -13,7 +15,8 @@ use file_io::{FileError, FileReader, FileWriter};
 // Concrete File IO Implementation --------------------------------------------
 #[derive(Debug)]
 pub struct ProjectReader {
-    base: PathBuf
+    base: PathBuf,
+    overlay: RefCell<HashMap<PathBuf, String>>
 }
 
 impl ProjectReader {
@@ -23,18 +26,25 @@ impl ProjectReader {
         main.set_file_name("");
         base.push(main);
         Self {
-            base
+            base,
+            overlay: RefCell::new(HashMap::new())
         }
     }
 
     pub fn from_absolute(base: PathBuf) -> Self {
         Self {
-            base
+            base,
+            overlay: RefCell::new(HashMap::new())
         }
     }
 
     pub fn base_dir(&self) -> &PathBuf {
         &self.base
+    }
+
+    pub fn overlay_file(&self, path: PathBuf, text: String) {
+        let mut overlays = self.overlay.borrow_mut();
+        overlays.insert(path, text);
     }
 
     fn read_file_inner(&self, full_path: &PathBuf) -> Result<(PathBuf, String), IOError> {
@@ -98,12 +108,18 @@ impl FileReader for ProjectReader {
 
     fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {
         let path = Self::resolve_path(&self.base, parent, child);
-        self.read_file_inner(&path).map_err(|io| {
-            FileError {
-                io,
-                path
-            }
-        })
+        let overlays = self.overlay.borrow();
+        if let Some(overlay) = overlays.get(&path) {
+            Ok((path, overlay.clone()))
+
+        } else {
+            self.read_file_inner(&path).map_err(|io| {
+                FileError {
+                    io,
+                    path
+                }
+            })
+        }
     }
 
     fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {

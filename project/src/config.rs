@@ -8,9 +8,8 @@ use std::collections::HashMap;
 // External Dependencies ------------------------------------------------------
 use serde::Deserialize;
 use file_io::Logger;
-use compiler::linker::{Completion, Lookup};
+use compiler::linker::Linker;
 use compiler::compiler::{Compiler, CompilationError};
-use compiler::lexer::{LexerFile, stage::include::IncludeToken};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -38,32 +37,14 @@ impl ProjectConfig {
         }
     }
 
-    pub fn complete(project: &ProjectConfig, logger: &mut Logger, local_file: &str) -> Result<Vec<Completion>, CompilationError> {
-        let mut reader = ProjectReader::from_relative(project.rom.input.clone());
-        let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
-        let local_file = PathBuf::from(local_file);
-        let mut compiler = Compiler::new();
-        compiler.set_optimize_instructions();
-        compiler.set_strip_debug_code();
-        compiler.complete(logger, &mut reader, main_file, local_file)
-    }
-
-    pub fn lookup(project: &ProjectConfig, logger: &mut Logger, name: String) -> Result<Option<Lookup>, CompilationError> {
+    pub fn link(project: &ProjectConfig, logger: &mut Logger) -> Result<Linker, CompilationError> {
         let mut reader = ProjectReader::from_relative(project.rom.input.clone());
         let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
         let mut compiler = Compiler::new();
         compiler.set_optimize_instructions();
         compiler.set_strip_debug_code();
         compiler.set_linter_enabled();
-        compiler.lookup(logger, &mut reader, main_file, name)
-    }
-
-    pub fn tokenize(project: &ProjectConfig, logger: &mut Logger, local_file: &str, line: usize, col: usize) -> Result<Option<(IncludeToken, LexerFile)>, CompilationError> {
-        let mut reader = ProjectReader::from_relative(project.rom.input.clone());
-        let mut compiler = Compiler::new();
-        let local_file = PathBuf::from(local_file);
-        let local_file = local_file.strip_prefix(reader.base_dir()).unwrap();
-        compiler.tokenize(logger, &mut reader, local_file.to_path_buf(), line, col)
+        compiler.create_linker(logger, &mut reader, main_file)
     }
 
     pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool, lint: bool) {
@@ -149,7 +130,7 @@ impl ProjectConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct RomConfig {
-    input: PathBuf,
+    pub input: PathBuf,
     pub output: PathBuf,
 }
 

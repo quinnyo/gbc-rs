@@ -61,6 +61,7 @@ pub enum Completion {
 
 
 // Linker Implementation ------------------------------------------------------
+#[derive(Clone)]
 pub struct Linker {
     sections: Vec<Section>,
     context: EvaluatorContext,
@@ -192,7 +193,6 @@ impl Linker {
                     let file = &self.files[constant.inner.file_index];
                     let (line, col) = file.get_line_and_col(constant.inner.start_index);
                     let (eline, ecol) = file.get_line_and_col(constant.inner.end_index);
-                    let refs = self.usage.constants.get(index).map(|r| r.len()).unwrap_or(0);
                     let references = self.usage.constants.get(index).map(|refs| {
                         refs.iter().map(|(file_index, start_index)| {
                             let file = &self.files[*file_index];
@@ -204,7 +204,7 @@ impl Linker {
                     }).unwrap_or_else(Vec::new);
                     return Some(Lookup {
                         name: "Constant".to_string(),
-                        description: format!("Name: `{}`\n{}\nReferences: {}", constant.inner.value.to_string(), result.to_string(), references.len()),
+                        description: format!("Name: `{}`\nValue: {}\nReferences: {}", constant.inner.value.to_string(), result.to_string(), references.len()),
                         path: file.path.to_string_lossy().to_string(),
                         start: (line, col),
                         end: (eline, ecol),
@@ -219,7 +219,6 @@ impl Linker {
                     let file = &self.files[token.file_index];
                     let (line, col) = file.get_line_and_col(token.start_index);
                     let (eline, ecol) = file.get_line_and_col(token.end_index);
-                    let refs = self.usage.labels.get(label_id).map(|r| r.len()).unwrap_or(0);
                     let references = self.usage.labels.get(label_id).map(|refs| {
                         refs.iter().map(|(file_index, start_index)| {
                             let file = &self.files[*file_index];
@@ -265,7 +264,7 @@ impl Linker {
                 true
             };
             if valid {
-                if let Some((result, usage)) = self.context.constants.get(index) {
+                if let Some((result, _)) = self.context.constants.get(index) {
                     completions.push(Completion::Constant {
                         name: index.0.to_string(),
                         info: Some(format!("Value: {}", result.to_string()))
