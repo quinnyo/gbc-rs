@@ -1,6 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
 use std::mem;
+use std::path::PathBuf;
 
 
 // Modules --------------------------------------------------------------------
@@ -31,6 +32,31 @@ pub struct SegmentUsage {
     pub end_address: usize,
     pub bytes_in_use: usize,
     pub ranges: Vec<(bool, Option<String>, usize, usize)>
+}
+
+#[derive(Debug)]
+pub struct Lookup {
+    pub name: String,
+    pub description: String,
+    pub path: String,
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub references: Vec<(String, usize, usize, usize, usize)>
+}
+
+#[derive(Debug)]
+pub enum Completion {
+    Constant {
+        name: String,
+        info: Option<String>
+    },
+    GlobalLabel {
+        name: String,
+        info: Option<String>
+    },
+    LocalLabel {
+        name: String
+    }
 }
 
 
@@ -86,10 +112,10 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, &mut usage, inner.file_index)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, &mut usage, inner.file_index)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, &mut usage, inner.file_index)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, &mut usage, inner.file_index)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, &mut usage, inner.file_index, inner.start_index)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, &mut usage, inner.file_index, inner.start_index)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, &mut usage, inner.file_index, inner.start_index)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, &mut usage, inner.file_index, inner.start_index)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
@@ -157,6 +183,127 @@ impl Linker {
             usage,
             files: Vec::new()
         })
+    }
+
+    pub fn to_lookup_result(&self, symbol_name: String) -> Option<Lookup> {
+        for (index, constant) in &self.context.raw_constants {
+            if index.0.to_string() == symbol_name {
+                if let Some((result, _)) = self.context.constants.get(index) {
+                    let file = &self.files[constant.inner.file_index];
+                    let (line, col) = file.get_line_and_col(constant.inner.start_index);
+                    let (eline, ecol) = file.get_line_and_col(constant.inner.end_index);
+                    let refs = self.usage.constants.get(index).map(|r| r.len()).unwrap_or(0);
+                    let references = self.usage.constants.get(index).map(|refs| {
+                        refs.iter().map(|(file_index, start_index)| {
+                            let file = &self.files[*file_index];
+                            let (line, col) = file.get_line_and_col(*start_index);
+                            (file.path.to_string_lossy().to_string(), line, col, line, col + symbol_name.len())
+
+                        }).collect()
+
+                    }).unwrap_or_else(Vec::new);
+                    return Some(Lookup {
+                        name: "Constant".to_string(),
+                        description: format!("Name: `{}`\n{}\nReferences: {}", constant.inner.value.to_string(), result.to_string(), references.len()),
+                        path: file.path.to_string_lossy().to_string(),
+                        start: (line, col),
+                        end: (eline, ecol),
+                        references
+                    });
+                }
+            }
+        }
+        for ((symbol, label_id, is_global), token) in &self.context.raw_labels {
+            if symbol.to_string() == symbol_name {
+                if let Some(address) = self.context.label_addresses.get(label_id) {
+                    let file = &self.files[token.file_index];
+                    let (line, col) = file.get_line_and_col(token.start_index);
+                    let (eline, ecol) = file.get_line_and_col(token.end_index);
+                    let refs = self.usage.labels.get(label_id).map(|r| r.len()).unwrap_or(0);
+                    let references = self.usage.labels.get(label_id).map(|refs| {
+                        refs.iter().map(|(file_index, start_index)| {
+                            let file = &self.files[*file_index];
+                            let (line, col) = file.get_line_and_col(*start_index);
+                            (file.path.to_string_lossy().to_string(), line, col, line, col + symbol_name.len())
+
+                        }).collect()
+
+                    }).unwrap_or_else(Vec::new);
+                    return Some(Lookup {
+                        name: if *is_global {
+                            "Global Label".to_string()
+
+                        } else {
+                            "Local Label".to_string()
+                        },
+                        description: format!("Name: `{}`\nAddress: ${:0>4x}\nReferences: {}", symbol.to_string(), address, references.len()),
+                        path: file.path.to_string_lossy().to_string(),
+                        start: (line, col),
+                        end: (eline, ecol),
+                        references
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    pub fn to_completion_list(&self, local_file: PathBuf) -> Vec<Completion> {
+        let local_file_index = self.files.iter().find(|f| {
+            f.path == local_file
+
+        }).map(|f| f.index);
+
+        let mut completions = Vec::new();
+        for (index, _) in &self.context.raw_constants {
+            // Constant is local to its file
+            let valid = if let Some(file_index) = index.1 {
+                Some(file_index) == local_file_index
+
+            // Constant is global
+            } else {
+                true
+            };
+            if valid {
+                if let Some((result, usage)) = self.context.constants.get(index) {
+                    completions.push(Completion::Constant {
+                        name: index.0.to_string(),
+                        info: Some(format!("Value: {}", result.to_string()))
+                    })
+                } else {
+                    completions.push(Completion::Constant {
+                        name: index.0.to_string(),
+                        info: None
+                    })
+                }
+            }
+        }
+
+        for ((symbol, label_id, is_global), token) in &self.context.raw_labels {
+            // Label is global
+            let valid = if *is_global {
+                true
+
+            // Constant is local to its token.file_index
+            } else {
+                Some(token.file_index) == local_file_index
+            };
+            if valid {
+                if let Some(address) = self.context.label_addresses.get(label_id) {
+                    completions.push(Completion::GlobalLabel {
+                        name: symbol.to_string(),
+                        info: Some(format!("Address: ${:0>4x}", address))
+                    })
+
+                } else {
+                    completions.push(Completion::GlobalLabel {
+                        name: symbol.to_string(),
+                        info: None
+                    })
+                }
+            }
+        }
+        completions
     }
 
     pub fn to_lint_list(&self) -> Vec<Lint> {
@@ -252,12 +399,12 @@ impl Linker {
                 }
 
             // Note label definitions for error messages
-            } else if let EntryToken::ParentLabelDef(ref inner, label_id, ref args) = token {
+            } else if let EntryToken::ParentLabelDef(ref inner, label_id, ref args, is_global) = token {
                 if inactive_labels_only {
-                    context.declare_label(inner, label_id, args.clone(), false);
+                    context.declare_label(inner, label_id, args.clone(), false, is_global);
 
                 } else {
-                    context.declare_label(inner, label_id, args.clone(), true);
+                    context.declare_label(inner, label_id, args.clone(), true, is_global);
                     remaining_tokens.push((volatile_instructions, token));
                 }
 
@@ -267,7 +414,7 @@ impl Linker {
                 let mut first_taken = false;
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
-                        context.resolve_const_expression(&condition, usage, inner.file_index)?
+                        context.resolve_const_expression(&condition, usage, inner.file_index, inner.start_index)?
 
                     } else {
                         ExpressionResult::Integer(1)
@@ -288,8 +435,8 @@ impl Linker {
             } else if let EntryToken::ForStatement(inner, for_statement) = token {
 
                 let binding = for_statement.binding;
-                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, usage, inner.file_index)?, "Invalid for range argument")?;
-                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, usage, inner.file_index)?, "Invalid for range argument")?;
+                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, usage, inner.file_index, inner.start_index)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, usage, inner.file_index, inner.start_index)?, "Invalid for range argument")?;
 
                 let iterations = to - from;
                 if iterations > 2048 {

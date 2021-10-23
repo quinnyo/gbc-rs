@@ -317,7 +317,7 @@ impl LabelResolver {
     ) -> Result<Option<ChildLabelError>, SourceError> {
         for (index, token) in tokens.iter_mut().enumerate() {
             match token {
-                ValueToken::ParentLabelDef(inner, _, _) if parent_def_allowed => {
+                ValueToken::ParentLabelDef(inner, _, _, _) if parent_def_allowed => {
                     let parent_label = parent_label_map.entry(inner.macro_call_id).or_insert(None);
                     if let Some(error) = Self::verify_child_label_refs_under_parent(parent_label.take(), child_label_refs) {
                         return Ok(Some(error));

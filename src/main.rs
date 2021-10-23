@@ -6,19 +6,13 @@ use std::process::Command;
 
 // External Dependencies ------------------------------------------------------
 use decompiler::Decompiler;
+use project::{ProjectConfig, ProjectReader};
 use file_io::Logger;
 use compiler::compiler::Compiler;
 
 
 // Modules --------------------------------------------------------------------
 mod cli;
-mod config;
-mod reader;
-
-
-// Internal Dependencies ------------------------------------------------------
-use self::config::ProjectConfig;
-use self::reader::ProjectReader;
 
 
 // CLI Interface --------------------------------------------------------------
@@ -38,7 +32,7 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        ProjectConfig::build(&config, &mut logger, true);
+        ProjectConfig::build(&config, &mut logger, true, false);
 
     // Debug Builds
     } else if matches.subcommand_matches("debug").is_some() {
@@ -46,12 +40,20 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        ProjectConfig::build(&config, &mut logger, false);
+        ProjectConfig::build(&config, &mut logger, false, false);
+
+    // Lint Builds
+    } else if matches.subcommand_matches("lint").is_some() {
+        let config = ProjectConfig::load(
+            &mut logger,
+            &ProjectReader::from_absolute(env::current_dir().unwrap())
+        );
+        ProjectConfig::build(&config, &mut logger, false, true);
 
     // Emulation
     } else if let Some(matches) = matches.subcommand_matches("emu") {
         let name = matches.value_of("EMULATOR").unwrap();
-        if try_emulator(&mut logger, false, name) {
+        if !try_emulator(&mut logger, false, name) {
             logger.fail(Logger::format_error(
                 format!("No emulator configuration for \"{}\".", name)
             ));
@@ -128,7 +130,7 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
         return false;
     };
     if let Some(emulator) = config.emulator.get(name) {
-        ProjectConfig::build(&config, logger, !emulator.debug);
+        ProjectConfig::build(&config, logger, !emulator.debug, false);
         logger.status("Emulating", format!("Running \"{}\"...", emulator.command));
         logger.flush();
 
@@ -136,9 +138,8 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
         let name = args.next().expect("Failed to get command name");
         let mut args: Vec<String> = args.map(|arg| arg.to_string()).collect();
         args.push(config.rom.output.display().to_string());
-        let mut child = Command::new(name).args(args).spawn().expect("Command failed");
-        child.wait().ok();
-        true
+        let status = Command::new(name).args(args).status().expect("Command failed");
+        status.success()
 
     } else {
         false

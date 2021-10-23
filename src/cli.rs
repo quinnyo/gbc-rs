@@ -15,6 +15,10 @@ pub fn app<'a>() -> App<'a, 'a> {
                 .about("Builds a debug ROM using the local \"gbc.toml\" project configuration.")
         )
         .subcommand(
+            SubCommand::with_name("lint")
+                .about("Lint a debug ROM using the local \"gbc.toml\" project configuration.")
+        )
+        .subcommand(
             SubCommand::with_name("emu")
                 .about("Builds a ROM and emulates it via the specified configuration.")
                 .arg(Arg::with_name("EMULATOR")

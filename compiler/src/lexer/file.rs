@@ -25,6 +25,23 @@ impl LexerFile {
         }
     }
 
+    pub fn get_index(&self, get_line: usize, get_col: usize) -> usize {
+        let (mut line, mut col) = (0, 0);
+        for (i, c) in self.contents.chars().enumerate() {
+            if line == get_line && col == get_col {
+                return i;
+
+            } else if c == '\n' || c == '\r' {
+                line += 1;
+                col = 0;
+
+            } else {
+                col += 1;
+            }
+        }
+        0
+    }
+
     pub fn get_line_and_col(&self, index: usize) -> (usize, usize) {
         let (mut line, mut col) = (0, 0);
         for (i, c) in self.contents.chars().enumerate() {

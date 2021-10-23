@@ -46,7 +46,7 @@ lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
     ForStatement((ForStatement<ValueToken>)),
     BlockStatement((BlockStatement<ValueToken>)),
     Lookup((Vec<ValueToken>)),
-    ParentLabelDef((usize, Option<Vec<Register>>)),
+    ParentLabelDef((usize, Option<Vec<Register>>, bool)),
     ParentLabelRef((usize)),
     ChildLabelDef((usize, Option<usize>)),
     ChildLabelRef((usize, Option<usize>))
@@ -419,7 +419,7 @@ impl ValueStage {
                 inner.end_index = colon.end_index;
                 namespace_members.insert(member_id, (inner.clone(), *unique_label_id));
 
-                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, argument_list))
+                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, argument_list, false))
             }
 
         } else {
@@ -468,7 +468,7 @@ impl ValueStage {
                 parent_labels_names.push(label_id.0.clone());
                 child_labels.clear();
 
-                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, argument_list))
+                Ok(ValueToken::ParentLabelDef(inner, *unique_label_id, argument_list, is_global))
             }
 
         } else if is_global {
@@ -854,7 +854,8 @@ mod test {
         assert_eq!(tfv("parent_label:"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
         )]);
     }
 
@@ -863,7 +864,8 @@ mod test {
         assert_eq!(tfv("parent_label(bc, de, hl):"), vec![ValueToken::ParentLabelDef(
             itk!(0, 25, "parent_label"),
             1,
-            Some(vec![Register::BC, Register::DE, Register::HL])
+            Some(vec![Register::BC, Register::DE, Register::HL]),
+            false
         )]);
         assert_eq!(tfv("parent_label(a, b, c, d, e, h, l):"), vec![ValueToken::ParentLabelDef(
             itk!(0, 34, "parent_label"),
@@ -876,7 +878,8 @@ mod test {
                 Register::E,
                 Register::H,
                 Register::L
-            ])
+            ]),
+            false
         )]);
     }
 
@@ -885,7 +888,8 @@ mod test {
         assert_eq!(tfv("parent_label():\nparent_label()"), vec![ValueToken::ParentLabelDef(
             itk!(0, 15, "parent_label"),
             1,
-            Some(vec![])
+            Some(vec![]),
+            false
 
         ), ValueToken::ParentLabelCall(
             itk!(16, 28, "parent_label"),
@@ -915,7 +919,8 @@ mod test {
         assert_eq!(tfv("parent_label:\nparent_label"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ParentLabelRef(
             itf!(14, 26, "parent_label", 0),
@@ -925,7 +930,8 @@ mod test {
             ValueToken::ParentLabelDef(
                 itk!(0, 13, "parent_label"),
                 1,
-                None
+                None,
+                false
             ),
             ValueToken::BuiltinCall(
                 itk!(14, 18, "CEIL"),
@@ -958,12 +964,14 @@ mod test {
         assert_eq!(tokens, vec![ValueToken::ParentLabelDef(
             itf!(0, 25, "_parent_file_child_label", 0),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ParentLabelDef(
             itf!(0, 25, "_parent_file_child_label", 1),
             2,
-            None
+            None,
+            false
         )]);
     }
 
@@ -977,7 +985,8 @@ mod test {
         assert_eq!(tokens, vec![ValueToken::ParentLabelDef(
             itf!(0, 25, "_parent_file_child_label", 0),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ParentLabelRef(
             itf!(26, 50, "_parent_file_child_label", 0),
@@ -986,7 +995,8 @@ mod test {
         ), ValueToken::ParentLabelDef(
             itf!(0, 25, "_parent_file_child_label", 1),
             2,
-            None
+            None,
+            false
 
         ), ValueToken::ParentLabelRef(
             itf!(26, 50, "_parent_file_child_label", 1),
@@ -1033,8 +1043,8 @@ mod test {
         ).tokens;
 
         assert_eq!(tokens, vec![
-            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 0), 1, None),
-            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 1), 2, None)
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 0), 1, None, false),
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 1), 2, None, false)
         ]);
     }
 
@@ -1046,8 +1056,8 @@ mod test {
         ).tokens;
 
         assert_eq!(tokens, vec![
-            ValueToken::ParentLabelDef(itf!(7, 20, "parent_label", 0), 1, None),
-            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 1), 2, None)
+            ValueToken::ParentLabelDef(itf!(7, 20, "parent_label", 0), 1, None, true),
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 1), 2, None, false)
         ]);
     }
 
@@ -1060,7 +1070,7 @@ mod test {
         ).tokens;
 
         assert_eq!(tokens, vec![
-            ValueToken::ParentLabelDef(itf!(7, 20, "parent_label", 0), 1, None),
+            ValueToken::ParentLabelDef(itf!(7, 20, "parent_label", 0), 1, None, true),
             ValueToken::ParentLabelRef(itf!(0, 12, "parent_label", 1), 1)
         ]);
     }
@@ -1073,7 +1083,7 @@ mod test {
         ).tokens;
 
         assert_eq!(tokens, vec![
-            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 0), 1, None),
+            ValueToken::ParentLabelDef(itf!(0, 13, "parent_label", 0), 1, None, false),
             ValueToken::Name(itf!(0, 12, "parent_label", 1))
         ]);
     }
@@ -1108,7 +1118,8 @@ mod test {
         assert_eq!(tfv("parent_label:\n.child_label:\n.child_other_label:"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ChildLabelDef(
             itk!(14, 27, "child_label"),
@@ -1127,7 +1138,8 @@ mod test {
         assert_eq!(tfv("parent_label:\n.stop:"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ChildLabelDef(
             itk!(14, 20, "stop"),
@@ -1141,7 +1153,8 @@ mod test {
         assert_eq!(tfv("parent_label:\n.DS:"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ChildLabelDef(
             itk!(14, 18, "DS"),
@@ -1155,7 +1168,8 @@ mod test {
         assert_eq!(tfv("parent_label:\n.child_label:\n.child_label"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ChildLabelDef(
             itk!(14, 27, "child_label"),
@@ -1174,7 +1188,8 @@ mod test {
         assert_eq!(tfv("parent_label:\n.child_label:\nCEIL(.child_label)"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ChildLabelDef(
             itk!(14, 27, "child_label"),
@@ -1200,7 +1215,8 @@ mod test {
         assert_eq!(tfv("parent_label:\n.child_label\n.child_label:"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::ChildLabelRef(
             itk!(14, 26, "child_label"),
@@ -1219,7 +1235,8 @@ mod test {
         assert_eq!(tfv("parent_label:\nCEIL(.child_label)\n.child_label:"), vec![ValueToken::ParentLabelDef(
             itk!(0, 13, "parent_label"),
             1,
-            None
+            None,
+            false
 
         ), ValueToken::BuiltinCall(
             itk!(14, 18, "CEIL"),
@@ -1242,7 +1259,8 @@ mod test {
             ValueToken::ParentLabelDef(
                 itk!(0, 13, "parent_label"),
                 1,
-                None
+                None,
+                false
 
             ), ValueToken::ChildLabelRef(
                 itk!(14, 26, "child_label"),
@@ -1252,7 +1270,8 @@ mod test {
             ), ValueToken::ParentLabelDef(
                 itkm!(59, 72, "_macro_label", 0),
                 2,
-                None
+                None,
+                false
 
             ), ValueToken::ChildLabelRef(
                 itkm!(73, 85, "macro_child", 0),
@@ -1281,11 +1300,11 @@ mod test {
     fn test_label_macro_postfix() {
         assert_eq!(tfv("FOO() FOO() MACRO FOO()\nmacro_label_def:\n.child_macro_label_def:\n.child_macro_label_def\nENDMACRO"), vec![
             ValueToken::ParentLabelDef(
-                itkm!(24, 40, "macro_label_def", 0), 1, None
+                itkm!(24, 40, "macro_label_def", 0), 1, None, false
             ),
             ValueToken::ChildLabelDef(itkm!(41, 64, "child_macro_label_def", 0), 2, Some(0)),
             ValueToken::ChildLabelRef(itkm!(65, 87, "child_macro_label_def", 0), 2, Some(0)),
-            ValueToken::ParentLabelDef(itkm!(24, 40, "macro_label_def", 1), 3, None),
+            ValueToken::ParentLabelDef(itkm!(24, 40, "macro_label_def", 1), 3, None, false),
             ValueToken::ChildLabelDef(itkm!(41, 64, "child_macro_label_def", 1), 4, Some(1)),
             ValueToken::ChildLabelRef(itkm!(65, 87, "child_macro_label_def", 1), 4, Some(1))
         ]);
@@ -1295,7 +1314,7 @@ mod test {
     fn test_macro_arg_parent_label_ref() {
         assert_eq!(tfv("parent:\nMACRO FOO(@a) DB @a ENDMACRO\nFOO(parent)"), vec![
             ValueToken::ParentLabelDef(
-                itk!(0, 7, "parent"), 1, None
+                itk!(0, 7, "parent"), 1, None, false
             ),
             vtkm!(Reserved, 22, 24, "DB", 0),
             ValueToken::ParentLabelRef(
@@ -1308,7 +1327,7 @@ mod test {
     #[test]
     fn test_macro_parent_label_ref() {
         assert_eq!(tfv("MACRO FOO() parent_label:\nparent_label\n ENDMACRO\nFOO()"), vec![
-            ValueToken::ParentLabelDef(itkm!(12, 25, "parent_label", 0), 1, None),
+            ValueToken::ParentLabelDef(itkm!(12, 25, "parent_label", 0), 1, None, false),
             ValueToken::ParentLabelRef(itkm!(26, 38, "parent_label", 0), 1)
         ]);
     }
@@ -1480,7 +1499,7 @@ mod test {
                     ]
                 }
             ]),
-            ValueToken::ParentLabelDef(itf!(34, 47, "global_label", 0), 1, None)
+            ValueToken::ParentLabelDef(itf!(34, 47, "global_label", 0), 1, None, false)
         ]);
     }
 
@@ -1522,7 +1541,7 @@ mod test {
                     ValueToken::ParentLabelRef(itf!(24, 36, "global_label", 0), 1)
                 ]
             }),
-            ValueToken::ParentLabelDef(itf!(44, 57, "global_label", 0), 1, None)
+            ValueToken::ParentLabelDef(itf!(44, 57, "global_label", 0), 1, None, false)
         ]);
     }
 
@@ -1563,7 +1582,7 @@ mod test {
         assert_eq!(lexer.tokens, vec![
             ValueToken::BlockStatement(itk!(0, 5, "BLOCK"), BlockStatement::Volatile(
                 vec![
-                    ValueToken::ParentLabelDef(itk!(15, 22, "parent"), 1, None),
+                    ValueToken::ParentLabelDef(itk!(15, 22, "parent"), 1, None, false),
                     ValueToken::ChildLabelDef(itk!(23, 30, "child"), 2, None),
                     ValueToken::Reserved(itk!(31, 33, "DB")),
                     ValueToken::ChildLabelRef(itk!(34, 40, "child"), 2, None)
@@ -1580,7 +1599,7 @@ mod test {
                 IfStatementBranch {
                     condition: Some(vec![ValueToken::Name(itk!(3, 6, "foo"))]),
                     body: vec![
-                        ValueToken::ParentLabelDef(itk!(12, 19, "parent"), 1, None),
+                        ValueToken::ParentLabelDef(itk!(12, 19, "parent"), 1, None, false),
                         ValueToken::ChildLabelDef(itk!(20, 27, "child"), 2, None),
                         ValueToken::Reserved(itk!(28, 30, "DB")),
                         ValueToken::ChildLabelRef(itk!(31, 37, "child"), 2, None)
@@ -1605,7 +1624,7 @@ mod test {
                     value: 10
                 }],
                 body: vec![
-                    ValueToken::ParentLabelDef(itk!(24, 31, "parent"), 1, None),
+                    ValueToken::ParentLabelDef(itk!(24, 31, "parent"), 1, None, false),
                     ValueToken::ChildLabelDef(itk!(32, 39, "child"), 2, None),
                     ValueToken::Reserved(itk!(40, 42, "DB")),
                     ValueToken::ChildLabelRef(itk!(43, 49, "child"), 2, None)
@@ -1619,7 +1638,7 @@ mod test {
     fn test_namespace_statement_local() {
         let lexer = value_lexer("NAMESPACE foo field: DB ENDNAMESPACE\nfoo::field");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None),
+            ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None, false),
             ValueToken::Reserved(itk!(21, 23, "DB")),
             ValueToken::ParentLabelRef(itk!(37, 47, "foo::field"), 1)
         ]);
@@ -1640,7 +1659,7 @@ mod test {
     fn test_namespace_statement_constants() {
         let lexer = value_lexer("NAMESPACE foo field: DS SIZE ENDNAMESPACE");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None),
+            ValueToken::ParentLabelDef(itk!(14, 20, "foo::field"), 1, None, false),
             ValueToken::Reserved(itk!(21, 23, "DS")),
             ValueToken::Name(itk!(24, 28, "SIZE"))
         ]);
@@ -1657,7 +1676,7 @@ mod test {
         let lexer = value_lexer_child("INCLUDE 'child.gb.s'\nGLOBAL NAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
         assert_eq!(lexer.tokens, vec![
             ValueToken::ParentLabelRef(itf!(0, 10, "foo::field", 1), 1),
-            ValueToken::ParentLabelDef(itk!(42, 48, "foo::field"), 1, None),
+            ValueToken::ParentLabelDef(itk!(42, 48, "foo::field"), 1, None, false),
             ValueToken::Reserved(itk!(49, 51, "DB"))
         ]);
     }
@@ -1666,7 +1685,7 @@ mod test {
     fn test_namespace_statement_macro() {
         let lexer = value_lexer("MACRO m(@name) NAMESPACE @name field: DB ENDNAMESPACE foo::field ENDMACRO m(foo)");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itkm!(31, 37, "foo::field", 0), 1, None),
+            ValueToken::ParentLabelDef(itkm!(31, 37, "foo::field", 0), 1, None, false),
             ValueToken::Reserved(itkm!(38, 40, "DB", 0)),
             ValueToken::ParentLabelRef(itkm!(54, 64, "foo::field", 0), 1)
         ]);
@@ -1676,7 +1695,7 @@ mod test {
     fn test_namespace_statement_nested() {
         let lexer = value_lexer("NAMESPACE foo NAMESPACE inner bar: DB\nENDNAMESPACE\nENDNAMESPACE\nfoo::inner::bar");
         assert_eq!(lexer.tokens, vec![
-            ValueToken::ParentLabelDef(itk!(30, 34, "foo::inner::bar"), 1, None),
+            ValueToken::ParentLabelDef(itk!(30, 34, "foo::inner::bar"), 1, None, false),
             ValueToken::Reserved(itk!(35, 37, "DB")),
             ValueToken::ParentLabelRef(itk!(64, 79, "foo::inner::bar"), 1)
         ]);

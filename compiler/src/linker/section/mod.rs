@@ -372,7 +372,7 @@ impl Section {
                     bytes
                 ))
             },
-            EntryToken::ParentLabelDef(inner, id, _) => {
+            EntryToken::ParentLabelDef(inner, id, _, _) => {
                 let name = inner.value.clone();
                 self.entries.push(SectionEntry::new_unsized(self.id, inner, EntryData::Label {
                     name: name.to_string(),
@@ -783,8 +783,8 @@ impl Section {
                 }
             },
             DataStorage::Buffer(ref length, ref fill) => {
-                let length_or_string = context.resolve_dyn_expression(length, usage, None, false, inner.file_index)?;
-                let fill = context.resolve_opt_dyn_expression(fill, usage, None, inner.file_index)?;
+                let length_or_string = context.resolve_dyn_expression(length, usage, None, false, inner.file_index, inner.start_index)?;
+                let fill = context.resolve_opt_dyn_expression(fill, usage, None, inner.file_index, inner.start_index)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"
                     (ExpressionResult::Integer(size), Some(ExpressionResult::String(s))) => {
@@ -837,11 +837,11 @@ impl Section {
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner.file_index)?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner.file_index, inner.start_index)?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner.file_index)?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner.file_index, inner.start_index)?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -870,7 +870,7 @@ impl Section {
             // Handle constant/offset -> op code mapping
             let is_call_instruction = Instruction::is_call_op_code(op_code);
             if let Some(offsets) = instruction::offsets(op_code) {
-                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid constant argument")?;
+                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index, inner.start_index)?, "Invalid constant argument")?;
                 let mut mapped_op_code = None;
                 for (constant_value, constant_op_code) in offsets {
                     if value == *constant_value as i32 {
@@ -895,11 +895,11 @@ impl Section {
                 let mut arg_bytes: Vec<u8> = match argument {
                     Argument::MemoryLookupByteValue | Argument::ByteValue => {
                         vec![
-                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid byte argument")?
+                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index, inner.start_index)?, "Invalid byte argument")?
                         ]
                     },
                     Argument::MemoryLookupWordValue | Argument::WordValue => {
-                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid word argument")?;
+                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index, inner.start_index)?, "Invalid word argument")?;
                         vec![
                             word as u8,
                             (word >> 8) as u8
@@ -909,12 +909,12 @@ impl Section {
                         // ldsp hl,X
                         if op_code == 248 {
                             vec![
-                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index)?, "Invalid signed byte argument")?
+                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner.file_index, inner.start_index)?, "Invalid signed byte argument")?
                             ]
 
                         // jr
                         } else if let Some(end_of_instruction) = end_of_instruction {
-                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), is_call_instruction, inner.file_index)?, "Invalid address")?;
+                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), is_call_instruction, inner.file_index, inner.start_index)?, "Invalid address")?;
                             let target = address as i32 - end_of_instruction;
                             vec![
                                 util::signed_byte_value(inner, target, "").map_err(|mut e| {

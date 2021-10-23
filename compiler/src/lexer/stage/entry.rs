@@ -42,7 +42,7 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     InstructionWithArg((u16, DataExpression)),
     DebugInstruction((u16)),
     DebugInstructionWithArg((u16, DataExpression)),
-    ParentLabelDef((usize, Option<Vec<Register>>)),
+    ParentLabelDef((usize, Option<Vec<Register>>, bool)),
     ChildLabelDef((usize)),
     // IF [ConstExpression] THEN .. ELSE .. ENDIF
     IfStatement((Vec<IfStatementBranch>)),
@@ -167,7 +167,7 @@ impl EntryStage {
             let entry = match token {
 
                 // Passthrough Label Defs
-                ExpressionToken::ParentLabelDef(inner, id, args) => EntryToken::ParentLabelDef(inner, id, args),
+                ExpressionToken::ParentLabelDef(inner, id, args, is_global) => EntryToken::ParentLabelDef(inner, id, args, is_global),
                 ExpressionToken::ChildLabelDef(inner, id) => EntryToken::ChildLabelDef(inner, id),
 
                 // If Statements
@@ -2239,7 +2239,8 @@ mod test {
         assert_eq!(tfe("global_label:"), vec![EntryToken::ParentLabelDef(
             itk!(0, 13, "global_label"),
             1,
-            None
+            None,
+            false
         )]);
     }
 
@@ -2248,7 +2249,8 @@ mod test {
         assert_eq!(tfe("global_label(a, hl):"), vec![EntryToken::ParentLabelDef(
             itk!(0, 20, "global_label"),
             1,
-            Some(vec![Register::Accumulator, Register::HL])
+            Some(vec![Register::Accumulator, Register::HL]),
+            false
         )]);
     }
 
@@ -2257,7 +2259,8 @@ mod test {
         assert_eq!(tfe("global_label:\n.local_label:"), vec![EntryToken::ParentLabelDef(
             itk!(0, 13, "global_label"),
             1,
-            None
+            None,
+            false
 
         ), EntryToken::ChildLabelDef(
             itk!(14, 27, "local_label"),
@@ -2421,7 +2424,8 @@ mod test {
         assert_eq!(tfe("global:\nDB global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
             1,
-            None
+            None,
+            false
         ), EntryToken::Data {
             inner: itk!(8, 10, "DB"),
             alignment: DataAlignment::Byte,
@@ -2482,7 +2486,8 @@ mod test {
         assert_eq!(tfe("global:\nDW global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
             1,
-            None
+            None,
+            false
         ), EntryToken::Data {
             inner: itk!(8, 10, "DW"),
             alignment: DataAlignment::Byte,
@@ -2543,7 +2548,8 @@ mod test {
         assert_eq!(tfe("global:\nBW global"), vec![EntryToken::ParentLabelDef(
             itk!(0, 7, "global"),
             1,
-            None
+            None,
+            false
         ), EntryToken::Data {
             inner: itk!(8, 10, "BW"),
             alignment: DataAlignment::Byte,
@@ -3324,7 +3330,8 @@ mod test {
             EntryToken::ParentLabelDef(
                 itk!(0, 16, "global_label"),
                 1,
-                Some(vec![Register::Accumulator])
+                Some(vec![Register::Accumulator]),
+                false
             ),
             EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::ParentLabelCall {
                 inner: itk!(22, 34, "global_label"),
@@ -3337,7 +3344,8 @@ mod test {
             EntryToken::ParentLabelDef(
                 itk!(0, 16, "global_label"),
                 1,
-                Some(vec![Register::Accumulator])
+                Some(vec![Register::Accumulator]),
+                false
             ),
             EntryToken::InstructionWithArg(itk!(17, 21, "call"), 0xCD, Expression::ParentLabelCall {
                 inner: itk!(22, 34, "global_label"),

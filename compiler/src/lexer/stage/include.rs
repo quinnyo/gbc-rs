@@ -97,7 +97,7 @@ impl LexerStage for IncludeStage {
         state.parent_path = Some(file_path);
 
         let mut tokens = Vec::with_capacity(2048);
-        Self::tokenize(&mut tokens, &mut state)?;
+        Self::tokenize(&mut tokens, &mut state, true)?;
         Ok(tokens)
     }
 
@@ -105,9 +105,41 @@ impl LexerStage for IncludeStage {
 
 impl IncludeStage {
 
+    pub fn tokenize_single<R: FileReader>(
+        file_reader: &R,
+        file_path: &PathBuf,
+        files: &mut Vec<LexerFile>
+
+    ) -> Result<Vec<IncludeToken>, SourceError> {
+        let mut state = IncludeLexerState {
+            file_reader,
+            files,
+            parent_path: None,
+            parent_file_index: 0,
+            source_index: 0,
+            file_path
+        };
+
+        let (file_path, contents) = state.file_reader.read_file(state.parent_path.as_ref(), state.file_path).map_err(|err| {
+            SourceError::new(state.parent_file_index, state.source_index, format!("Failed to include file \"{}\": {}", err.path.display(), err.io))
+        })?;
+
+        state.files.push(LexerFile::new(
+            state.files.len(),
+            contents,
+            file_path.clone(),
+            Vec::with_capacity(8)
+        ));
+
+        let mut tokens = Vec::with_capacity(2048);
+        Self::tokenize(&mut tokens, &mut state, false)?;
+        Ok(tokens)
+    }
+
     fn tokenize<T: FileReader>(
         tokens: &mut Vec<IncludeToken>,
-        state: &mut IncludeLexerState<T>
+        state: &mut IncludeLexerState<T>,
+        resolve: bool
 
     ) -> Result<(), SourceError> {
         let (mut gen, file_index) = {
@@ -117,7 +149,7 @@ impl IncludeStage {
         while gen.peek().is_some() {
             if let Some(token) = Self::match_token(&mut gen, false)? {
                 match token {
-                    ref t if t.is(IncludeType::Reserved) && t.is_symbol(Symbol::INCLUDE) => {
+                    ref t if t.is(IncludeType::Reserved) && t.is_symbol(Symbol::INCLUDE) => if resolve {
                         Self::tokenize_include(&mut gen, tokens, state, file_index)?;
                     },
                     t => tokens.push(t)
@@ -261,7 +293,7 @@ impl IncludeStage {
                     include_stack
                 ));
                 state.parent_path = Some(file_path);
-                Self::tokenize(tokens, &mut state)
+                Self::tokenize(tokens, &mut state, true)
             }
         }
 

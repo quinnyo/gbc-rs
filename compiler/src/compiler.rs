@@ -12,8 +12,9 @@ use file_io::{FileReader, FileWriter, Logger};
 // Internal Dependencies ------------------------------------------------------
 use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
-use crate::linker::{Linker, SegmentUsage};
-use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
+use crate::linker::{Completion, Lookup, Linker, SegmentUsage};
+use crate::lexer::stage::include::IncludeToken;
+use crate::lexer::{Lexer, LexerFile, LexerToken, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 
 
 // Structs --------------------------------------------------------------------
@@ -99,6 +100,37 @@ impl Compiler {
             self.generate(logger, io, linker)?;
         }
         Ok(())
+    }
+
+    pub fn complete<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf, local_file: PathBuf) -> Result<Vec<Completion>, CompilationError> {
+        colored::control::set_override(!self.no_color);
+        let entry_lexer = self.parse(logger, io, file)?;
+        let linker = self.link(logger, io, entry_lexer)?;
+        Ok(linker.to_completion_list(local_file))
+    }
+
+    pub fn lookup<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf, symbol_name: String) -> Result<Option<Lookup>, CompilationError> {
+        colored::control::set_override(!self.no_color);
+        let entry_lexer = self.parse(logger, io, file)?;
+        let linker = self.link(logger, io, entry_lexer)?;
+        Ok(linker.to_lookup_result(symbol_name))
+    }
+
+    pub fn tokenize<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf, line: usize, col: usize) -> Result<Option<(IncludeToken, LexerFile)>, CompilationError> {
+        colored::control::set_override(!self.no_color);
+        let mut files = Vec::new();
+        let tokens = IncludeStage::tokenize_single(io, &file, &mut files).map_err(|e| CompilationError::new("file inclusion", e))?;
+        if let Some(index) = files.first().map(|f| f.get_index(line, col)) {
+            for t in tokens {
+                if index >= t.inner().start_index && index < t.inner().end_index {
+                    return Ok(Some((t, files.remove(0))));
+                }
+            }
+            Ok(None)
+
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -262,9 +294,10 @@ impl Compiler {
 
     fn print_linter_warnings(&mut self, logger: &mut Logger, lints: Vec<Lint>) {
         logger.info("Linter Report");
-        for lint in lints {
+        for lint in &lints {
             logger.warning(format!("{}", lint.error));
         }
+        //logger.warning(format!("= {} warning(s)", lints.len()));
         logger.newline();
     }
 
@@ -588,6 +621,16 @@ mod test {
     }
 
     #[test]
+    fn test_linting_global_label_not_reference_outside_file() {
+        let l = Logger::new();
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(l, c, "SECTION ROM0\nGLOBAL used_label:\njp used_label", ""),
+            "        Info Linter Report\n     Warning Label \"used_label\" should not be global, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 8\n".to_string()
+        );
+    }
+
+    #[test]
     fn test_linting_replace_fixed_value_with_constant() {
         let l = Logger::new();
         let c = Compiler::new();
@@ -617,5 +660,14 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_linting_replace_magic_number() {
+        let l = Logger::new();
+        let c = Compiler::new();
+        assert_eq!(
+            compiler_lint(l, c, "SECTION ROM0\n DB 19", ""),
+            "        Info Linter Report\n     Warning Fixed integer value ($0013) should be replaced with a constant in file \"main.gb.s\" on line 2, column 5\n".to_string()
+        );
+    }
 }
 

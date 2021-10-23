@@ -157,7 +157,6 @@ fn optimize_instructions(
         // ->
         // ld [hl],d8
         (0x3E, Some((0x77, _, _, _)), _) => {
-            println!("{:?} {:?}", expression, bytes);
             Some((1, vec![EntryData::Instruction {
                 op_code: 0x36,
                 expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),

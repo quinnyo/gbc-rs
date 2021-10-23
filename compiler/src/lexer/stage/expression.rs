@@ -42,7 +42,7 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch<ExpressionToken>>)),
     ForStatement((ForStatement<ExpressionToken>)),
     BlockStatement((BlockStatement<ExpressionToken>)),
-    ParentLabelDef((usize, Option<Vec<Register>>)),
+    ParentLabelDef((usize, Option<Vec<Register>>, bool)),
     ChildLabelDef((usize))
 
 }, {
@@ -65,7 +65,7 @@ impl ExpressionToken {
             ValueToken::Comma(inner) => Ok(ExpressionToken::Comma(inner)),
             ValueToken::OpenBracket(inner) => Ok(ExpressionToken::OpenBracket(inner)),
             ValueToken::CloseBracket(inner) => Ok(ExpressionToken::CloseBracket(inner)),
-            ValueToken::ParentLabelDef(inner, id, args) => Ok(ExpressionToken::ParentLabelDef(inner, id, args)),
+            ValueToken::ParentLabelDef(inner, id, args, is_global) => Ok(ExpressionToken::ParentLabelDef(inner, id, args, is_global)),
             ValueToken::ChildLabelDef(inner, id, _) => Ok(ExpressionToken::ChildLabelDef(inner, id)),
             ValueToken::Register { inner, name } => Ok(ExpressionToken::Register {
                 inner,
@@ -669,7 +669,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
                 1,
-                None
+                None,
+                false
             ),
             ExpressionToken::Expression(
                 itk!(14, 17, "foo"),
@@ -712,7 +713,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 16, "global_label"),
                 1,
-                Some(vec![Register::Accumulator])
+                Some(vec![Register::Accumulator]),
+                false
             ),
             ExpressionToken::Instruction(itk!(17, 21, "call")),
             ExpressionToken::Expression(
@@ -733,7 +735,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 16, "global_label"),
                 1,
-                Some(vec![Register::Accumulator])
+                Some(vec![Register::Accumulator]),
+                false
             ),
             ExpressionToken::Instruction(itk!(17, 21, "call")),
             ExpressionToken::Expression(
@@ -796,7 +799,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
                 1,
-                None
+                None,
+                false
             ),
             ExpressionToken::Expression(
                 itk!(14, 18, "CEIL"),
@@ -819,7 +823,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
                 1,
-                None
+                None,
+                false
             ),
             ExpressionToken::ChildLabelDef(
                 itk!(14, 27, "local_label"),
@@ -858,7 +863,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
                 1,
-                None
+                None,
+                false
             ),
             ExpressionToken::Expression(
                 itk!(14, 26, "global_label"),
@@ -875,7 +881,8 @@ mod test {
             ExpressionToken::ParentLabelDef(
                 itk!(0, 13, "global_label"),
                 1,
-                None
+                None,
+                false
             ),
             ExpressionToken::ChildLabelDef(
                 itk!(14, 27, "local_label"),

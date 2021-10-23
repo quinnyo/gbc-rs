@@ -145,6 +145,14 @@ impl ExpressionResult {
         }
     }
 
+    pub fn to_string(&self) -> String {
+        match self {
+            ExpressionResult::Integer(i) => format!("{} (Integer)", i),
+            ExpressionResult::Float(f) => format!("{:.2} (Float)", f),
+            ExpressionResult::String(s) => format!("{:?} (String)", s)
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             ExpressionResult::Integer(_) => "Integer",

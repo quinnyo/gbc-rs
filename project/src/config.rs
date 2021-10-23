@@ -8,7 +8,9 @@ use std::collections::HashMap;
 // External Dependencies ------------------------------------------------------
 use serde::Deserialize;
 use file_io::Logger;
-use compiler::compiler::Compiler;
+use compiler::linker::{Completion, Lookup};
+use compiler::compiler::{Compiler, CompilationError};
+use compiler::lexer::{LexerFile, stage::include::IncludeToken};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -36,7 +38,35 @@ impl ProjectConfig {
         }
     }
 
-    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool) {
+    pub fn complete(project: &ProjectConfig, logger: &mut Logger, local_file: &str) -> Result<Vec<Completion>, CompilationError> {
+        let mut reader = ProjectReader::from_relative(project.rom.input.clone());
+        let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
+        let local_file = PathBuf::from(local_file);
+        let mut compiler = Compiler::new();
+        compiler.set_optimize_instructions();
+        compiler.set_strip_debug_code();
+        compiler.complete(logger, &mut reader, main_file, local_file)
+    }
+
+    pub fn lookup(project: &ProjectConfig, logger: &mut Logger, name: String) -> Result<Option<Lookup>, CompilationError> {
+        let mut reader = ProjectReader::from_relative(project.rom.input.clone());
+        let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
+        let mut compiler = Compiler::new();
+        compiler.set_optimize_instructions();
+        compiler.set_strip_debug_code();
+        compiler.set_linter_enabled();
+        compiler.lookup(logger, &mut reader, main_file, name)
+    }
+
+    pub fn tokenize(project: &ProjectConfig, logger: &mut Logger, local_file: &str, line: usize, col: usize) -> Result<Option<(IncludeToken, LexerFile)>, CompilationError> {
+        let mut reader = ProjectReader::from_relative(project.rom.input.clone());
+        let mut compiler = Compiler::new();
+        let local_file = PathBuf::from(local_file);
+        let local_file = local_file.strip_prefix(reader.base_dir()).unwrap();
+        compiler.tokenize(logger, &mut reader, local_file.to_path_buf(), line, col)
+    }
+
+    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool, lint: bool) {
         let mut reader = ProjectReader::from_relative(project.rom.input.clone());
         let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
 
@@ -50,6 +80,10 @@ impl ProjectConfig {
         }
 
         compiler.set_optimize_instructions();
+
+        if lint {
+            compiler.set_linter_enabled();
+        }
 
         // Remove debug code in release builds
         if release {
