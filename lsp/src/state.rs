@@ -112,6 +112,7 @@ impl State {
                             character: ec as u32
                         }
                     };
+                    log::info!("Lookup completed");
                     return Ok(Some((lookup, range)))
                 }
             }
@@ -124,7 +125,19 @@ impl State {
         if let Some(linker) = self.get_linker(local_file.clone()) {
             // TODO sort based on relevance best match, distance to current location etc.
             // language client will filter / sort anyways
+            log::info!("Completions generated");
             Ok(linker.to_completion_list(local_file))
+
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    pub fn inlay_hints(&self, local_file: &str) -> Result<Vec<((usize, usize), String)>> {
+        let local_file = PathBuf::from(local_file);
+        if let Some(linker) = self.get_linker(local_file.clone()) {
+            log::info!("Hints generated");
+            Ok(linker.to_hint_list(local_file))
 
         } else {
             Ok(Vec::new())
@@ -174,14 +187,20 @@ impl State {
     }
 
     fn get_linker(&self, local_file: PathBuf) -> Option<Linker> {
-        if let Ok(linker) = self.linker.lock() {
-            if linker.is_none() {
-                log::info!("Force Linking...");
-                Self::link(local_file, self.linker.clone(), self.documents.clone());
+        let has_linker = if let Ok(linker) = self.linker.lock() {
+            linker.is_some()
 
-            } else {
-                log::info!("Returning cached linker");
-            }
+        } else {
+            false
+        };
+        if has_linker {
+            log::info!("Returning cached linker");
+
+        } else {
+            log::info!("Force Linking...");
+            Self::link(local_file, self.linker.clone(), self.documents.clone());
+        }
+        if let Ok(linker) = self.linker.lock() {
             linker.clone()
 
         } else {

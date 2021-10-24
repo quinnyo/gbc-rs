@@ -29,6 +29,7 @@ pub struct EvaluatorConstant {
 pub struct UsageInformation {
     pub constants: HashMap<ConstantIndex, HashSet<(usize, usize)>>,
     pub labels: HashMap<usize, HashSet<(usize, usize)>>,
+    pub expressions: HashMap<(FileIndex, usize), ExpressionResult>,
     magic_constants: Vec<(ConstantIndex, InnerToken, i32)>,
     magic_numbers: Vec<(InnerToken, i32)>
 }
@@ -37,10 +38,11 @@ impl UsageInformation {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
-            constants: HashMap::new(),
-            labels: HashMap::new(),
-            magic_constants: Vec::new(),
-            magic_numbers: Vec::new()
+            constants: HashMap::with_capacity(512),
+            labels: HashMap::with_capacity(512),
+            expressions: HashMap::with_capacity(1024),
+            magic_constants: Vec::with_capacity(512),
+            magic_numbers: Vec::with_capacity(512)
         }
     }
 
@@ -88,10 +90,10 @@ impl EvaluatorContext {
         Self {
             constants: HashMap::with_capacity(512),
             raw_constants: HashMap::with_capacity(512),
-            label_addresses: HashMap::with_capacity(512),
-            raw_labels: HashMap::with_capacity(512),
-            callable_labels: HashMap::with_capacity(64),
-            inactive_labels: HashMap::with_capacity(64),
+            label_addresses: HashMap::with_capacity(1024),
+            raw_labels: HashMap::with_capacity(1024),
+            callable_labels: HashMap::with_capacity(128),
+            inactive_labels: HashMap::with_capacity(128),
             relative_address_offset: 0,
             linter_enabled
         }
@@ -276,7 +278,7 @@ impl EvaluatorContext {
 
     ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::new();
-        self.inner_const_resolve(&stack, expression, usage, from_file_index, from_start_index)
+        self.inner_const_resolve_outer(&stack, expression, usage, from_file_index, from_start_index)
     }
 
     pub fn resolve_opt_const_expression(
@@ -289,7 +291,7 @@ impl EvaluatorContext {
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
             let stack = Vec::new();
-            Ok(Some(self.inner_const_resolve(&stack, expr, usage, from_file_index, from_start_index)?))
+            Ok(Some(self.inner_const_resolve_outer(&stack, expr, usage, from_file_index, from_start_index)?))
 
         } else {
             Ok(None)
@@ -307,7 +309,7 @@ impl EvaluatorContext {
         from_start_index: usize
 
     ) -> Result<ExpressionResult, SourceError> {
-        self.inner_dyn_resolve(expression, usage, address_offset, is_call_instruction, from_file_index, from_start_index)
+        self.inner_dyn_resolve_outer(expression, usage, address_offset, is_call_instruction, from_file_index, from_start_index)
     }
 
     pub fn resolve_opt_dyn_expression(
@@ -320,7 +322,7 @@ impl EvaluatorContext {
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            Ok(Some(self.inner_dyn_resolve(expr, usage, address_offset, false, from_file_index, from_start_index)?))
+            Ok(Some(self.inner_dyn_resolve_outer(expr, usage, address_offset, false, from_file_index, from_start_index)?))
 
         } else {
             Ok(None)
@@ -371,6 +373,25 @@ impl EvaluatorContext {
 
         } else {
             panic!("Invalid callable when resolving signature!");
+        }
+    }
+
+    fn inner_dyn_resolve_outer(
+        &self,
+        expression: &Expression,
+        usage: &mut UsageInformation,
+        address_offset: Option<i32>,
+        is_call_instruction: bool,
+        from_file_index: usize,
+        from_start_index: usize
+
+    ) -> Result<ExpressionResult, SourceError> {
+        match self.inner_dyn_resolve(expression, usage, address_offset, is_call_instruction, from_file_index, from_start_index) {
+            Ok(result) => {
+                usage.expressions.insert((Some(from_file_index), from_start_index), result.clone());
+                Ok(result)
+            },
+            Err(err) => Err(err)
         }
     }
 
@@ -491,6 +512,24 @@ impl EvaluatorContext {
                 }
             },
             _ => unreachable!()
+        }
+    }
+
+    fn inner_const_resolve_outer(
+        &mut self,
+        constant_stack: &[&Symbol],
+        expression: &Expression,
+        usage: &mut UsageInformation,
+        from_file_index: usize,
+        from_start_index: usize
+
+    ) -> Result<ExpressionResult, SourceError> {
+        match self.inner_const_resolve(constant_stack, expression, usage, from_file_index, from_start_index) {
+            Ok(result) => {
+                usage.expressions.insert((Some(from_file_index), from_start_index), result.clone());
+                Ok(result)
+            },
+            Err(err) => Err(err)
         }
     }
 

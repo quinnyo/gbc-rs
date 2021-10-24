@@ -305,6 +305,46 @@ impl Linker {
         completions
     }
 
+    pub fn to_hint_list(&self, local_file: PathBuf) -> Vec<((usize, usize), String)> {
+        let local_file_index = self.files.iter().find(|f| {
+            f.path == local_file
+
+        }).map(|f| f.index).unwrap_or(1_000_000);
+
+        let mut hints = Vec::new();
+        for (index, constant) in &self.context.raw_constants {
+            let token = &constant.inner;
+            if token.file_index == local_file_index  {
+                if let Some((result, _)) = self.context.constants.get(index) {
+                    let file = &self.files[token.file_index];
+                    let (line, col) = file.get_line_and_col(token.start_index);
+                    let refs = self.usage.constants.get(index).map(|refs| {
+                        refs.len()
+
+                    }).unwrap_or(0);
+                    hints.push(((line, col), format!("{} ({} refs)", result.to_string(), refs)));
+                }
+            }
+        }
+        for ((_, label_id, _), token) in &self.context.raw_labels {
+            if token.file_index == local_file_index  {
+                if let Some(address) = self.context.label_addresses.get(label_id) {
+                    let file = &self.files[token.file_index];
+                    let (line, col) = file.get_line_and_col(token.start_index);
+                    let refs = self.usage.labels.get(label_id).map(|refs| {
+                        refs.len()
+
+                    }).unwrap_or(0);
+
+                    hints.push(((line, col), format!("${:0>4x} (Address) ({} refs)", address, refs)));
+                }
+            }
+        }
+        // TODO find any expressions in the current file, this would create a LOT of hints, how to
+        // filter down?
+        hints
+    }
+
     pub fn to_lint_list(&self) -> Vec<Lint> {
         let mut lints = Vec::new();
         let mut unused = self.context.find_unused(&self.usage);

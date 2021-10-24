@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use serde::{Serialize, Deserialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -44,6 +44,7 @@ pub struct ServerStatusParams {
     pub message: Option<String>,
 }
 
+
 // Backend Implementation -----------------------------------------------------
 struct Backend {
     client: Client,
@@ -51,13 +52,6 @@ struct Backend {
 }
 
 impl Backend {
-    //#[rpc(name = "gbc-analyzer/inlayHints")]
-    //async fn inlay_hints(&self, params: InlayHintsParams) -> Result<Vec<InlayHint>> {
-    //    let file = params.text_document.uri.path();
-    //    log::info!(&format!("Inlay Hints {}", file));
-    //    Ok(Vec::new())
-    //}
-
     fn do_completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
@@ -202,6 +196,31 @@ impl Backend {
             Ok(None)
         }
     }
+
+    fn do_inlay_hints(&self, file: &str) -> Option<Vec<InlayHint>> {
+        log::info!(&format!("ExperimentalAny {}", file));
+        if let Ok(hints) = self.state.inlay_hints(file) {
+            Some(hints.into_iter().map(|((line, col), label)| {
+                   InlayHint {
+                    range: Range {
+                        start: Position {
+                            line: line as u32,
+                            character: col as u32
+                        },
+                        end: Position {
+                            line: line as u32,
+                            character: col as u32
+                        }
+                    },
+                    kind: InlayKind::TypeHint,
+                    label
+                }
+            }).collect())
+
+        } else {
+            None
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -232,7 +251,7 @@ impl LanguageServer for Backend {
             quiescent: true,
             message: Some("Ready".to_string())
 
-            }).await;
+        }).await;
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -272,7 +291,7 @@ impl LanguageServer for Backend {
         self.state.close_document(params.text_document.uri.path());
     }
 
-    // TODO symbols()
+    // TODO symbols for project outline
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         self.do_hover(params)
@@ -294,26 +313,10 @@ impl LanguageServer for Backend {
         if let Value::Object(map) = params {
             if let Some(Value::Object(text_document)) = map.get("textDocument") {
                 if let Some(Value::String(path)) = text_document.get("uri") {
-                    log::info!(&format!("ExperimentalAny {}", Url::parse(path).unwrap().path()));
-
-                    let mut hints = Vec::new();
-                    hints.push(InlayHint {
-                        range: Range {
-                            start: Position {
-                                line: 0,
-                                character: 0
-                            },
-                            end: Position {
-                                line: 0,
-                                character: 1
-                            }
-                        },
-                        kind: InlayKind::TypeHint,
-                        label: "XYZ".to_string()
-                    });
-
-                    let hints = serde_json::to_value(&hints).unwrap();
-                    return Ok(Some(hints))
+                    let url = Url::parse(path).unwrap();
+                    if let Some(hints) = self.do_inlay_hints(url.path()) {
+                        return Ok(Some(serde_json::to_value(&hints).unwrap()))
+                    }
                 }
             }
         }
