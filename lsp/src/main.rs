@@ -1,8 +1,12 @@
+// STD Dependencies -----------------------------------------------------------
+use std::sync::Arc;
+use std::path::PathBuf;
+
+
 // External Dependencies ------------------------------------------------------
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp::{LanguageServer, LspService, Server};
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
@@ -31,201 +35,22 @@ pub struct InlayHint {
     pub label: String,
 }
 
-pub enum ServerStatusNotification {}
-
-impl Notification for ServerStatusNotification {
-    type Params = ServerStatusParams;
-    const METHOD: &'static str = "experimental/serverStatus";
-}
-
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub struct ServerStatusParams {
-    pub quiescent: bool,
-    pub message: Option<String>,
-}
-
-
 // Backend Implementation -----------------------------------------------------
 struct Backend {
-    client: Client,
     state: State
-}
-
-impl Backend {
-    fn do_completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let pos = params.text_document_position;
-        let file = pos.text_document.uri.path();
-        log::info!(&format!("Complete {} {}:{}", file, pos.position.line, pos.position.character));
-
-        if let Ok(completions) = self.state.completions(file, pos.position.line as usize, pos.position.character as usize) {
-            Ok(Some(CompletionResponse::Array(completions.into_iter().map(|item| {
-                match item {
-                    Completion::GlobalLabel { name, info } => CompletionItem {
-                        label: name,
-                        kind: Some(CompletionItemKind::Function),
-                        detail: info,
-                        documentation: None,
-                        deprecated: None,
-                        preselect: None,
-                        sort_text: None,
-                        filter_text: None,
-                        insert_text: None,
-                        insert_text_format: None,
-                        insert_text_mode: None,
-                        text_edit: None,
-                        additional_text_edits: None,
-                        command: None,
-                        commit_characters: None,
-                        data: None,
-                        tags: None
-                    },
-                    Completion::LocalLabel { name } => CompletionItem {
-                        label: name,
-                        kind: Some(CompletionItemKind::Field),
-                        detail: None,
-                        documentation: None,
-                        deprecated: None,
-                        preselect: None,
-                        sort_text: None,
-                        filter_text: None,
-                        insert_text: None,
-                        insert_text_format: None,
-                        insert_text_mode: None,
-                        text_edit: None,
-                        additional_text_edits: None,
-                        command: None,
-                        commit_characters: None,
-                        data: None,
-                        tags: None
-                    },
-                    Completion::Constant { name, info } => CompletionItem {
-                        label: name,
-                        kind: Some(CompletionItemKind::Variable),
-                        detail: info,
-                        documentation: None,
-                        deprecated: None,
-                        preselect: None,
-                        sort_text: None,
-                        filter_text: None,
-                        insert_text: None,
-                        insert_text_format: None,
-                        insert_text_mode: None,
-                        text_edit: None,
-                        additional_text_edits: None,
-                        command: None,
-                        commit_characters: None,
-                        data: None,
-                        tags: None
-                    },
-                }
-            }).collect())))
-
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn do_hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let pos = params.text_document_position_params;
-        let file = pos.text_document.uri.path();
-        log::info!(&format!("Hover {} {}:{}", file, pos.position.line, pos.position.character));
-
-        if let Ok(Some((lookup, range))) = self.state.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
-            Ok(Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::from_markdown(
-                    format!("# {}\n\n{}\n\nDefined in {}:{}:{}", lookup.name, lookup.description, lookup.path, lookup.start.0 + 1, lookup.start.1 + 1)
-                )),
-                range: Some(range)
-            }))
-
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn do_goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        let pos = params.text_document_position_params;
-        let file = pos.text_document.uri.path();
-        log::info!(&format!("Goto Definition {} {}:{}", file, pos.position.line, pos.position.character));
-
-        if let Ok(Some((lookup, _))) = self.state.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
-            Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                uri: Url::from_file_path(lookup.path).unwrap(),
-                range: Range {
-                    start: Position {
-                        line: lookup.start.0 as u32,
-                        character: lookup.start.1 as u32
-                    },
-                    end: Position {
-                        line: lookup.end.0 as u32,
-                        character: lookup.end.1 as u32
-                    }
-                }
-            })))
-
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn do_references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let pos = params.text_document_position;
-        let file = pos.text_document.uri.path();
-        log::info!(&format!("References {} {}:{}", file, pos.position.line, pos.position.character));
-
-        if let Ok(Some((lookup, _))) = self.state.lookup_symbol(file, pos.position.line as usize, pos.position.character as usize) {
-            Ok(Some(lookup.references.into_iter().map(|(path, line, col, eline, ecol)| {
-                // TODO check if we can actual expression entry range instead of the parent
-                // instruction entry (check code in section.rs and the xyz.start_index)
-                Location {
-                    uri: Url::from_file_path(path).unwrap(),
-                    range: Range {
-                        start: Position {
-                            line: line as u32,
-                            character: col as u32
-                        },
-                        end: Position {
-                            line: eline as u32,
-                            character: ecol as u32
-                        }
-                    }
-                }
-            }).collect()))
-
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn do_inlay_hints(&self, file: &str) -> Option<Vec<InlayHint>> {
-        log::info!(&format!("ExperimentalAny {}", file));
-        if let Ok(hints) = self.state.inlay_hints(file) {
-            Some(hints.into_iter().map(|((line, col), label)| {
-                   InlayHint {
-                    range: Range {
-                        start: Position {
-                            line: line as u32,
-                            character: col as u32
-                        },
-                        end: Position {
-                            line: line as u32,
-                            character: col as u32
-                        }
-                    },
-                    kind: InlayKind::TypeHint,
-                    label
-                }
-            }).collect())
-
-        } else {
-            None
-        }
-    }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        if let Some(folders) = params.workspace_folders {
+            if let Some(folder) = folders.first() {
+                self.state.set_workspace_path(PathBuf::from(folder.uri.path()));
+            }
+
+        } else if let Some(root_uri) = params.root_uri {
+            self.state.set_workspace_path(PathBuf::from(root_uri.path()));
+        }
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -234,6 +59,8 @@ impl LanguageServer for Backend {
                 )),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
                     trigger_characters: Some(vec![".".to_string()]),
@@ -246,12 +73,8 @@ impl LanguageServer for Backend {
         })
     }
 
-    async fn initialized(&self, _: InitializedParams) {
-        self.client.send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
-            quiescent: true,
-            message: Some("Ready".to_string())
-
-        }).await;
+    async fn initialized(&self, _params: InitializedParams) {
+        self.state.initialize().await
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -261,17 +84,6 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         log::info!(&format!("Opened {}", params.text_document.uri.path()));
         self.state.open_document(params.text_document.uri.path(), &params.text_document.text);
-        /*
-        self.client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
-            token: NumberOrString::Number(0)
-
-            }).await;
-        self.client
-            .show_progress_begin(NumberOrString::Number(0), "Initializing")
-            .await;
-        self.client
-            .show_progress_end(NumberOrString::Number(0), "Initialized")
-            .await;*/
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -291,32 +103,137 @@ impl LanguageServer for Backend {
         self.state.close_document(params.text_document.uri.path());
     }
 
-    // TODO symbols for project outline
-
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        self.do_hover(params)
+        let pos = params.text_document_position_params;
+        let file = pos.text_document.uri.path();
+        log::info!(&format!("Hover {} {}:{}", file, pos.position.line, pos.position.character));
+
+        if let Some((detail, location)) = self.state.hover(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+            Ok(Some(Hover {
+                contents: HoverContents::Scalar(MarkedString::from_markdown(detail)),
+                range: Some(location.range)
+            }))
+
+        } else {
+            Ok(None)
+        }
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        self.do_completion(params)
+        let pos = params.text_document_position;
+        let file = pos.text_document.uri.path();
+        log::info!(&format!("Complete {} {}:{}", file, pos.position.line, pos.position.character));
+
+        let completions = self.state.completions(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await;
+        Ok(Some(CompletionResponse::Array(completions.into_iter().map(|item| {
+            match item {
+                Completion::GlobalLabel { name, info } => CompletionItem {
+                    label: name,
+                    kind: Some(CompletionItemKind::Function),
+                    detail: info,
+                    documentation: None,
+                    deprecated: None,
+                    preselect: None,
+                    sort_text: None,
+                    filter_text: None,
+                    insert_text: None,
+                    insert_text_format: None,
+                    insert_text_mode: None,
+                    text_edit: None,
+                    additional_text_edits: None,
+                    command: None,
+                    commit_characters: None,
+                    data: None,
+                    tags: None
+                },
+                Completion::LocalLabel { name } => CompletionItem {
+                    label: name,
+                    kind: Some(CompletionItemKind::Field),
+                    detail: None,
+                    documentation: None,
+                    deprecated: None,
+                    preselect: None,
+                    sort_text: None,
+                    filter_text: None,
+                    insert_text: None,
+                    insert_text_format: None,
+                    insert_text_mode: None,
+                    text_edit: None,
+                    additional_text_edits: None,
+                    command: None,
+                    commit_characters: None,
+                    data: None,
+                    tags: None
+                },
+                Completion::Constant { name, info } => CompletionItem {
+                    label: name,
+                    kind: Some(CompletionItemKind::Variable),
+                    detail: info,
+                    documentation: None,
+                    deprecated: None,
+                    preselect: None,
+                    sort_text: None,
+                    filter_text: None,
+                    insert_text: None,
+                    insert_text_format: None,
+                    insert_text_mode: None,
+                    text_edit: None,
+                    additional_text_edits: None,
+                    command: None,
+                    commit_characters: None,
+                    data: None,
+                    tags: None
+                },
+            }
+        }).collect())))
     }
 
     async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        self.do_goto_definition(params)
+        let pos = params.text_document_position_params;
+        let file = pos.text_document.uri.path();
+        log::info!(&format!("Goto Definition {} {}:{}", file, pos.position.line, pos.position.character));
+        if let Some(symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+            Ok(Some(GotoDefinitionResponse::Scalar(symbol.location)))
+
+        } else {
+            Ok(None)
+        }
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        self.do_references(params)
+        let pos = params.text_document_position;
+        let file = pos.text_document.uri.path();
+        log::info!(&format!("References {} {}:{}", file, pos.position.line, pos.position.character));
+
+        if let Some(symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+            Ok(Some(symbol.references))
+
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn symbol(&self, params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+        log::info!("WorkspaceSymbols");
+        let symbols = self.state.symbols(None).await;
+        Ok(Some(symbols))
+    }
+
+    async fn document_symbol(&self, params: DocumentSymbolParams) -> Result<Option<DocumentSymbolResponse>> {
+        let file = params.text_document.uri.path();
+        log::info!(&format!("DocumentSymbols {}", file));
+        let symbols = self.state.symbols(Some(PathBuf::from(file))).await;
+        Ok(Some(DocumentSymbolResponse::Flat(symbols)))
     }
 
     async fn experimental_any(&self, params: Value) -> Result<Option<Value>> {
+        // TODO wait for state to finish linking?
         if let Value::Object(map) = params {
             if let Some(Value::Object(text_document)) = map.get("textDocument") {
                 if let Some(Value::String(path)) = text_document.get("uri") {
                     let url = Url::parse(path).unwrap();
-                    if let Some(hints) = self.do_inlay_hints(url.path()) {
-                        return Ok(Some(serde_json::to_value(&hints).unwrap()))
-                    }
+                    let hints = self.state.inlay_hints(PathBuf::from(url.path())).await;
+                    return Ok(Some(serde_json::to_value(&hints).unwrap()))
                 }
             }
         }
@@ -331,9 +248,10 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, messages) = LspService::new(|client| Backend {
-        client,
-        state: State::new()
+    let (service, messages) = LspService::new(|client| {
+        Backend {
+            state: State::new(Arc::new(client))
+        }
     });
     Server::new(stdin, stdout)
         .interleave(messages)

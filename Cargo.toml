@@ -26,6 +26,9 @@ file-io = { version = "0.5.0", path = "./file-io" }
 project = { version = "0.5.0", path = "./project" }
 clap = "2.33.0"
 
+[profile.dev.package.compiler]
+opt-level = 3
+
 [profile.release]
 lto = 'fat'
 codegen-units = 1

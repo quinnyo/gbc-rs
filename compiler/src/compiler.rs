@@ -102,6 +102,7 @@ impl Compiler {
     }
 
     pub fn create_linker<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
+        colored::control::set_override(false);
         let entry_lexer = self.parse(logger, io, file)?;
         self.link(logger, io, entry_lexer)
     }
@@ -309,6 +310,19 @@ impl CompilationError {
         }
     }
 
+    pub fn into_diagnostic(self) -> Option<(PathBuf, usize, usize, String)> {
+        if let Some(source) = self.source {
+            if let Some((path, line, col)) = source.location {
+                Some((path, line, col, source.raw_message))
+
+            } else {
+                None
+            }
+
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for CompilationError {

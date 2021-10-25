@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
+use std::path::PathBuf;
 
 
 // External Dependencies ------------------------------------------------------
@@ -17,6 +18,8 @@ pub struct SourceError {
     pub file_index: usize,
     pub index: usize,
     pub message: String,
+    pub location: Option<(PathBuf, usize, usize)>,
+    pub raw_message: String,
     macro_call_id: Option<usize>,
     reference: Option<(usize, usize, String)>
 }
@@ -27,8 +30,10 @@ impl SourceError {
         Self {
             file_index,
             index,
+            raw_message: message.clone(),
             message,
             macro_call_id: None,
+            location: None,
             reference: None
         }
     }
@@ -43,8 +48,10 @@ impl SourceError {
         Self {
             file_index,
             index,
+            raw_message: message.clone(),
             message,
             macro_call_id,
+            location: None,
             reference: None
         }
     }
@@ -68,17 +75,17 @@ impl SourceError {
     }
 
     pub fn extend_with_basic_location(self, files: &[LexerFile]) -> SourceError {
-        let location = Self::format_location(
+        let (message, location) = Self::format_location(
             files,
             self.file_index,
             self.index,
-            self.message,
+            self.message.clone(),
             true,
             false,
             true
         );
         let reference = if let Some((file_index, index, reference)) = self.reference {
-            format!(". {}", Self::format_location(files, file_index, index, reference, true, false, false))
+            format!(". {}", Self::format_location(files, file_index, index, reference, true, false, false).0)
 
         } else {
             "".to_string()
@@ -88,7 +95,9 @@ impl SourceError {
             file_index: self.file_index,
             index: self.index,
             macro_call_id: self.macro_call_id,
-            message: format!("{}{}", location, reference),
+            raw_message: self.message,
+            message: format!("{}{}", message, reference),
+            location,
             reference: None
         }
     }
@@ -129,17 +138,17 @@ impl SourceError {
 
         // Add reference location
         let reference = if let Some((file_index, index, reference)) = self.reference {
-            format!("\n\n{}", Self::format_location(files, file_index, index, reference, true, true, true))
+            format!("\n\n{}", Self::format_location(files, file_index, index, reference, true, true, true).0)
 
         } else {
             "".to_string()
         };
 
-        let location = Self::format_location(
+        let (message, location) = Self::format_location(
             files,
             self.file_index,
             self.index,
-            self.message,
+            self.message.clone(),
             false,
             true,
             true
@@ -149,13 +158,15 @@ impl SourceError {
             file_index: self.file_index,
             index: self.index,
             macro_call_id: self.macro_call_id,
+            raw_message: self.message,
             message: format!(
                 "{}{}{}{}",
-                location,
+                message,
                 stack.bright_yellow(),
                 reference,
                 macro_call,
             ),
+            location,
             reference: None
         }
 
@@ -170,12 +181,12 @@ impl SourceError {
         show_source: bool,
         show_line: bool
 
-    ) -> String {
+    ) -> (String, Option<(PathBuf, usize, usize)>) {
         if let Some(file) = files.get(file_index) {
             let (line, col) = file.get_line_and_col(index);
             let line_source = file.contents.split(|c| c == '\r' || c == '\n').nth(line).unwrap_or("Unknown Error Location");
             let col_pointer = str::repeat(" ", col);
-            if prefix_message {
+            let message = if prefix_message {
                 let location = if show_line {
                     format!(
                         "{} in file \"{}\" on line {}, column {}",
@@ -215,9 +226,10 @@ impl SourceError {
                     col_pointer,
                     "^--- Here".bright_red()
                 )
-            }
+            };
+            (message, Some((file.path.clone(), line, col)))
         } else {
-            message
+            (message, None)
         }
     }
 

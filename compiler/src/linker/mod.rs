@@ -2,6 +2,7 @@
 use std::cmp;
 use std::mem;
 use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
 
 
 // Modules --------------------------------------------------------------------
@@ -17,10 +18,11 @@ use file_io::FileReader;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::compiler::Lint;
-use crate::lexer::{Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol};
+use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, ExpressionValue};
-use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
+use crate::expression::evaluator::{ConstantIndex, EvaluatorContext, EvaluatorConstant, UsageInformation};
 use self::section::Section;
+pub use self::section::entry::{SectionEntry, EntryData};
 
 
 // Structs --------------------------------------------------------------------
@@ -32,16 +34,6 @@ pub struct SegmentUsage {
     pub end_address: usize,
     pub bytes_in_use: usize,
     pub ranges: Vec<(bool, Option<String>, usize, usize)>
-}
-
-#[derive(Debug)]
-pub struct Lookup {
-    pub name: String,
-    pub description: String,
-    pub path: String,
-    pub start: (usize, usize),
-    pub end: (usize, usize),
-    pub references: Vec<(String, usize, usize, usize, usize)>
 }
 
 #[derive(Debug)]
@@ -57,6 +49,17 @@ pub enum Completion {
     LocalLabel {
         name: String
     }
+}
+
+pub struct LinkerContext<'a> {
+    pub local_file_index: Option<usize>,
+    pub files: &'a [LexerFile],
+    pub constants: &'a HashMap<ConstantIndex, EvaluatorConstant>,
+    pub constant_values: &'a HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
+    pub constant_usage: &'a HashMap<ConstantIndex, HashSet<(usize, usize)>>,
+    pub labels: &'a HashMap<(Symbol, usize, bool), InnerToken>,
+    pub label_addresses: &'a HashMap<usize, usize>,
+    pub label_usage: &'a HashMap<usize, HashSet<(usize, usize)>>,
 }
 
 
@@ -186,163 +189,29 @@ impl Linker {
         })
     }
 
-    pub fn to_lookup_result(&self, symbol_name: String) -> Option<Lookup> {
-        for (index, constant) in &self.context.raw_constants {
-            if index.0.to_string() == symbol_name {
-                if let Some((result, _)) = self.context.constants.get(index) {
-                    let file = &self.files[constant.inner.file_index];
-                    let (line, col) = file.get_line_and_col(constant.inner.start_index);
-                    let (eline, ecol) = file.get_line_and_col(constant.inner.end_index);
-                    let references = self.usage.constants.get(index).map(|refs| {
-                        refs.iter().map(|(file_index, start_index)| {
-                            let file = &self.files[*file_index];
-                            let (line, col) = file.get_line_and_col(*start_index);
-                            (file.path.to_string_lossy().to_string(), line, col, line, col + symbol_name.len())
-
-                        }).collect()
-
-                    }).unwrap_or_else(Vec::new);
-                    return Some(Lookup {
-                        name: "Constant".to_string(),
-                        description: format!("Name: `{}`\nValue: {}\nReferences: {}", constant.inner.value.to_string(), result.to_string(), references.len()),
-                        path: file.path.to_string_lossy().to_string(),
-                        start: (line, col),
-                        end: (eline, ecol),
-                        references
-                    });
-                }
-            }
+    pub fn section_entries(&self) -> Vec<&[SectionEntry]> {
+        let mut entries = Vec::with_capacity(self.sections.len());
+        for s in &self.sections {
+            entries.push(&s.entries[..]);
         }
-        for ((symbol, label_id, is_global), token) in &self.context.raw_labels {
-            if symbol.to_string() == symbol_name {
-                if let Some(address) = self.context.label_addresses.get(label_id) {
-                    let file = &self.files[token.file_index];
-                    let (line, col) = file.get_line_and_col(token.start_index);
-                    let (eline, ecol) = file.get_line_and_col(token.end_index);
-                    let references = self.usage.labels.get(label_id).map(|refs| {
-                        refs.iter().map(|(file_index, start_index)| {
-                            let file = &self.files[*file_index];
-                            let (line, col) = file.get_line_and_col(*start_index);
-                            (file.path.to_string_lossy().to_string(), line, col, line, col + symbol_name.len())
-
-                        }).collect()
-
-                    }).unwrap_or_else(Vec::new);
-                    return Some(Lookup {
-                        name: if *is_global {
-                            "Global Label".to_string()
-
-                        } else {
-                            "Local Label".to_string()
-                        },
-                        description: format!("Name: `{}`\nAddress: ${:0>4x}\nReferences: {}", symbol.to_string(), address, references.len()),
-                        path: file.path.to_string_lossy().to_string(),
-                        start: (line, col),
-                        end: (eline, ecol),
-                        references
-                    });
-                }
-            }
-        }
-        None
+        entries
     }
 
-    pub fn to_completion_list(&self, local_file: PathBuf) -> Vec<Completion> {
+    pub fn context<'a>(&'a self, local_file: Option<PathBuf>) -> LinkerContext<'a> {
         let local_file_index = self.files.iter().find(|f| {
-            f.path == local_file
+            Some(&f.path) == local_file.as_ref()
 
         }).map(|f| f.index);
-
-        let mut completions = Vec::new();
-        for (index, _) in &self.context.raw_constants {
-            // Constant is local to its file
-            let valid = if let Some(file_index) = index.1 {
-                Some(file_index) == local_file_index
-
-            // Constant is global
-            } else {
-                true
-            };
-            if valid {
-                if let Some((result, _)) = self.context.constants.get(index) {
-                    completions.push(Completion::Constant {
-                        name: index.0.to_string(),
-                        info: Some(format!("Value: {}", result.to_string()))
-                    })
-                } else {
-                    completions.push(Completion::Constant {
-                        name: index.0.to_string(),
-                        info: None
-                    })
-                }
-            }
+        LinkerContext {
+            local_file_index,
+            files: &self.files[..],
+            constants: &self.context.raw_constants,
+            constant_values: &self.context.constants,
+            constant_usage: &self.usage.constants,
+            labels: &self.context.raw_labels,
+            label_addresses: &self.context.label_addresses,
+            label_usage: &self.usage.labels
         }
-
-        for ((symbol, label_id, is_global), token) in &self.context.raw_labels {
-            // Label is global
-            let valid = if *is_global {
-                true
-
-            // Constant is local to its token.file_index
-            } else {
-                Some(token.file_index) == local_file_index
-            };
-            if valid {
-                if let Some(address) = self.context.label_addresses.get(label_id) {
-                    completions.push(Completion::GlobalLabel {
-                        name: symbol.to_string(),
-                        info: Some(format!("Address: ${:0>4x}", address))
-                    })
-
-                } else {
-                    completions.push(Completion::GlobalLabel {
-                        name: symbol.to_string(),
-                        info: None
-                    })
-                }
-            }
-        }
-        completions
-    }
-
-    pub fn to_hint_list(&self, local_file: PathBuf) -> Vec<((usize, usize), String)> {
-        let local_file_index = self.files.iter().find(|f| {
-            f.path == local_file
-
-        }).map(|f| f.index).unwrap_or(1_000_000);
-
-        let mut hints = Vec::new();
-        for (index, constant) in &self.context.raw_constants {
-            let token = &constant.inner;
-            if token.file_index == local_file_index  {
-                if let Some((result, _)) = self.context.constants.get(index) {
-                    let file = &self.files[token.file_index];
-                    let (line, col) = file.get_line_and_col(token.start_index);
-                    let refs = self.usage.constants.get(index).map(|refs| {
-                        refs.len()
-
-                    }).unwrap_or(0);
-                    hints.push(((line, col), format!("{} ({} refs)", result.to_string(), refs)));
-                }
-            }
-        }
-        for ((_, label_id, _), token) in &self.context.raw_labels {
-            if token.file_index == local_file_index  {
-                if let Some(address) = self.context.label_addresses.get(label_id) {
-                    let file = &self.files[token.file_index];
-                    let (line, col) = file.get_line_and_col(token.start_index);
-                    let refs = self.usage.labels.get(label_id).map(|refs| {
-                        refs.len()
-
-                    }).unwrap_or(0);
-
-                    hints.push(((line, col), format!("${:0>4x} (Address) ({} refs)", address, refs)));
-                }
-            }
-        }
-        // TODO find any expressions in the current file, this would create a LOT of hints, how to
-        // filter down?
-        hints
     }
 
     pub fn to_lint_list(&self) -> Vec<Lint> {
