@@ -36,21 +36,6 @@ pub struct SegmentUsage {
     pub ranges: Vec<(bool, Option<String>, usize, usize)>
 }
 
-#[derive(Debug)]
-pub enum Completion {
-    Constant {
-        name: String,
-        info: Option<String>
-    },
-    GlobalLabel {
-        name: String,
-        info: Option<String>
-    },
-    LocalLabel {
-        name: String
-    }
-}
-
 pub struct LinkerContext<'a> {
     pub local_file_index: Option<usize>,
     pub files: &'a [LexerFile],

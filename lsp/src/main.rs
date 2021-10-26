@@ -11,10 +11,6 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
 
-// Internal Dependencies ------------------------------------------------------
-use compiler::linker::Completion;
-
-
 // Modules --------------------------------------------------------------------
 mod state;
 use self::state::State;
@@ -106,11 +102,12 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let pos = params.text_document_position_params;
         let file = pos.text_document.uri.path();
-        log::info!(&format!("Hover {} {}:{}", file, pos.position.line, pos.position.character));
-
         if let Some((detail, location)) = self.state.hover(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
             Ok(Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::from_markdown(detail)),
+                contents: HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
+                    language: "gbc".to_string(),
+                    value: detail.to_string()
+                })),
                 range: Some(location.range)
             }))
 
@@ -122,76 +119,13 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
-        log::info!(&format!("Complete {} {}:{}", file, pos.position.line, pos.position.character));
-
         let completions = self.state.completions(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await;
-        Ok(Some(CompletionResponse::Array(completions.into_iter().map(|item| {
-            match item {
-                Completion::GlobalLabel { name, info } => CompletionItem {
-                    label: name,
-                    kind: Some(CompletionItemKind::Function),
-                    detail: info,
-                    documentation: None,
-                    deprecated: None,
-                    preselect: None,
-                    sort_text: None,
-                    filter_text: None,
-                    insert_text: None,
-                    insert_text_format: None,
-                    insert_text_mode: None,
-                    text_edit: None,
-                    additional_text_edits: None,
-                    command: None,
-                    commit_characters: None,
-                    data: None,
-                    tags: None
-                },
-                Completion::LocalLabel { name } => CompletionItem {
-                    label: name,
-                    kind: Some(CompletionItemKind::Field),
-                    detail: None,
-                    documentation: None,
-                    deprecated: None,
-                    preselect: None,
-                    sort_text: None,
-                    filter_text: None,
-                    insert_text: None,
-                    insert_text_format: None,
-                    insert_text_mode: None,
-                    text_edit: None,
-                    additional_text_edits: None,
-                    command: None,
-                    commit_characters: None,
-                    data: None,
-                    tags: None
-                },
-                Completion::Constant { name, info } => CompletionItem {
-                    label: name,
-                    kind: Some(CompletionItemKind::Variable),
-                    detail: info,
-                    documentation: None,
-                    deprecated: None,
-                    preselect: None,
-                    sort_text: None,
-                    filter_text: None,
-                    insert_text: None,
-                    insert_text_format: None,
-                    insert_text_mode: None,
-                    text_edit: None,
-                    additional_text_edits: None,
-                    command: None,
-                    commit_characters: None,
-                    data: None,
-                    tags: None
-                },
-            }
-        }).collect())))
+        Ok(Some(CompletionResponse::Array(completions)))
     }
 
     async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
         let pos = params.text_document_position_params;
         let file = pos.text_document.uri.path();
-        log::info!(&format!("Goto Definition {} {}:{}", file, pos.position.line, pos.position.character));
         if let Some(symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
             Ok(Some(GotoDefinitionResponse::Scalar(symbol.location)))
 
@@ -203,8 +137,6 @@ impl LanguageServer for Backend {
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
-        log::info!(&format!("References {} {}:{}", file, pos.position.line, pos.position.character));
-
         if let Some(symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
             Ok(Some(symbol.references))
 
@@ -213,21 +145,18 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn symbol(&self, params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
-        log::info!("WorkspaceSymbols");
-        let symbols = self.state.symbols(None).await;
+    async fn symbol(&self, _params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+        let symbols = self.state.workspace_symbols().await;
         Ok(Some(symbols))
     }
 
     async fn document_symbol(&self, params: DocumentSymbolParams) -> Result<Option<DocumentSymbolResponse>> {
         let file = params.text_document.uri.path();
-        log::info!(&format!("DocumentSymbols {}", file));
-        let symbols = self.state.symbols(Some(PathBuf::from(file))).await;
-        Ok(Some(DocumentSymbolResponse::Flat(symbols)))
+        let symbols = self.state.document_symbols(PathBuf::from(file)).await;
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 
     async fn experimental_any(&self, params: Value) -> Result<Option<Value>> {
-        // TODO wait for state to finish linking?
         if let Value::Object(map) = params {
             if let Some(Value::Object(text_document)) = map.get("textDocument") {
                 if let Some(Value::String(path)) = text_document.get("uri") {

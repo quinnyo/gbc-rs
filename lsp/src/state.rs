@@ -14,7 +14,8 @@ use serde::{Serialize, Deserialize};
 use tower_lsp::Client;
 use tower_lsp::lsp_types::Diagnostic;
 use tower_lsp::lsp_types::DiagnosticSeverity;
-use tower_lsp::lsp_types::{PublishDiagnosticsParams, SymbolInformation, SymbolKind, Url, Location};
+use tower_lsp::lsp_types::DocumentSymbol;
+use tower_lsp::lsp_types::{PublishDiagnosticsParams, SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::notification::PublishDiagnostics;
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
@@ -32,7 +33,7 @@ use compiler::{
         LexerFile
     },
     linker::{
-        Completion, Linker, EntryData
+        Linker, SectionEntry, EntryData
     }
 };
 use crate::{InlayHint, InlayKind};
@@ -69,15 +70,41 @@ pub struct GBCSymbol {
     pub kind: SymbolKind,
     pub is_global: bool,
     pub location: Location,
-    pub address: usize,
     pub name: String,
     pub value: String,
+    pub width: usize,
     pub children: Vec<GBCSymbol>,
     pub references: Vec<Location>
 }
 
+impl GBCSymbol {
+    fn into_symbol_information(self) -> SymbolInformation {
+        SymbolInformation {
+            name: self.name,
+            kind: self.kind,
+            tags: None,
+            deprecated: None,
+            location: self.location,
+            container_name: None
+        }
+    }
+
+    fn into_document_symbol(self) -> DocumentSymbol {
+        DocumentSymbol {
+            name: self.name,
+            kind: self.kind,
+            tags: None,
+            deprecated: None,
+            range: self.location.range,
+            selection_range: self.location.range,
+            detail: Some(self.value),
+            children: Some(self.children.into_iter().map(GBCSymbol::into_document_symbol).collect())
+        }
+    }
+}
 
 // State Abstraction ----------------------------------------------------------
+// TODO rename Analyzer
 pub struct State {
     client: Arc<Client>,
     documents: Arc<Mutex<RefCell<HashMap<String, String>>>>,
@@ -114,7 +141,6 @@ impl State {
     // TODO handle deletion and renaming of files
     pub fn set_workspace_path(&self, path: PathBuf) {
         if let Ok(mut workspace_path) = self.workspace_path.lock() {
-            log::info!(&format!("WorkspacePath {}", path.display()));
             *workspace_path = Some(path);
         }
     }
@@ -134,7 +160,6 @@ impl State {
         }
         if let Ok(tokens) = self.tokens.lock() {
             let mut tokens = tokens.borrow_mut();
-            log::info!(&format!("Cleared cached tokens for {}...", path));
             tokens.remove(&PathBuf::from(path));
         }
         self.link_async(PathBuf::from(path));
@@ -147,7 +172,6 @@ impl State {
         }
         if let Ok(tokens) = self.tokens.lock() {
             let mut tokens = tokens.borrow_mut();
-            log::info!(&format!("Cleared cached tokens for {}...", path));
             tokens.remove(&PathBuf::from(path));
         }
         self.link_async(PathBuf::from(path));
@@ -160,59 +184,72 @@ impl State {
         }
         if let Ok(tokens) = self.tokens.lock() {
             let mut tokens = tokens.borrow_mut();
-            log::info!(&format!("Cleared cached tokens for {}...", path));
             tokens.remove(&PathBuf::from(path));
         }
         self.link_async(PathBuf::from(path));
     }
 
-    pub async fn symbols(&self, current_file: Option<PathBuf>) -> Vec<SymbolInformation> {
-        let mut workspace_path = current_file.clone();
-        if workspace_path.is_none() {
-            if let Ok(ws) = self.workspace_path.lock() {
-                workspace_path = ws.clone();
-            }
-        }
-        if let Some(workspace_path) = workspace_path {
-            let uri = current_file.map(Url::from_file_path).transpose().ok().flatten();
-            self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
-                // Return if we either want all symbols or the symbol originates from the current file
-                uri.is_none() || Some(&symbol.location.uri) == uri.as_ref()
+    pub async fn workspace_symbols(&self) -> Vec<SymbolInformation> {
+        let workspace_path = if let Ok(ws) = self.workspace_path.lock() {
+            ws.clone()
 
-            }).map(|symbol| {
-                SymbolInformation {
-                    name: symbol.name,
-                    kind: symbol.kind,
-                    tags: None,
-                    deprecated: None,
-                    location: symbol.location,
-                    container_name: None
-                }
-            }).collect()
+        } else {
+            None
+        };
+        if let Some(workspace_path) = workspace_path {
+            self.get_symbols(workspace_path).await.into_iter().map(GBCSymbol::into_symbol_information).collect()
 
         } else {
            Vec::new()
         }
     }
+
+    pub async fn document_symbols(&self, current_file: PathBuf) -> Vec<DocumentSymbol> {
+        let workspace_path = current_file.clone();
+        let uri = Url::from_file_path(current_file).unwrap();
+        self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
+            // Return if we either want all symbols or the symbol originates from the current file
+            symbol.location.uri == uri
+
+        }).map(GBCSymbol::into_document_symbol).collect()
+    }
 }
 
 impl State {
-    pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<Completion> {
+    pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<CompletionItem> {
         let uri = Url::from_file_path(current_file.clone()).ok();
         return self.get_symbols(current_file).await.into_iter().filter(|symbol| {
             // Complete if the symbol is either global or originates from the current file
             symbol.is_global || Some(&symbol.location.uri) == uri.as_ref()
 
         }).flat_map(|symbol| match symbol.kind {
-            SymbolKind::Constant => Some(Completion::Constant {
-                name: symbol.name,
-                info: Some(format!("Value: {}", symbol.value))
+            SymbolKind::Constant => Some(CompletionItem {
+                label: symbol.name,
+                kind: Some(CompletionItemKind::Constant),
+                detail: Some(format!("Value: {}", symbol.value)),
+                .. CompletionItem::default()
             }),
-            // TODO Functions info: Some(format!("Address: ${:0>4x}", address))
-            SymbolKind::Function => None,
-            SymbolKind::Variable => None,
+            SymbolKind::Function => Some(CompletionItem {
+                label: symbol.name,
+                kind: Some(CompletionItemKind::Function),
+                detail: Some(format!("Address: {}", symbol.value)),
+                .. CompletionItem::default()
+            }),
+            SymbolKind::Variable => Some(CompletionItem {
+                label: symbol.name,
+                kind: Some(CompletionItemKind::Variable),
+                detail: Some(format!("Address: {}", symbol.value)),
+                .. CompletionItem::default()
+            }),
+            SymbolKind::Field => Some(CompletionItem {
+                label: symbol.name,
+                kind: Some(CompletionItemKind::Field),
+                detail: Some(format!("Address: {}", symbol.value)),
+                .. CompletionItem::default()
+            }),
             _ => None
 
+        // TODO sort by relevance?
         }).collect();
     }
 
@@ -251,9 +288,21 @@ impl State {
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
                 range: symbol.location.range
             }),
-            // TODO format!("${:0>4x} (Address) ({} refs)", address, refs)
-            SymbolKind::Function => None,
-            SymbolKind::Variable => None,
+            SymbolKind::Function => Some(InlayHint {
+                kind: InlayKind::TypeHint,
+                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                range: symbol.location.range
+            }),
+            SymbolKind::Variable => Some(InlayHint {
+                kind: InlayKind::TypeHint,
+                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                range: symbol.location.range
+            }),
+            SymbolKind::Field => Some(InlayHint {
+                kind: InlayKind::TypeHint,
+                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                range: symbol.location.range
+            }),
             _ => None
 
         }).collect()
@@ -261,19 +310,37 @@ impl State {
 
     pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
         if let Some(symbol) = self.symbol(current_file, line, col).await {
-            Some((
-                // TODO show callers
-                // TODO details for constants / functions / variables
-                // TODO show ref count
-                format!(
-                    "# `{}`\n\nDefined in {}:{}:{}",
-                    symbol.name,
-                    symbol.location.uri.path(),
-                    symbol.location.range.start.line + 1,
-                    symbol.location.range.start.character + 1
-                ),
-                symbol.location
-            ))
+            let location = symbol.location;
+            let is_global = symbol.is_global;
+            let m = match symbol.kind {
+                SymbolKind::Constant => {
+                    Some(format!("CONST {}", symbol.name))
+                },
+                SymbolKind::Function => {
+                    Some(format!("{}:", symbol.name))
+                },
+                SymbolKind::Variable => {
+                    Some(format!("{}: {}", symbol.name, if symbol.width == 1 {
+                        "DB"
+
+                    } else if symbol.width == 2 {
+                        "DW"
+
+                    } else {
+                        "DS"
+                    }))
+                },
+                SymbolKind::Field => {
+                    Some(format!("{}:", symbol.name))
+                },
+                _ => None
+            };
+            m.map(|s| (if is_global {
+                format!("GLOBAL {}", s)
+
+            } else {
+                s
+            }, location))
 
         } else {
             None
@@ -297,8 +364,6 @@ impl State {
 
 impl State {
     fn parse_token(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(IncludeToken, LexerFile)> {
-        log::info!(&format!("Getting token from {:?}:{}:{}...", current_file, line, col));
-
         let mut logger = Logger::new();
         logger.set_silent();
 
@@ -308,13 +373,11 @@ impl State {
         let data = if let Ok(tokens) = self.tokens.lock() {
             let mut tokens = tokens.borrow_mut();
             if let Some(data) = tokens.get(&current_file) {
-                log::info!(&format!("Returned {} cached token(s)...", data.0.len()));
                 Some(data.clone())
 
             } else {
                 let mut files = Vec::new();
                 if let Ok(parsed) = IncludeStage::tokenize_single(&reader, &relative_file, &mut files) {
-                    log::info!(&format!("Parsed {} token(s)...", parsed.len()));
                     let data = (parsed, files.remove(0));
                     tokens.insert(current_file, data.clone());
                     Some(data)
@@ -360,23 +423,16 @@ impl State {
         } else {
             false
         };
-        if has_linker {
-            log::info!("Returning cached symbols");
-
-        } else {
-            //let handle = Handle::current();
-            //handle.block_on(async move {
-                log::info!("Force Linking...");
-                Self::link(
-                    self.client.clone(),
-                    NumberOrString::Number(0),
-                    workspace_path,
-                    self.symbols.clone(),
-                    self.link_error.clone(),
-                    self.diagnostic_urls.clone(),
-                    self.documents.clone()
-                ).await;
-            //})
+        if !has_linker {
+            Self::link(
+                self.client.clone(),
+                NumberOrString::Number(0),
+                workspace_path,
+                self.symbols.clone(),
+                self.link_error.clone(),
+                self.diagnostic_urls.clone(),
+                self.documents.clone()
+            ).await;
         }
         if let Ok(symbols) = self.symbols.lock() {
             symbols.clone().unwrap_or_else(Vec::new)
@@ -387,10 +443,10 @@ impl State {
     }
 
     fn parse_symbols(linker: Linker) -> Vec<GBCSymbol> {
-        let mut symbols = Vec::new();
+        let mut symbols: Vec<GBCSymbol> = Vec::new();
         let context = linker.context(None);
 
-        // Constant Symbols
+        // Constants
         for (index, constant) in context.constants {
             let token = &constant.inner;
             let name = token.value.to_string();
@@ -435,8 +491,8 @@ impl State {
                             }
                         }
                     },
-                    address: 0,
                     name,
+                    width: 0,
                     value: result.to_string(),
                     children: Vec::new(),
                     references
@@ -444,16 +500,152 @@ impl State {
             }
         }
 
-        // TODO Differentiate Variables and Functions
+        let mut last_parent_label_index: Option<usize> = None;
         let sections = linker.section_entries();
         for entries in sections {
-            let mut entries = entries.iter();
+            let mut entries = entries.iter().peekable();
             while let Some(entry) = entries.next() {
-                if let EntryData::Label { id, is_local, name } = &entry.data {
-                    // TODO any labels
+                let file_index = entry.inner.file_index;
+                let entry_name = &entry.inner.value;
+                if let EntryData::Label { is_local, name, .. } = &entry.data {
+
+                    // Local label under a parent
+                    let (kind, size) = if *is_local {
+                        if let Some(index) = last_parent_label_index {
+
+                            // Add to last parent label
+                            if let Some(symbol) = symbols.get_mut(index) {
+                                let file = &context.files[file_index];
+                                let (line, col) = file.get_line_and_col(entry.inner.start_index);
+                                let (eline, ecol) = file.get_line_and_col(entry.inner.end_index);
+                                symbol.children.push(GBCSymbol {
+                                    kind: SymbolKind::Method,
+                                    is_global: false,
+                                    location: Location {
+                                        uri: Url::from_file_path(&file.path).unwrap(),
+                                        range: Range {
+                                            start: Position {
+                                                line: line as u32,
+                                                character: col as u32
+                                            },
+                                            end: Position {
+                                                line: eline as u32,
+                                                character: ecol as u32
+                                            }
+                                        }
+                                    },
+                                    name: name.to_string(),
+                                    width: 0,
+                                    value: "".to_string(),
+                                    children: Vec::new(),
+                                    references: Vec::new()
+                                });
+                            }
+                        }
+                        (SymbolKind::Method, None)
+
+                    // Field Data
+                    } else if let Some(SectionEntry {
+                        size,
+                        data: EntryData::Data {
+                            bytes: Some(_),
+                            ..
+                        },
+                        ..
+
+                    }) = entries.peek() {
+                        // TODO collect multiple fields together
+                        (SymbolKind::Field, Some(*size))
+
+                    // Variable
+                    } else if let Some(SectionEntry {
+                        size,
+                        data: EntryData::Data {
+                            bytes: None,
+                            ..
+                        },
+                        ..
+
+                    }) = entries.peek() {
+                        (SymbolKind::Variable, Some(*size))
+
+                    // Normal label
+                    } else {
+                        last_parent_label_index = Some(symbols.len());
+                        (SymbolKind::Function, None)
+                    };
+
+                    // Find matching label reference
+                    for ((symbol, label_id, is_global), token) in context.labels {
+                        if token.file_index == file_index && symbol == entry_name {
+                            let name = symbol.to_string();
+                            let file = &context.files[token.file_index];
+                            let (line, col) = file.get_line_and_col(token.start_index);
+                            let (eline, ecol) = file.get_line_and_col(token.end_index);
+                            let address = context.label_addresses.get(label_id).unwrap_or(&0);
+                            let references = context.label_usage.get(label_id).map(|refs| {
+                                refs.iter().map(|(file_index, start_index)| {
+                                    let file = &context.files[*file_index];
+                                    let (line, col) = file.get_line_and_col(*start_index);
+                                    Location {
+                                        uri: Url::from_file_path(&file.path).unwrap(),
+                                        range: Range {
+                                            start: Position {
+                                                line: line as u32,
+                                                character: col as u32
+                                            },
+                                            end: Position {
+                                                line: line as u32,
+                                                character: (col + name.len()) as u32
+                                            }
+                                        }
+                                    }
+
+                                }).collect()
+
+                            }).unwrap_or_else(Vec::new);
+                            symbols.push(GBCSymbol {
+                                kind,
+                                is_global: *is_global,
+                                location: Location {
+                                    uri: Url::from_file_path(&file.path).unwrap(),
+                                    range: Range {
+                                        start: Position {
+                                            line: line as u32,
+                                            character: col as u32
+                                        },
+                                        end: Position {
+                                            line: eline as u32,
+                                            character: ecol as u32
+                                        }
+                                    }
+                                },
+                                name,
+                                width: size.unwrap_or(0),
+                                value: if let Some(size) = size {
+                                    if size <= 1 {
+                                        format!("${:0>4x} ({} byte)", address, size)
+
+                                    } else {
+                                        format!("${:0>4x} ({} bytes)", address, size)
+                                    }
+
+                                } else {
+                                    format!("${:0>4x}", address)
+                                },
+                                children: Vec::new(),
+                                references
+                            });
+                        }
+                    }
                 }
             }
         }
+
+        // Sort by Name
+        symbols.sort_by(|a, b| {
+            a.name.cmp(&b.name)
+        });
         symbols
     }
 
@@ -471,13 +663,13 @@ impl State {
 
         let handle = Handle::current();
         handle.spawn(async move {
-            // Wait for debounc purposes
+            // Wait for debounce purposes TODO better way to do this i.e. canceling the previous
+            // task?
             tokio::time::sleep(tokio::time::Duration::from_millis(THREAD_DEBOUNCE)).await;
 
             // Check if still the latest link request
             let latest_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
             if thread_gen == latest_gen {
-                log::info!("Linking in background...");
                 Self::link(
                     client,
                     NumberOrString::Number(thread_gen as i32),
@@ -487,9 +679,6 @@ impl State {
                     diagnostic_urls,
                     documents
                 ).await;
-
-            } else {
-                log::info!("Link canceled");
             }
         });
     }
@@ -508,7 +697,7 @@ impl State {
         client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
             token: link_id.clone()
 
-        }).await;
+        }).await.ok();
         client.show_progress_begin(link_id.clone(), "Linking...").await;
 
         // Start Linking Process
