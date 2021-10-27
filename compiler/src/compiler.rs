@@ -19,13 +19,22 @@ use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage,
 // Structs --------------------------------------------------------------------
 #[derive(Debug)]
 pub struct Lint {
-    error: SourceError
+    pub error: SourceError
 }
 
 impl Lint {
     pub fn new(error: SourceError) -> Self {
         Self {
             error
+        }
+    }
+
+    pub fn into_diagnostic(self) -> Option<(PathBuf, usize, usize, String)> {
+        if let Some((path, line, col)) = self.error.location {
+            Some((path, line, col, self.error.raw_message))
+
+        } else {
+            None
         }
     }
 }

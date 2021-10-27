@@ -215,7 +215,7 @@ impl MacroDefinition {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct MacroCall {
     id: usize,
     name: InnerToken,
@@ -223,6 +223,10 @@ pub struct MacroCall {
 }
 
 impl MacroCall {
+    pub fn name(&self) -> &InnerToken {
+        &self.name
+    }
+
     pub fn error(&self, message: String) -> SourceError {
         self.name.error(message)
     }

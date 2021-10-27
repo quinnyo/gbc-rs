@@ -18,6 +18,7 @@ use file_io::FileReader;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::compiler::Lint;
+use crate::lexer::stage::macros::MacroCall;
 use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{ConstantIndex, EvaluatorContext, EvaluatorConstant, UsageInformation};
@@ -41,19 +42,21 @@ pub struct LinkerContext<'a> {
     pub files: &'a [LexerFile],
     pub constants: &'a HashMap<ConstantIndex, EvaluatorConstant>,
     pub constant_values: &'a HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
-    pub constant_usage: &'a HashMap<ConstantIndex, HashSet<(usize, usize)>>,
+    pub constant_usage: &'a HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
     pub labels: &'a HashMap<(Symbol, usize, bool), InnerToken>,
     pub label_addresses: &'a HashMap<usize, usize>,
-    pub label_usage: &'a HashMap<usize, HashSet<(usize, usize)>>,
+    pub label_usage: &'a HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
+    pub macro_calls: &'a [MacroCall]
 }
 
 
 // Linker Implementation ------------------------------------------------------
 #[derive(Clone)]
 pub struct Linker {
-    sections: Vec<Section>,
+    pub sections: Vec<Section>,
     context: EvaluatorContext,
     usage: UsageInformation,
+    macro_calls: Vec<MacroCall>,
     files: Vec<LexerFile>
 }
 
@@ -69,7 +72,7 @@ impl Linker {
     ) -> Result<Self, SourceError> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        let mut linker = Self::new(file_reader, lexer.tokens, strip_debug, optimize, linter_enabled).map_err(|err| {
+        let mut linker = Self::new(file_reader, lexer.tokens, macro_calls.clone(), strip_debug, optimize, linter_enabled).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?;
         linker.files = files;
@@ -79,6 +82,7 @@ impl Linker {
     fn new<R: FileReader>(
         file_reader: &R,
         tokens: Vec<EntryToken>,
+        macro_calls: Vec<MacroCall>,
         strip_debug: bool,
         optimize: bool,
         linter_enabled: bool
@@ -101,10 +105,10 @@ impl Linker {
             if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, &mut usage, inner.file_index, inner.start_index)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, &mut usage, inner.file_index, inner.start_index)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, &mut usage, inner.file_index, inner.start_index)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, &mut usage, inner.file_index, inner.start_index)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, &mut usage, &inner)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, &mut usage, &inner)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, &mut usage, &inner)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, &mut usage, &inner)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
@@ -170,6 +174,7 @@ impl Linker {
             sections,
             context,
             usage,
+            macro_calls,
             files: Vec::new()
         })
     }
@@ -195,14 +200,15 @@ impl Linker {
             constant_usage: &self.usage.constants,
             labels: &self.context.raw_labels,
             label_addresses: &self.context.label_addresses,
-            label_usage: &self.usage.labels
+            label_usage: &self.usage.labels,
+            macro_calls: &self.macro_calls[..]
         }
     }
 
     pub fn to_lint_list(&self) -> Vec<Lint> {
         let mut lints = Vec::new();
         let mut unused = self.context.find_unused(&self.usage);
-        unused.append(&mut self.context.find_magic_numbers(&self.usage));
+        //unused.append(&mut self.context.find_magic_numbers(&self.usage));
         unused.sort_by(|a, b| {
             (a.0, &a.1).cmp(&(b.0, &b.1))
         });
@@ -307,7 +313,7 @@ impl Linker {
                 let mut first_taken = false;
                 for branch in branches {
                     let result = if let Some(condition) = branch.condition {
-                        context.resolve_const_expression(&condition, usage, inner.file_index, inner.start_index)?
+                        context.resolve_const_expression(&condition, usage, &inner)?
 
                     } else {
                         ExpressionResult::Integer(1)
@@ -328,8 +334,8 @@ impl Linker {
             } else if let EntryToken::ForStatement(inner, for_statement) = token {
 
                 let binding = for_statement.binding;
-                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, usage, inner.file_index, inner.start_index)?, "Invalid for range argument")?;
-                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, usage, inner.file_index, inner.start_index)?, "Invalid for range argument")?;
+                let from = util::integer_value(&inner, context.resolve_const_expression(&for_statement.from, usage, &inner)?, "Invalid for range argument")?;
+                let to = util::integer_value(&inner, context.resolve_const_expression(&for_statement.to, usage, &inner)?, "Invalid for range argument")?;
 
                 let iterations = to - from;
                 if iterations > 2048 {

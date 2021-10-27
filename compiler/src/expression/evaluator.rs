@@ -27,8 +27,8 @@ pub struct EvaluatorConstant {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UsageInformation {
-    pub constants: HashMap<ConstantIndex, HashSet<(usize, usize)>>,
-    pub labels: HashMap<usize, HashSet<(usize, usize)>>,
+    pub constants: HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
+    pub labels: HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
     pub expressions: HashMap<(FileIndex, usize), ExpressionResult>,
     magic_constants: Vec<(ConstantIndex, InnerToken, i32)>,
     magic_numbers: Vec<(InnerToken, i32)>
@@ -46,13 +46,13 @@ impl UsageInformation {
         }
     }
 
-    fn use_constant(&mut self, index: ConstantIndex, from_file_index: usize, start_index: usize) {
+    fn use_constant(&mut self, index: ConstantIndex, outer: &InnerToken) {
         let entry = self.constants.entry(index).or_insert_with(HashSet::new);
-        entry.insert((from_file_index, start_index));
+        entry.insert((outer.file_index, outer.start_index, outer.macro_call_id));
     }
 
-    fn use_label(&mut self, label: usize, file_index: usize, start_index: usize) {
-        self.labels.entry(label).or_insert_with(HashSet::new).insert((file_index, start_index));
+    fn use_label(&mut self, label: usize, outer: &InnerToken) {
+        self.labels.entry(label).or_insert_with(HashSet::new).insert((outer.file_index, outer.start_index, outer.macro_call_id));
     }
 
     fn merge(&mut self, other: &UsageInformation) {
@@ -116,7 +116,7 @@ impl EvaluatorContext {
                             )
                         ));
 
-                    } else if let Some((file, _)) = files.iter().nth(0) {
+                    } else if let Some((file, _, _)) = files.iter().nth(0) {
                         locations.push((
                             4,
                             c.inner.value.clone(),
@@ -261,8 +261,7 @@ impl EvaluatorContext {
                 &stack[..],
                 &constant.expression,
                 &mut usage,
-                constant.inner.file_index,
-                constant.inner.start_index
+                &constant.inner
             )?;
             self.constants.insert(name, (c, usage));
         }
@@ -273,25 +272,23 @@ impl EvaluatorContext {
         &mut self,
         expression: &DataExpression,
         usage: &mut UsageInformation,
-        from_file_index: usize,
-        from_start_index: usize
+        inner: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
         let stack = Vec::new();
-        self.inner_const_resolve_outer(&stack, expression, usage, from_file_index, from_start_index)
+        self.inner_const_resolve_outer(&stack, expression, usage, inner)
     }
 
     pub fn resolve_opt_const_expression(
         &mut self,
         expression: &OptionalDataExpression,
         usage: &mut UsageInformation,
-        from_file_index: usize,
-        from_start_index: usize
+        inner: &InnerToken
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
             let stack = Vec::new();
-            Ok(Some(self.inner_const_resolve_outer(&stack, expr, usage, from_file_index, from_start_index)?))
+            Ok(Some(self.inner_const_resolve_outer(&stack, expr, usage, inner)?))
 
         } else {
             Ok(None)
@@ -305,11 +302,10 @@ impl EvaluatorContext {
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
         is_call_instruction: bool,
-        from_file_index: usize,
-        from_start_index: usize
+        inner: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
-        self.inner_dyn_resolve_outer(expression, usage, address_offset, is_call_instruction, from_file_index, from_start_index)
+        self.inner_dyn_resolve_outer(expression, usage, address_offset, is_call_instruction, inner)
     }
 
     pub fn resolve_opt_dyn_expression(
@@ -317,12 +313,11 @@ impl EvaluatorContext {
         expression: &OptionalDataExpression,
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
-        from_file_index: usize,
-        from_start_index: usize
+        inner: &InnerToken
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            Ok(Some(self.inner_dyn_resolve_outer(expr, usage, address_offset, false, from_file_index, from_start_index)?))
+            Ok(Some(self.inner_dyn_resolve_outer(expr, usage, address_offset, false, inner)?))
 
         } else {
             Ok(None)
@@ -340,7 +335,7 @@ impl EvaluatorContext {
             if let Some((outer, signature)) = self.callable_labels.get(id) {
 
                 if self.linter_enabled {
-                    usage.use_label(*id, inner.file_index, inner.start_index);
+                    usage.use_label(*id, inner);
                 }
 
                 if let Some(signature) = signature {
@@ -382,13 +377,12 @@ impl EvaluatorContext {
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
         is_call_instruction: bool,
-        from_file_index: usize,
-        from_start_index: usize
+        inner: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
-        match self.inner_dyn_resolve(expression, usage, address_offset, is_call_instruction, from_file_index, from_start_index) {
+        match self.inner_dyn_resolve(expression, usage, address_offset, is_call_instruction, inner) {
             Ok(result) => {
-                usage.expressions.insert((Some(from_file_index), from_start_index), result.clone());
+                usage.expressions.insert((Some(inner.file_index), inner.start_index), result.clone());
                 Ok(result)
             },
             Err(err) => Err(err)
@@ -401,18 +395,17 @@ impl EvaluatorContext {
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
         is_call_instruction: bool,
-        from_file_index: usize,
-        from_start_index: usize
+        outer: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
         match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_dyn_resolve(left, usage, address_offset, false, from_file_index, from_start_index)?;
-                let right = self.inner_dyn_resolve(right, usage, address_offset, false, from_file_index, from_start_index)?;
+                let left = self.inner_dyn_resolve(left, usage, address_offset, false, outer)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, false, outer)?;
                 Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
-                let right = self.inner_dyn_resolve(right, usage, address_offset, false, from_file_index, from_start_index)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, false, outer)?;
                 Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
@@ -420,13 +413,13 @@ impl EvaluatorContext {
                     ExpressionValue::ConstantValue(inner, name) => {
 
                         let global_index = (name.clone(), None);
-                        let local_index = (name.clone(), Some(from_file_index));
+                        let local_index = (name.clone(), Some(outer.file_index));
 
                         // Local Lookup
                         if let Some(value) = self.constants.get(&local_index) {
                             if self.linter_enabled {
                                 usage.merge(&value.1);
-                                usage.use_constant(local_index, from_file_index, from_start_index);
+                                usage.use_constant(local_index, outer);
                             }
                             value.0.clone()
 
@@ -434,7 +427,7 @@ impl EvaluatorContext {
                         } else if let Some(value) = self.constants.get(&global_index) {
                             if self.linter_enabled {
                                 usage.merge(&value.1);
-                                usage.use_constant(global_index, from_file_index, from_start_index);
+                                usage.use_constant(global_index, outer);
                             }
                             value.0.clone()
 
@@ -455,7 +448,7 @@ impl EvaluatorContext {
                     },
                     ExpressionValue::ParentLabelAddress(outer, id) | ExpressionValue::ChildLabelAddress(outer, id) => {
                         if self.linter_enabled {
-                            usage.use_label(*id, from_file_index, from_start_index);
+                            usage.use_label(*id, outer);
                         }
 
                         if let Some((inner, _)) = self.callable_labels.get(id) {
@@ -490,8 +483,7 @@ impl EvaluatorContext {
                         usage,
                         address_offset,
                         false,
-                        from_file_index,
-                        from_start_index
+                        inner
                     )?);
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
@@ -520,13 +512,12 @@ impl EvaluatorContext {
         constant_stack: &[&Symbol],
         expression: &Expression,
         usage: &mut UsageInformation,
-        from_file_index: usize,
-        from_start_index: usize
+        outer: &InnerToken,
 
     ) -> Result<ExpressionResult, SourceError> {
-        match self.inner_const_resolve(constant_stack, expression, usage, from_file_index, from_start_index) {
+        match self.inner_const_resolve(constant_stack, expression, usage, outer) {
             Ok(result) => {
-                usage.expressions.insert((Some(from_file_index), from_start_index), result.clone());
+                usage.expressions.insert((Some(outer.file_index), outer.start_index), result.clone());
                 Ok(result)
             },
             Err(err) => Err(err)
@@ -538,18 +529,17 @@ impl EvaluatorContext {
         constant_stack: &[&Symbol],
         expression: &Expression,
         usage: &mut UsageInformation,
-        from_file_index: usize,
-        from_start_index: usize
+        outer: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
         match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_const_resolve(constant_stack, left, usage, from_file_index, from_start_index)?;
-                let right = self.inner_const_resolve(constant_stack, right, usage, from_file_index, from_start_index)?;
+                let left = self.inner_const_resolve(constant_stack, left, usage, outer)?;
+                let right = self.inner_const_resolve(constant_stack, right, usage, outer)?;
                 Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
-                let right = self.inner_const_resolve(constant_stack, right, usage, from_file_index, from_start_index)?;
+                let right = self.inner_const_resolve(constant_stack, right, usage, outer)?;
                 Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
@@ -557,13 +547,13 @@ impl EvaluatorContext {
                     ExpressionValue::ConstantValue(parent, name) => {
 
                         let global_index = (name.clone(), None);
-                        let local_index = (name.clone(), Some(from_file_index));
+                        let local_index = (name.clone(), Some(outer.file_index));
 
                         // Local Lookup
                         if let Some(result) = self.constants.get(&local_index) {
                             if self.linter_enabled {
                                 usage.merge(&result.1);
-                                usage.use_constant(local_index, from_file_index, from_start_index);
+                                usage.use_constant(local_index, outer);
                             }
                             result.0.clone()
 
@@ -571,7 +561,7 @@ impl EvaluatorContext {
                         } else if let Some(result) = self.constants.get(&global_index) {
                             if self.linter_enabled {
                                 usage.merge(&result.1);
-                                usage.use_constant(global_index, from_file_index, from_start_index);
+                                usage.use_constant(global_index, outer);
                             }
                             result.0.clone()
 
@@ -584,8 +574,7 @@ impl EvaluatorContext {
                                 name,
                                 expression,
                                 usage,
-                                from_file_index,
-                                from_start_index,
+                                outer,
                                 local_index
                             )?
 
@@ -598,8 +587,7 @@ impl EvaluatorContext {
                                 name,
                                 expression,
                                 usage,
-                                from_file_index,
-                                from_start_index,
+                                outer,
                                 global_index
                             )?
 
@@ -632,8 +620,7 @@ impl EvaluatorContext {
                         constant_stack,
                         arg,
                         usage,
-                        from_file_index,
-                        from_start_index
+                        inner
                     )?);
                 }
                 Self::execute_builtin_call(&inner, &name, arguments)
@@ -688,8 +675,7 @@ impl EvaluatorContext {
         name: &Symbol,
         expression: &Expression,
         usage: &mut UsageInformation,
-        from_file_index: usize,
-        from_start_index: usize,
+        outer: &InnerToken,
         declare_index: (Symbol, Option<usize>)
 
     ) -> Result<ExpressionResult, SourceError> {
@@ -711,12 +697,11 @@ impl EvaluatorContext {
                 &child_stack,
                 expression,
                 &mut constant_usage,
-                from_file_index,
-                from_start_index
+                inner
             )?;
             if self.linter_enabled {
                 usage.merge(&constant_usage);
-                usage.use_constant(declare_index.clone(), from_file_index, from_start_index);
+                usage.use_constant(declare_index.clone(), outer);
             }
             self.constants.insert(declare_index, (value.clone(), constant_usage));
             Ok(value)
@@ -1185,7 +1170,7 @@ mod test {
     use ordered_float::OrderedFloat;
     use crate::mocks::expr_lex;
     use crate::error::SourceError;
-    use crate::lexer::ExpressionToken;
+    use crate::lexer::{InnerToken, ExpressionToken};
     use super::{EvaluatorContext, ExpressionResult, UsageInformation};
 
     fn const_expression<S: Into<String>>(s: S) -> ExpressionResult {
@@ -1202,7 +1187,14 @@ mod test {
             let mut context = EvaluatorContext::new(false);
             let mut usage = UsageInformation::new();
             let stack = Vec::new();
-            context.inner_const_resolve(&stack, expr, &mut usage, 0, 0)
+            let inner = InnerToken {
+                file_index: 0,
+                start_index: 0,
+                end_index: 0,
+                value: crate::lexer::Symbol::A,
+                macro_call_id: None
+            };
+            context.inner_const_resolve(&stack, expr, &mut usage, &inner)
 
         } else {
             panic!("Not a constant expression");

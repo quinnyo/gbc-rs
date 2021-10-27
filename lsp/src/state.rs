@@ -69,6 +69,7 @@ pub struct InlayHintsParams {}
 pub struct GBCSymbol {
     pub kind: SymbolKind,
     pub is_global: bool,
+    pub in_macro: bool,
     pub location: Location,
     pub name: String,
     pub value: String,
@@ -283,6 +284,11 @@ impl State {
             symbol.location.range.start.line < first_error_line as u32
 
         }).flat_map(|symbol| match symbol.kind {
+            SymbolKind::Namespace => Some(InlayHint {
+                kind: InlayKind::TypeHint,
+                label: format!("{}", symbol.value),
+                range: symbol.location.range
+            }),
             SymbolKind::Constant => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
@@ -313,6 +319,9 @@ impl State {
             let location = symbol.location;
             let is_global = symbol.is_global;
             let m = match symbol.kind {
+                SymbolKind::Namespace => {
+                    Some(format!("SECTION \"{}\",{}", symbol.name, symbol.value))
+                },
                 SymbolKind::Constant => {
                     Some(format!("CONST {}", symbol.name))
                 },
@@ -442,6 +451,48 @@ impl State {
         }
     }
 
+    fn resolve_reference(linker: &Linker, file_index: usize, start_index: usize, macro_call_id: Option<usize>, l: usize) -> Location {
+        let context = linker.context(None);
+
+        // Follow macro calls to their original source
+        let macro_call = macro_call_id.and_then(|id| context.macro_calls.get(id));
+        if let Some(macro_call) = macro_call {
+            let token = macro_call.name();
+            let file = &context.files[token.file_index];
+            let (line, col) = file.get_line_and_col(token.start_index);
+            Location {
+                uri: Url::from_file_path(&file.path).unwrap(),
+                range: Range {
+                    start: Position {
+                        line: line as u32,
+                        character: col as u32
+                    },
+                    end: Position {
+                        line: line as u32,
+                        character: (col + l) as u32
+                    }
+                }
+            }
+
+        } else {
+            let file = &context.files[file_index];
+            let (line, col) = file.get_line_and_col(start_index);
+            Location {
+                uri: Url::from_file_path(&file.path).unwrap(),
+                range: Range {
+                    start: Position {
+                        line: line as u32,
+                        character: col as u32
+                    },
+                    end: Position {
+                        line: line as u32,
+                        character: (col + l) as u32
+                    }
+                }
+            }
+        }
+    }
+
     fn parse_symbols(linker: Linker) -> Vec<GBCSymbol> {
         let mut symbols: Vec<GBCSymbol> = Vec::new();
         let context = linker.context(None);
@@ -455,22 +506,8 @@ impl State {
                 let (line, col) = file.get_line_and_col(constant.inner.start_index);
                 let (eline, ecol) = file.get_line_and_col(constant.inner.end_index);
                 let references = context.constant_usage.get(index).map(|refs| {
-                    refs.iter().map(|(file_index, start_index)| {
-                        let file = &context.files[*file_index];
-                        let (line, col) = file.get_line_and_col(*start_index);
-                        Location {
-                            uri: Url::from_file_path(&file.path).unwrap(),
-                            range: Range {
-                                start: Position {
-                                    line: line as u32,
-                                    character: col as u32
-                                },
-                                end: Position {
-                                    line: line as u32,
-                                    character: (col + name.len()) as u32
-                                }
-                            }
-                        }
+                    refs.iter().map(|(file_index, start_index, macro_call_id)| {
+                        Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
 
                     }).collect()
 
@@ -478,6 +515,7 @@ impl State {
                 symbols.push(GBCSymbol {
                     kind: SymbolKind::Constant,
                     is_global: index.1.is_none(),
+                    in_macro: token.macro_call_id.is_some(),
                     location: Location {
                         uri: Url::from_file_path(&file.path).unwrap(),
                         range: Range {
@@ -500,6 +538,40 @@ impl State {
             }
         }
 
+        // Sections
+        // TODO list stuff inside as children
+        // TODO document_symbols must also return sections in case their children are part of a
+        // given file even if the section itself is not
+        for section in &linker.sections {
+            let file = &context.files[section.inner.file_index];
+            let (line, col) = file.get_line_and_col(section.inner.start_index);
+            let (eline, ecol) = file.get_line_and_col(section.inner.end_index);
+            symbols.push(GBCSymbol {
+                kind: SymbolKind::Namespace,
+                is_global: false,
+                in_macro: section.inner.macro_call_id.is_some(),
+                location: Location {
+                    uri: Url::from_file_path(&file.path).unwrap(),
+                    range: Range {
+                        start: Position {
+                            line: line as u32,
+                            character: col as u32
+                        },
+                        end: Position {
+                            line: eline as u32,
+                            character: ecol as u32
+                        }
+                    }
+                },
+                name: section.name.to_string(),
+                width: 0,
+                value: format!("{}[${:0>4x}-${:0>4x}][{}]", section.segment, section.start_address, section.end_address, section.bank),
+                children: Vec::new(),
+                references: Vec::new()
+            });
+        }
+
+        // Variables / Labels
         let mut last_parent_label_index: Option<usize> = None;
         let sections = linker.section_entries();
         for entries in sections {
@@ -521,6 +593,7 @@ impl State {
                                 symbol.children.push(GBCSymbol {
                                     kind: SymbolKind::Method,
                                     is_global: false,
+                                    in_macro: entry.inner.macro_call_id.is_some(),
                                     location: Location {
                                         uri: Url::from_file_path(&file.path).unwrap(),
                                         range: Range {
@@ -584,29 +657,18 @@ impl State {
                             let (eline, ecol) = file.get_line_and_col(token.end_index);
                             let address = context.label_addresses.get(label_id).unwrap_or(&0);
                             let references = context.label_usage.get(label_id).map(|refs| {
-                                refs.iter().map(|(file_index, start_index)| {
-                                    let file = &context.files[*file_index];
-                                    let (line, col) = file.get_line_and_col(*start_index);
-                                    Location {
-                                        uri: Url::from_file_path(&file.path).unwrap(),
-                                        range: Range {
-                                            start: Position {
-                                                line: line as u32,
-                                                character: col as u32
-                                            },
-                                            end: Position {
-                                                line: line as u32,
-                                                character: (col + name.len()) as u32
-                                            }
-                                        }
-                                    }
+                                refs.iter().map(|(file_index, start_index, macro_call_id)| {
+                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
 
                             }).unwrap_or_else(Vec::new);
+
+                            // TODO for callable labels list register arguments
                             symbols.push(GBCSymbol {
                                 kind,
                                 is_global: *is_global,
+                                in_macro: token.macro_call_id.is_some(),
                                 location: Location {
                                     uri: Url::from_file_path(&file.path).unwrap(),
                                     range: Range {
@@ -636,6 +698,7 @@ impl State {
                                 children: Vec::new(),
                                 references
                             });
+                            break;
                         }
                     }
                 }
@@ -646,7 +709,51 @@ impl State {
         symbols.sort_by(|a, b| {
             a.name.cmp(&b.name)
         });
-        symbols
+
+        // Ignore everything outside of gbc files
+        symbols.into_iter().filter(|s| {
+            s.location.uri.path().ends_with(".gbc")
+
+        }).collect()
+    }
+
+    fn parse_warnings(symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
+        let mut warnings = Vec::new();
+        for symbol in symbols {
+
+            // Ignore Sections, symbols inside macros, symbols prefixed with _ and symbols inside a
+            // library folder
+            if symbol.kind == SymbolKind::Namespace
+                || symbol.in_macro
+                || symbol.name.starts_with('_')
+                || symbol.location.uri.path().contains("lib") {
+                continue;
+            }
+
+            // Unused Symbols
+            if symbol.references.is_empty() {
+                warnings.push((symbol.location.uri.clone(), Diagnostic {
+                    message: "Is never used".to_string(),
+                    range: symbol.location.range.clone(),
+                    severity: Some(DiagnosticSeverity::Warning),
+                    .. Diagnostic::default()
+                }));
+
+            // Symbols unused outside their file
+            } else if symbol.is_global {
+                // TODO check if referenced from within a macro OR fix macro reference detection
+                let outer_refs = symbol.references.iter().filter(|r| r.uri != symbol.location.uri).count();
+                if outer_refs == 0 {
+                    warnings.push((symbol.location.uri.clone(), Diagnostic {
+                        message: "Is only used inside this file".to_string(),
+                        range: symbol.location.range.clone(),
+                        severity: Some(DiagnosticSeverity::Warning),
+                        .. Diagnostic::default()
+                    }));
+                }
+            }
+        }
+        warnings
     }
 
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {
@@ -716,7 +823,7 @@ impl State {
 
         // Run linker
         let mut errors: Vec<(Url, Diagnostic)> = Vec::new();
-        let warnings: Vec<(Url, Diagnostic)> = Vec::new();
+        let mut warnings: Vec<(Url, Diagnostic)> = Vec::new();
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
                 log::info!(&format!("Linked in {}ms", start.elapsed().as_millis()));
@@ -724,7 +831,10 @@ impl State {
 
                 // Generate and store new symbols
                 if let Ok(mut symbols) = outer_symbols.lock() {
-                    *symbols = Some(Self::parse_symbols(linker));
+                    let s = Self::parse_symbols(linker);
+                    warnings.append(&mut Self::parse_warnings(&s));
+                    log::info!(&format!("{} symbol(s)", s.len()));
+                    *symbols = Some(s);
                 }
             },
             Err(err) => {
