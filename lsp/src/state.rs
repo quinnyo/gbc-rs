@@ -287,27 +287,42 @@ impl State {
             SymbolKind::Namespace => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{}", symbol.value),
-                range: symbol.location.range
+                range: Range {
+                    start: symbol.location.range.start,
+                    end: symbol.location.range.start
+                }
             }),
             SymbolKind::Constant => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
-                range: symbol.location.range
+                range: Range {
+                    start: symbol.location.range.start,
+                    end: symbol.location.range.start
+                }
             }),
             SymbolKind::Function => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
-                range: symbol.location.range
+                range: Range {
+                    start: symbol.location.range.start,
+                    end: symbol.location.range.start
+                }
             }),
             SymbolKind::Variable => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
-                range: symbol.location.range
+                range: Range {
+                    start: symbol.location.range.start,
+                    end: symbol.location.range.start
+                }
             }),
             SymbolKind::Field => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
-                range: symbol.location.range
+                range: Range {
+                    start: symbol.location.range.start,
+                    end: symbol.location.range.start
+                }
             }),
             _ => None
 
@@ -572,89 +587,90 @@ impl State {
         }
 
         // Variables / Labels
-        let mut last_parent_label_index: Option<usize> = None;
         let sections = linker.section_entries();
         for entries in sections {
             let mut entries = entries.iter().peekable();
             while let Some(entry) = entries.next() {
+
                 let file_index = entry.inner.file_index;
+                let file = &context.files[entry.inner.file_index];
                 let entry_name = &entry.inner.value;
-                if let EntryData::Label { is_local, name, .. } = &entry.data {
+                let start_index = entry.inner.start_index;
+                let mut end_index = entry.inner.end_index;
 
-                    // Local label under a parent
-                    let (kind, size) = if *is_local {
-                        if let Some(index) = last_parent_label_index {
+                if let EntryData::Label { .. } = &entry.data {
 
-                            // Add to last parent label
-                            if let Some(symbol) = symbols.get_mut(index) {
-                                let file = &context.files[file_index];
-                                let (line, col) = file.get_line_and_col(entry.inner.start_index);
-                                let (eline, ecol) = file.get_line_and_col(entry.inner.end_index);
-                                symbol.children.push(GBCSymbol {
-                                    kind: SymbolKind::Method,
-                                    is_global: false,
-                                    in_macro: entry.inner.macro_call_id.is_some(),
-                                    location: Location {
-                                        uri: Url::from_file_path(&file.path).unwrap(),
-                                        range: Range {
-                                            start: Position {
-                                                line: line as u32,
-                                                character: col as u32
-                                            },
-                                            end: Position {
-                                                line: eline as u32,
-                                                character: ecol as u32
-                                            }
-                                        }
-                                    },
-                                    name: name.to_string(),
-                                    width: 0,
-                                    value: "".to_string(),
-                                    children: Vec::new(),
-                                    references: Vec::new()
-                                });
-                            }
+                    let mut children = Vec::new();
+                    let mut kind = SymbolKind::Function;
+                    let mut data_size = 0;
+                    while let Some(SectionEntry { size, data, inner, .. }) = entries.peek() {
+
+                        // Encountered next parent label
+                        if let EntryData::Label { is_local: false, .. } = data {
+                            break;
                         }
-                        (SymbolKind::Method, None)
 
-                    // Field Data
-                    } else if let Some(SectionEntry {
-                        size,
-                        data: EntryData::Data {
-                            bytes: Some(_),
-                            ..
-                        },
-                        ..
+                        // Child labels
+                        if let EntryData::Label { is_local: true, name, .. } = data {
+                            let file = &context.files[inner.file_index];
+                            let (line, col) = file.get_line_and_col(inner.start_index);
+                            let (eline, ecol) = file.get_line_and_col(inner.end_index);
+                            children.push(GBCSymbol {
+                                kind: SymbolKind::Method,
+                                is_global: false,
+                                in_macro: inner.macro_call_id.is_some(),
+                                location: Location {
+                                    uri: Url::from_file_path(&file.path).unwrap(),
+                                    range: Range {
+                                        start: Position {
+                                            line: line as u32,
+                                            character: col as u32
+                                        },
+                                        end: Position {
+                                            line: eline as u32,
+                                            character: ecol as u32
+                                        }
+                                    }
+                                },
+                                name: format!(".{}", name),
+                                width: 0,
+                                value: "".to_string(),
+                                children: Vec::new(),
+                                references: Vec::new()
+                            });
+                            entries.next();
 
-                    }) = entries.peek() {
-                        // TODO collect multiple fields together
-                        (SymbolKind::Field, Some(*size))
+                        // Collect Data
+                        } else if let EntryData::Data { bytes: Some(b), ..  } = data {
+                            kind = SymbolKind::Field;
+                            data_size += b.len();
+                            entries.next();
 
-                    // Variable
-                    } else if let Some(SectionEntry {
-                        size,
-                        data: EntryData::Data {
-                            bytes: None,
-                            ..
-                        },
-                        ..
+                        // Variables
+                        } else if let EntryData::Data { bytes: None, .. } = data {
+                            data_size = *size;
+                            kind = SymbolKind::Variable;
+                            entries.next();
+                            break;
 
-                    }) = entries.peek() {
-                        (SymbolKind::Variable, Some(*size))
+                        // Any other entry like an instruction
+                        } else {
+                            data_size += *size;
+                            entries.next();
+                        }
 
-                    // Normal label
-                    } else {
-                        last_parent_label_index = Some(symbols.len());
-                        (SymbolKind::Function, None)
-                    };
+                        // Update range of label body
+                        if inner.macro_call_id.is_none() {
+                            end_index = end_index.max(inner.end_index);
+                        }
+                    }
 
-                    // Find matching label reference
+                    // Find matching label in context
                     for ((symbol, label_id, is_global), token) in context.labels {
                         if token.file_index == file_index && symbol == entry_name {
                             let name = symbol.to_string();
-                            let file = &context.files[token.file_index];
-                            let (line, col) = file.get_line_and_col(token.start_index);
-                            let (eline, ecol) = file.get_line_and_col(token.end_index);
+                            let (line, col) = file.get_line_and_col(start_index);
+                            let (eline, ecol) = file.get_line_and_col(end_index);
                             let address = context.label_addresses.get(label_id).unwrap_or(&0);
                             let references = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().map(|(file_index, start_index, macro_call_id)| {
@@ -677,25 +693,28 @@ impl State {
                                             character: col as u32
                                         },
                                         end: Position {
-                                            line: eline as u32,
+                                            line: if eline > line {
+                                                (eline + 1) as u32
+
+                                            } else {
+                                                eline as u32
+                                            },
                                             character: ecol as u32
                                         }
                                     }
                                 },
                                 name,
-                                width: size.unwrap_or(0),
-                                value: if let Some(size) = size {
-                                    if size <= 1 {
-                                        format!("${:0>4x} ({} byte)", address, size)
+                                width: data_size,
+                                value: if data_size == 0 {
+                                    format!("${:0>4x}", address)
 
-                                    } else {
-                                        format!("${:0>4x} ({} bytes)", address, size)
-                                    }
+                                } else if data_size == 1 {
+                                    format!("${:0>4x} ({} byte)", address, data_size)
 
                                 } else {
-                                    format!("${:0>4x}", address)
+                                    format!("${:0>4x} ({} bytes)", address, data_size)
                                 },
-                                children: Vec::new(),
+                                children,
                                 references
                             });
                             break;
@@ -733,7 +752,7 @@ impl State {
             // Unused Symbols
             if symbol.references.is_empty() {
                 warnings.push((symbol.location.uri.clone(), Diagnostic {
-                    message: "Is never used".to_string(),
+                    message: "Unused".to_string(),
                     range: symbol.location.range.clone(),
                     severity: Some(DiagnosticSeverity::Warning),
                     .. Diagnostic::default()
@@ -745,7 +764,7 @@ impl State {
                 let outer_refs = symbol.references.iter().filter(|r| r.uri != symbol.location.uri).count();
                 if outer_refs == 0 {
                     warnings.push((symbol.location.uri.clone(), Diagnostic {
-                        message: "Is only used inside this file".to_string(),
+                        message: "Used only in this file".to_string(),
                         range: symbol.location.range.clone(),
                         severity: Some(DiagnosticSeverity::Warning),
                         .. Diagnostic::default()
