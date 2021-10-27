@@ -13,31 +13,7 @@ use file_io::{FileReader, FileWriter, Logger};
 use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
 use crate::linker::{Linker, SegmentUsage};
-use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
-
-
-// Structs --------------------------------------------------------------------
-#[derive(Debug)]
-pub struct Lint {
-    pub error: SourceError
-}
-
-impl Lint {
-    pub fn new(error: SourceError) -> Self {
-        Self {
-            error
-        }
-    }
-
-    pub fn into_diagnostic(self) -> Option<(PathBuf, usize, usize, String)> {
-        if let Some((path, line, col)) = self.error.location {
-            Some((path, line, col, self.error.raw_message))
-
-        } else {
-            None
-        }
-    }
-}
+use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage, IntegerMap};
 
 
 // Compiler Pipeline Implementation -------------------------------------------
@@ -45,7 +21,6 @@ pub struct Compiler {
     no_color: bool,
     strip_debug_code: bool,
     optimize_instructions: bool,
-    linter_enabled: bool,
     print_segment_map: bool,
     print_rom_info: bool,
     generate_symbols: Option<PathBuf>,
@@ -59,7 +34,6 @@ impl Compiler {
             no_color: false,
             strip_debug_code: false,
             optimize_instructions: false,
-            linter_enabled: false,
             print_segment_map: false,
             print_rom_info: false,
             generate_symbols: None,
@@ -95,59 +69,48 @@ impl Compiler {
         self.optimize_instructions = true;
     }
 
-    pub fn set_linter_enabled(&mut self) {
-        self.linter_enabled = true;
-    }
-
     pub fn compile<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<(), CompilationError> {
         colored::control::set_override(!self.no_color);
         self.status(logger, "Compiling", format!("\"{}\" ...", file.display()));
-        let entry_lexer = self.parse(logger, io, file)?;
-        let linker = self.link(logger, io, entry_lexer)?;
-        if !self.linter_enabled {
-            self.generate(logger, io, linker)?;
-        }
+        let (entry_lexer, integers) = self.parse(logger, io, file)?;
+        let linker = self.link(logger, io, entry_lexer, integers)?;
+        self.generate(logger, io, linker)?;
         Ok(())
     }
 
     pub fn create_linker<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
         colored::control::set_override(false);
-        let entry_lexer = self.parse(logger, io, file)?;
-        self.link(logger, io, entry_lexer)
+        let (entry_lexer, integers) = self.parse(logger, io, file)?;
+        self.link(logger, io, entry_lexer, integers)
     }
 }
 
 impl Compiler {
 
-    fn parse<T: FileReader>(&mut self, logger: &mut Logger, io: &T, file: PathBuf) -> Result<Lexer<EntryStage>, CompilationError> {
+    fn parse<T: FileReader>(&mut self, logger: &mut Logger, io: &T, file: PathBuf) -> Result<(Lexer<EntryStage>, IntegerMap), CompilationError> {
         let start = Instant::now();
         let include_lexer = Lexer::<IncludeStage>::from_file(io, &file).map_err(|e| CompilationError::new("file inclusion", e))?;
         self.status(logger, "File IO", format!("completed in {}ms.", start.elapsed().as_millis()));
         let start = Instant::now();
-        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer, self.linter_enabled).map_err(|e| CompilationError::new("macro expansion", e))?;
-        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer, self.linter_enabled).map_err(|e| CompilationError::new("value construction", e))?;
-        let expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer, self.linter_enabled).map_err(|e| CompilationError::new("expression construction", e))?;
-        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer, self.linter_enabled).map_err(|e| CompilationError::new("entry construction", e))?;
+        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilationError::new("macro expansion", e))?;
+        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilationError::new("value construction", e))?;
+        let mut expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| CompilationError::new("expression construction", e))?;
+        let integers = expr_lexer.data().remove(0);
+        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilationError::new("entry construction", e))?;
         self.status(logger, "Parsing", format!("completed in {}ms.", start.elapsed().as_millis()));
-        Ok(entry_lexer)
+        Ok((entry_lexer, integers))
     }
 
-    fn link<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, entry_lexer: Lexer<EntryStage>) -> Result<Linker, CompilationError> {
+    fn link<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, entry_lexer: Lexer<EntryStage>, integers: IntegerMap) -> Result<Linker, CompilationError> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
             io,
             entry_lexer,
+            integers,
             self.strip_debug_code,
-            self.optimize_instructions,
-            self.linter_enabled
+            self.optimize_instructions
 
         ).map_err(|e| CompilationError::new("section linking", e))?;
-
-        // Report linter warnings only
-        if self.linter_enabled {
-            self.print_linter_warnings(logger, linker.to_lint_list());
-            return Ok(linker);
-        }
 
         logger.status("Linking", format!("completed in {}ms.", start.elapsed().as_millis()));
 
@@ -275,19 +238,8 @@ impl Compiler {
         logger.clearline();
     }
 
-    fn print_linter_warnings(&mut self, logger: &mut Logger, lints: Vec<Lint>) {
-        logger.info("Linter Report");
-        for lint in &lints {
-            logger.warning(format!("{}", lint.error));
-        }
-        //logger.warning(format!("= {} warning(s)", lints.len()));
-        logger.newline();
-    }
-
     fn status(&self, logger: &mut Logger, p: &str, s: String) {
-        if !self.linter_enabled {
-            logger.status(p, s);
-        }
+        logger.status(p, s);
     }
 
 }
@@ -384,17 +336,6 @@ mod test {
         let re = Regex::new(r"([0-9]+)ms").unwrap();
         let err = compiler.compile(&mut logger, &mut reader, PathBuf::from("main.gb.s")).err().expect("Expected a CompilationError");
         (re.replace_all(logger.to_string().as_str(), "XXms").to_string(), err.to_string())
-    }
-
-    fn compiler_lint<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S, c: S) -> String {
-        compiler.set_no_color();
-        compiler.set_linter_enabled();
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        reader.add_file("child.gb.s", c.into().as_str());
-        let re = Regex::new(r"([0-9]+)ms").unwrap();
-        compiler.compile(&mut logger, &mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
-        re.replace_all(logger.to_string().as_str(), "XXms").to_string()
     }
 
     // STDOUT -----------------------------------------------------------------
@@ -583,87 +524,6 @@ mod test {
             "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.".to_string(),
             "       Error Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
         ));
-    }
-
-    // Lints ------------------------------------------------------------------
-    #[test]
-    fn test_linting_unused_constant_direct() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nCONST UNUSED 2\nCONST USED 1\nDB USED", ""),
-            "        Info Linter Report\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 7\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_unused_constant_indirect() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nCONST UNUSED INDIRECT_UNUSED\nCONST INDIRECT_UNUSED 2\nCONST INDIRECT_USED 1\nCONST USED INDIRECT_USED\nDB USED", ""),
-            "        Info Linter Report\n     Warning Constant \"INDIRECT_UNUSED\" is never used, declared in file \"main.gb.s\" on line 3, column 7\n     Warning Constant \"UNUSED\" is never used, declared in file \"main.gb.s\" on line 2, column 7\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_unused_label_direct() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nused_label:\nunused_label:\njp used_label", ""),
-            "        Info Linter Report\n     Warning Label \"unused_label\" is never referenced, declared in file \"main.gb.s\" on line 3, column 1\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_global_label_not_reference_outside_file() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nGLOBAL used_label:\njp used_label", ""),
-            "        Info Linter Report\n     Warning Label \"used_label\" should not be global, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 8\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_replace_fixed_value_with_constant() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nCONST USED 2048\nDW USED\nDW 2048", ""),
-            "        Info Linter Report\n     Warning Fixed integer value ($0800) could be replaced with the constant \"USED\" that shares the same value in file \"main.gb.s\" on line 4, column 4\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_constant_global_only_used_in_declaration_file() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nGLOBAL CONST USED 2048\nDW USED\nDW SHARED\nGLOBAL CONST SHARED 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
-            "        Info Linter Report\n     Warning Constant \"USED\" should be made non-global or default, since it is never used outside its declaration in file \"main.gb.s\" on line 2, column 14\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_constant_global_only_used_in_one_other_file() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\nGLOBAL CONST SHARED 1024\nINCLUDE 'child.gb.s'", "DW SHARED"),
-            "        Info Linter Report\n     Warning Constant \"SHARED\" should be moved to another file, since it is never used at its declaration in file \"main.gb.s\" on line 2, column 14. Constant is only used in file \"child.gb.s\".\n".to_string()
-        );
-    }
-
-    #[test]
-    fn test_linting_replace_magic_number() {
-        let l = Logger::new();
-        let c = Compiler::new();
-        assert_eq!(
-            compiler_lint(l, c, "SECTION ROM0\n DB 19", ""),
-            "        Info Linter Report\n     Warning Fixed integer value ($0013) should be replaced with a constant in file \"main.gb.s\" on line 2, column 5\n".to_string()
-        );
     }
 }
 

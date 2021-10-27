@@ -43,11 +43,10 @@ impl ProjectConfig {
         let mut compiler = Compiler::new();
         compiler.set_optimize_instructions();
         compiler.set_strip_debug_code();
-        compiler.set_linter_enabled();
         compiler.create_linker(logger, &mut reader, main_file)
     }
 
-    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool, lint: bool) {
+    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool) {
         let mut reader = ProjectReader::from_relative(project.rom.input.clone());
         let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
 
@@ -61,10 +60,6 @@ impl ProjectConfig {
         }
 
         compiler.set_optimize_instructions();
-
-        if lint {
-            compiler.set_linter_enabled();
-        }
 
         // Remove debug code in release builds
         if release {

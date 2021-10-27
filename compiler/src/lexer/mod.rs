@@ -204,7 +204,7 @@ pub use self::file::LexerFile;
 // Re-Exports --------------------------------------------------------------------
 use self::stage::LexerStage;
 pub use self::stage::entry::{EntryStage, EntryToken};
-pub use self::stage::expression::{ExpressionStage, ExpressionToken};
+pub use self::stage::expression::{ExpressionStage, ExpressionToken, IntegerMap};
 pub use self::stage::include::IncludeStage;
 pub use self::stage::macros::{MacroStage, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
 pub use self::stage::value::ValueStage;
@@ -238,11 +238,11 @@ impl<T: LexerStage> Lexer<T> {
         })
     }
 
-    pub fn from_lexer(lexer: Lexer<T::Input>, linter_enabled: bool) -> Result<Self, SourceError> {
+    pub fn from_lexer(lexer: Lexer<T::Input>) -> Result<Self, SourceError> {
         let files = lexer.files;
         let mut data = Vec::with_capacity(128);
         let mut macro_calls = lexer.macro_calls;
-        let tokens = T::from_tokens(lexer.tokens, &mut macro_calls, &mut data, linter_enabled).map_err(|err| {
+        let tokens = T::from_tokens(lexer.tokens, &mut macro_calls, &mut data).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?;
         Ok(Self {
@@ -266,9 +266,8 @@ impl<T: LexerStage> Lexer<T> {
         self.macro_calls.len()
     }
 
-    #[cfg(test)]
     pub fn data(&mut self) -> Vec<T::Data> {
-        self.data.drain(0..).collect()
+        std::mem::replace(&mut self.data, Vec::new())
     }
 
 }

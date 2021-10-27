@@ -1,7 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
 use std::mem;
-use std::path::PathBuf;
 use std::collections::{HashMap, HashSet};
 
 
@@ -17,11 +16,11 @@ use file_io::FileReader;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::compiler::Lint;
 use crate::lexer::stage::macros::MacroCall;
-use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol};
+use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol, IntegerMap};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{ConstantIndex, EvaluatorContext, EvaluatorConstant, UsageInformation};
+pub use self::optimizer::OptimizerNotes;
 use self::section::Section;
 pub use self::section::entry::{SectionEntry, EntryData};
 
@@ -38,7 +37,6 @@ pub struct SegmentUsage {
 }
 
 pub struct LinkerContext<'a> {
-    pub local_file_index: Option<usize>,
     pub files: &'a [LexerFile],
     pub constants: &'a HashMap<ConstantIndex, EvaluatorConstant>,
     pub constant_values: &'a HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
@@ -46,6 +44,8 @@ pub struct LinkerContext<'a> {
     pub labels: &'a HashMap<(Symbol, usize, bool), InnerToken>,
     pub label_addresses: &'a HashMap<usize, usize>,
     pub label_usage: &'a HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
+    pub integers: &'a IntegerMap,
+    pub optimizations: &'a OptimizerNotes,
     pub macro_calls: &'a [MacroCall]
 }
 
@@ -56,6 +56,7 @@ pub struct Linker {
     pub sections: Vec<Section>,
     context: EvaluatorContext,
     usage: UsageInformation,
+    optimizations: OptimizerNotes,
     macro_calls: Vec<MacroCall>,
     files: Vec<LexerFile>
 }
@@ -65,14 +66,14 @@ impl Linker {
     pub fn from_lexer<R: FileReader>(
         file_reader: &R,
         lexer: Lexer<EntryStage>,
+        integers: IntegerMap,
         strip_debug: bool,
-        optimize: bool,
-        linter_enabled: bool
+        optimize: bool
 
     ) -> Result<Self, SourceError> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        let mut linker = Self::new(file_reader, lexer.tokens, macro_calls.clone(), strip_debug, optimize, linter_enabled).map_err(|err| {
+        let mut linker = Self::new(file_reader, lexer.tokens, macro_calls.clone(), integers, strip_debug, optimize).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?;
         linker.files = files;
@@ -83,14 +84,14 @@ impl Linker {
         file_reader: &R,
         tokens: Vec<EntryToken>,
         macro_calls: Vec<MacroCall>,
+        integers: IntegerMap,
         strip_debug: bool,
-        optimize: bool,
-        linter_enabled: bool
+        optimize: bool
 
     ) -> Result<Self, SourceError> {
 
-        let mut context = EvaluatorContext::new(linter_enabled);
-        let mut usage = UsageInformation::new();
+        let mut context = EvaluatorContext::new();
+        let mut usage = UsageInformation::new(integers);
         let mut entry_tokens = Vec::with_capacity(tokens.len());
         Self::parse_entries(&mut context, &mut usage, tokens, true, false, &mut entry_tokens, false)?;
 
@@ -157,9 +158,10 @@ impl Linker {
 
         Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
 
+        let mut optimizations = Vec::new();
         if optimize {
             // Run passes until no more optimizations were applied
-            while Self::optimize_instructions(&mut sections, strip_debug) {
+            while Self::optimize_instructions(&mut sections, &mut optimizations, strip_debug) {
                 Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
             }
         }
@@ -174,6 +176,7 @@ impl Linker {
             sections,
             context,
             usage,
+            optimizations,
             macro_calls,
             files: Vec::new()
         })
@@ -187,13 +190,8 @@ impl Linker {
         entries
     }
 
-    pub fn context<'a>(&'a self, local_file: Option<PathBuf>) -> LinkerContext<'a> {
-        let local_file_index = self.files.iter().find(|f| {
-            Some(&f.path) == local_file.as_ref()
-
-        }).map(|f| f.index);
+    pub fn context<'a>(&'a self) -> LinkerContext<'a> {
         LinkerContext {
-            local_file_index,
             files: &self.files[..],
             constants: &self.context.raw_constants,
             constant_values: &self.context.constants,
@@ -201,23 +199,10 @@ impl Linker {
             labels: &self.context.raw_labels,
             label_addresses: &self.context.label_addresses,
             label_usage: &self.usage.labels,
+            integers: &self.usage.integers,
+            optimizations: &self.optimizations,
             macro_calls: &self.macro_calls[..]
         }
-    }
-
-    pub fn to_lint_list(&self) -> Vec<Lint> {
-        let mut lints = Vec::new();
-        let mut unused = self.context.find_unused(&self.usage);
-        //unused.append(&mut self.context.find_magic_numbers(&self.usage));
-        unused.sort_by(|a, b| {
-            (a.0, &a.1).cmp(&(b.0, &b.1))
-        });
-        for (_, _, error) in unused {
-            lints.push(Lint::new(
-                error.extend_with_basic_location(&self.files)
-            ));
-        }
-        lints
     }
 
     pub fn to_symbol_list(&self) -> Vec<(usize, usize, String)> {
@@ -397,7 +382,6 @@ impl Linker {
         }
         Ok(())
     }
-
 }
 
 impl Linker {
@@ -443,11 +427,11 @@ impl Linker {
         Ok(())
     }
 
-    fn optimize_instructions(sections: &mut Vec<Section>, strip_debug: bool) -> bool {
+    fn optimize_instructions(sections: &mut Vec<Section>, notes: &mut OptimizerNotes, strip_debug: bool) -> bool {
         let mut optimizations_applied = false;
         for s in sections.iter_mut() {
             if s.is_rom {
-                optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries, strip_debug);
+                optimizations_applied |= optimizer::optimize_section_entries(&mut s.entries, notes, strip_debug);
             }
         }
         optimizations_applied
@@ -488,6 +472,7 @@ impl Linker {
 #[cfg(test)]
 mod test {
 
+    use std::collections::HashMap;
     use super::{Linker, SegmentUsage};
     use super::section::entry::EntryData;
     use crate::expression::data::{DataAlignment, DataEndianess};
@@ -496,53 +481,53 @@ mod test {
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), false, false, false).expect("Linker failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> Linker {
-        Linker::from_lexer(reader, entry_lex(s.into()), false, false, false).expect("Linker failed")
+        Linker::from_lexer(reader, entry_lex(s.into()), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_error_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> String {
         colored::control::set_override(false);
-        Linker::from_lexer(reader, entry_lex(s.into()), false, false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(reader, entry_lex(s.into()), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), false, false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_child<S: Into<String>>(s: S, c: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false, false).expect("Linker failed")
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_error_child<S: Into<String>>(s: S, c: S) -> String {
         colored::control::set_override(false);
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), false, false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), true, false, false).expect("Debug stripping failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), true, false).expect("Debug stripping failed")
     }
 
     pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), true, true, false).expect("Instruction optimization failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), true, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_optimize_keep_debug<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), false, true, false).expect("Instruction optimization failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), false, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), false, false, false).expect("Binary Linker failed")
+        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), HashMap::new(), false, false).expect("Binary Linker failed")
     }
 
     pub fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {

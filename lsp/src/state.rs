@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::path::PathBuf;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
+use std::collections::{HashMap, HashSet};
 
 
 // External Dependencies ------------------------------------------------------
@@ -32,6 +32,7 @@ use compiler::{
         LexerToken,
         LexerFile
     },
+    expression::ExpressionResult,
     linker::{
         Linker, SectionEntry, EntryData
     }
@@ -41,6 +42,7 @@ use crate::{InlayHint, InlayKind};
 
 // Constants ------------------------------------------------------------------
 const THREAD_DEBOUNCE: u64 = 250;
+
 
 
 // Types ----------------------------------------------------------------------
@@ -65,6 +67,8 @@ impl Notification for InlayHintsNotification {
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct InlayHintsParams {}
 
+type Optimizations = Vec<(Location, String)>;
+
 #[derive(Debug, Clone)]
 pub struct GBCSymbol {
     pub kind: SymbolKind,
@@ -74,11 +78,22 @@ pub struct GBCSymbol {
     pub name: String,
     pub value: String,
     pub width: usize,
+    pub result: Option<ExpressionResult>,
     pub children: Vec<GBCSymbol>,
     pub references: Vec<Location>
 }
 
 impl GBCSymbol {
+    fn typ(&self) -> &str {
+        match self.kind {
+            SymbolKind::Constant => "constant",
+            SymbolKind::Function => "label",
+            SymbolKind::Variable => "variable",
+            SymbolKind::Field => "label",
+            _ => "entry"
+        }
+    }
+
     fn into_symbol_information(self) -> SymbolInformation {
         SymbolInformation {
             name: self.name,
@@ -98,7 +113,13 @@ impl GBCSymbol {
             deprecated: None,
             range: self.location.range,
             selection_range: self.location.range,
-            detail: Some(self.value),
+            detail: Some(match self.kind {
+                SymbolKind::Constant => format!("= {}", self.value),
+                SymbolKind::Function => format!("@ {}", self.value),
+                SymbolKind::Variable => format!("@ {}", self.value),
+                SymbolKind::Field => format!("@ {}", self.value),
+                _ => self.value
+            }),
             children: Some(self.children.into_iter().map(GBCSymbol::into_document_symbol).collect())
         }
     }
@@ -111,7 +132,7 @@ pub struct State {
     documents: Arc<Mutex<RefCell<HashMap<String, String>>>>,
     tokens: Mutex<RefCell<HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>>>,
     workspace_path: Arc<Mutex<Option<PathBuf>>>,
-    symbols: Arc<Mutex<Option<Vec<GBCSymbol>>>>,
+    symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Optimizations)>>>,
     diagnostic_urls: Arc<Mutex<Vec<Url>>>,
     link_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
     link_gen: Arc<AtomicUsize>
@@ -198,7 +219,10 @@ impl State {
             None
         };
         if let Some(workspace_path) = workspace_path {
-            self.get_symbols(workspace_path).await.into_iter().map(GBCSymbol::into_symbol_information).collect()
+            self.get_symbols(workspace_path).await.0.into_iter().filter(|symbol| {
+                symbol.kind != SymbolKind::Method
+
+            }).map(GBCSymbol::into_symbol_information).collect()
 
         } else {
            Vec::new()
@@ -208,9 +232,9 @@ impl State {
     pub async fn document_symbols(&self, current_file: PathBuf) -> Vec<DocumentSymbol> {
         let workspace_path = current_file.clone();
         let uri = Url::from_file_path(current_file).unwrap();
-        self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
+        self.get_symbols(workspace_path).await.0.into_iter().filter(|symbol| {
             // Return if we either want all symbols or the symbol originates from the current file
-            symbol.location.uri == uri
+            symbol.location.uri == uri && symbol.kind != SymbolKind::Method
 
         }).map(GBCSymbol::into_document_symbol).collect()
     }
@@ -219,7 +243,7 @@ impl State {
 impl State {
     pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<CompletionItem> {
         let uri = Url::from_file_path(current_file.clone()).ok();
-        return self.get_symbols(current_file).await.into_iter().filter(|symbol| {
+        return self.get_symbols(current_file).await.0.into_iter().filter(|symbol| {
             // Complete if the symbol is either global or originates from the current file
             symbol.is_global || Some(&symbol.location.uri) == uri.as_ref()
 
@@ -227,25 +251,25 @@ impl State {
             SymbolKind::Constant => Some(CompletionItem {
                 label: symbol.name,
                 kind: Some(CompletionItemKind::Constant),
-                detail: Some(format!("Value: {}", symbol.value)),
+                detail: Some(format!("= {}", symbol.value)),
                 .. CompletionItem::default()
             }),
             SymbolKind::Function => Some(CompletionItem {
                 label: symbol.name,
                 kind: Some(CompletionItemKind::Function),
-                detail: Some(format!("Address: {}", symbol.value)),
+                detail: Some(format!("@ {}", symbol.value)),
                 .. CompletionItem::default()
             }),
             SymbolKind::Variable => Some(CompletionItem {
                 label: symbol.name,
                 kind: Some(CompletionItemKind::Variable),
-                detail: Some(format!("Address: {}", symbol.value)),
+                detail: Some(format!("@ {}", symbol.value)),
                 .. CompletionItem::default()
             }),
             SymbolKind::Field => Some(CompletionItem {
                 label: symbol.name,
                 kind: Some(CompletionItemKind::Field),
-                detail: Some(format!("Address: {}", symbol.value)),
+                detail: Some(format!("@ {}", symbol.value)),
                 .. CompletionItem::default()
             }),
             _ => None
@@ -274,7 +298,8 @@ impl State {
         };
 
         let uri = Url::from_file_path(current_file.clone()).ok();
-        return self.get_symbols(current_file).await.into_iter().filter(|symbol| {
+        let (symbols, optimizations) = self.get_symbols(current_file).await;
+        let mut hints: Vec<InlayHint> = symbols.into_iter().filter(|symbol| {
             // Hint if the symbol is from the current file
             Some(&symbol.location.uri) == uri.as_ref()
 
@@ -326,7 +351,28 @@ impl State {
             }),
             _ => None
 
-        }).collect()
+        }).collect();
+
+        hints.append(&mut optimizations.into_iter().filter(|(location, _)| {
+            // Hint if the symbol is from the current file
+            Some(&location.uri) == uri.as_ref()
+
+        }).filter(|(location, _)| {
+            // Don't generate hints for lines after the current error as they'll be
+            // cached and potentially incorrect
+            location.range.start.line < first_error_line as u32
+
+        }).map(|(location, label)| {
+            InlayHint {
+                kind: InlayKind::OptimizerHint,
+                label: format!("{} (optimized)", label),
+                range: Range {
+                    start: location.range.start,
+                    end: location.range.start
+                }
+            }
+        }).collect());
+        hints
     }
 
     pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
@@ -373,11 +419,14 @@ impl State {
 
     pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<GBCSymbol> {
         let current_file = PathBuf::from(current_file);
+        let uri = Url::from_file_path(&current_file).unwrap();
         if let Some((token, _)) = self.parse_token(current_file.clone(), line, col) {
             let symbol_name = token.inner().value.to_string();
-            let symbols = self.get_symbols(current_file).await;
+            let symbols = self.get_symbols(current_file).await.0;
             symbols.into_iter().find(|symbol| {
-                symbol.name == symbol_name
+                // For child labels only search in the curent file
+                symbol.name == symbol_name &&
+                    (symbol.kind != SymbolKind::Method || symbol.location.uri == uri)
             })
 
         } else {
@@ -440,7 +489,7 @@ impl State {
         (config, reader)
     }
 
-    async fn get_symbols(&self, workspace_path: PathBuf) -> Vec<GBCSymbol> {
+    async fn get_symbols(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Optimizations) {
         let has_linker = if let Ok(symbols) = self.symbols.lock() {
             symbols.is_some()
 
@@ -459,15 +508,15 @@ impl State {
             ).await;
         }
         if let Ok(symbols) = self.symbols.lock() {
-            symbols.clone().unwrap_or_else(Vec::new)
+            symbols.clone().unwrap_or_else(|| (Vec::new(), Vec::new()))
 
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
     }
 
     fn resolve_reference(linker: &Linker, file_index: usize, start_index: usize, macro_call_id: Option<usize>, l: usize) -> Location {
-        let context = linker.context(None);
+        let context = linker.context();
 
         // Follow macro calls to their original source
         let macro_call = macro_call_id.and_then(|id| context.macro_calls.get(id));
@@ -508,18 +557,39 @@ impl State {
         }
     }
 
-    fn parse_symbols(linker: Linker) -> Vec<GBCSymbol> {
+    fn location_from_file_index(files: &[LexerFile], file_index: usize, start_index: usize, end_index: usize) -> Location {
+        let file = &files[file_index];
+        let (line, col) = file.get_line_and_col(start_index);
+        let (eline, ecol) = file.get_line_and_col(end_index);
+        Location {
+            uri: Url::from_file_path(&file.path).unwrap(),
+            range: Range {
+                start: Position {
+                    line: line as u32,
+                    character: col as u32
+                },
+                end: Position {
+                    line: if eline > line {
+                        (eline + 1) as u32
+
+                    } else {
+                        eline as u32
+                    },
+                    character: ecol as u32
+                }
+            }
+        }
+    }
+
+    fn parse_symbols(linker: &Linker) -> Vec<GBCSymbol> {
         let mut symbols: Vec<GBCSymbol> = Vec::new();
-        let context = linker.context(None);
+        let context = linker.context();
 
         // Constants
         for (index, constant) in context.constants {
             let token = &constant.inner;
             let name = token.value.to_string();
             if let Some((result, _)) = context.constant_values.get(index) {
-                let file = &context.files[constant.inner.file_index];
-                let (line, col) = file.get_line_and_col(constant.inner.start_index);
-                let (eline, ecol) = file.get_line_and_col(constant.inner.end_index);
                 let references = context.constant_usage.get(index).map(|refs| {
                     refs.iter().map(|(file_index, start_index, macro_call_id)| {
                         Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
@@ -531,21 +601,10 @@ impl State {
                     kind: SymbolKind::Constant,
                     is_global: index.1.is_none(),
                     in_macro: token.macro_call_id.is_some(),
-                    location: Location {
-                        uri: Url::from_file_path(&file.path).unwrap(),
-                        range: Range {
-                            start: Position {
-                                line: line as u32,
-                                character: col as u32
-                            },
-                            end: Position {
-                                line: eline as u32,
-                                character: ecol as u32
-                            }
-                        }
-                    },
+                    location: Self::location_from_file_index(context.files, constant.inner.file_index, constant.inner.start_index, constant.inner.end_index),
                     name,
                     width: 0,
+                    result: Some(result.clone()),
                     value: result.to_string(),
                     children: Vec::new(),
                     references
@@ -554,33 +613,16 @@ impl State {
         }
 
         // Sections
-        // TODO list stuff inside as children
-        // TODO document_symbols must also return sections in case their children are part of a
-        // given file even if the section itself is not
         for section in &linker.sections {
-            let file = &context.files[section.inner.file_index];
-            let (line, col) = file.get_line_and_col(section.inner.start_index);
-            let (eline, ecol) = file.get_line_and_col(section.inner.end_index);
             symbols.push(GBCSymbol {
                 kind: SymbolKind::Namespace,
                 is_global: false,
                 in_macro: section.inner.macro_call_id.is_some(),
-                location: Location {
-                    uri: Url::from_file_path(&file.path).unwrap(),
-                    range: Range {
-                        start: Position {
-                            line: line as u32,
-                            character: col as u32
-                        },
-                        end: Position {
-                            line: eline as u32,
-                            character: ecol as u32
-                        }
-                    }
-                },
+                location: Self::location_from_file_index(context.files, section.inner.file_index, section.inner.start_index, section.inner.end_index),
                 name: section.name.to_string(),
                 width: 0,
-                value: format!("{}[${:0>4x}-${:0>4x}][{}]", section.segment, section.start_address, section.end_address, section.bank),
+                result: None,
+                value: format!("{}[${:0>4X}-${:0>4X}][{}]", section.segment, section.start_address, section.end_address, section.bank),
                 children: Vec::new(),
                 references: Vec::new()
             });
@@ -593,7 +635,6 @@ impl State {
             while let Some(entry) = entries.next() {
 
                 let file_index = entry.inner.file_index;
-                let file = &context.files[entry.inner.file_index];
                 let entry_name = &entry.inner.value;
                 let start_index = entry.inner.start_index;
                 let mut end_index = entry.inner.end_index;
@@ -612,32 +653,23 @@ impl State {
 
                         // Child labels
                         if let EntryData::Label { is_local: true, name, .. } = data {
-                            let file = &context.files[inner.file_index];
-                            let (line, col) = file.get_line_and_col(inner.start_index);
-                            let (eline, ecol) = file.get_line_and_col(inner.end_index);
-                            children.push(GBCSymbol {
+                            let mut label = GBCSymbol {
                                 kind: SymbolKind::Method,
                                 is_global: false,
                                 in_macro: inner.macro_call_id.is_some(),
-                                location: Location {
-                                    uri: Url::from_file_path(&file.path).unwrap(),
-                                    range: Range {
-                                        start: Position {
-                                            line: line as u32,
-                                            character: col as u32
-                                        },
-                                        end: Position {
-                                            line: eline as u32,
-                                            character: ecol as u32
-                                        }
-                                    }
-                                },
+                                location: Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index),
                                 name: format!(".{}", name),
                                 width: 0,
+                                result: None,
                                 value: "".to_string(),
                                 children: Vec::new(),
                                 references: Vec::new()
-                            });
+                            };
+                            children.push(label.clone());
+                            label.name = name.clone();
+
+                            // Copy for goto definition
+                            symbols.push(label);
                             entries.next();
 
                         // Collect Data
@@ -669,8 +701,6 @@ impl State {
                     for ((symbol, label_id, is_global), token) in context.labels {
                         if token.file_index == file_index && symbol == entry_name {
                             let name = symbol.to_string();
-                            let (line, col) = file.get_line_and_col(start_index);
-                            let (eline, ecol) = file.get_line_and_col(end_index);
                             let address = context.label_addresses.get(label_id).unwrap_or(&0);
                             let references = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().map(|(file_index, start_index, macro_call_id)| {
@@ -685,34 +715,15 @@ impl State {
                                 kind,
                                 is_global: *is_global,
                                 in_macro: token.macro_call_id.is_some(),
-                                location: Location {
-                                    uri: Url::from_file_path(&file.path).unwrap(),
-                                    range: Range {
-                                        start: Position {
-                                            line: line as u32,
-                                            character: col as u32
-                                        },
-                                        end: Position {
-                                            line: if eline > line {
-                                                (eline + 1) as u32
-
-                                            } else {
-                                                eline as u32
-                                            },
-                                            character: ecol as u32
-                                        }
-                                    }
-                                },
+                                location: Self::location_from_file_index(context.files, file_index, start_index, end_index),
                                 name,
                                 width: data_size,
+                                result: None,
                                 value: if data_size == 0 {
-                                    format!("${:0>4x}", address)
-
-                                } else if data_size == 1 {
-                                    format!("${:0>4x} ({} byte)", address, data_size)
+                                    format!("${:0>4X}", address)
 
                                 } else {
-                                    format!("${:0>4x} ({} bytes)", address, data_size)
+                                    format!("${:0>4X} ({} byte)", address, data_size)
                                 },
                                 children,
                                 references
@@ -724,25 +735,68 @@ impl State {
             }
         }
 
+        // Remove any duplicate symbols
+        let mut symbol_locations = HashSet::new();
+        let mut unique_symbols = Vec::new();
+        let mut dupes = 0;
+        for s in symbols {
+            let loc = (
+                s.location.uri.path().to_string(),
+                s.location.range.start.line,
+                s.location.range.start.character,
+                s.location.range.end.line,
+                s.location.range.end.character
+            );
+            if !symbol_locations.contains(&loc) {
+                symbol_locations.insert(loc);
+                unique_symbols.push(s);
+
+            } else {
+                dupes += 1;
+            }
+        }
+        log::info!(&format!("Removed {} duplicate symbols", dupes));
+
         // Sort by Name
-        symbols.sort_by(|a, b| {
+        unique_symbols.sort_by(|a, b| {
             a.name.cmp(&b.name)
         });
 
         // Ignore everything outside of gbc files
-        symbols.into_iter().filter(|s| {
+        unique_symbols.into_iter().filter(|s| {
             s.location.uri.path().ends_with(".gbc")
 
         }).collect()
     }
 
-    fn parse_warnings(symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
-        let mut warnings = Vec::new();
+    fn parse_optimizations(linker: &Linker) -> Optimizations {
+        let context = linker.context();
+        context.optimizations.into_iter().filter(|(inner, _)| {
+            inner.macro_call_id.is_none()
+
+        }).map(|(inner, note)| {
+            (
+                Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index),
+                note.clone()
+            )
+
+        }).collect()
+    }
+
+    fn generate_lints(linker: &Linker, symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
+        let mut lints = Vec::new();
+        let mut constants = Vec::new();
         for symbol in symbols {
 
-            // Ignore Sections, symbols inside macros, symbols prefixed with _ and symbols inside a
+            // Record constants for later use
+            if symbol.kind == SymbolKind::Constant {
+                constants.push(symbol);
+            }
+
+            // Ignore Sections, child labels, symbols inside macros, symbols prefixed with _ and symbols inside a
             // library folder
             if symbol.kind == SymbolKind::Namespace
+                || symbol.kind == SymbolKind::Method
                 || symbol.in_macro
                 || symbol.name.starts_with('_')
                 || symbol.location.uri.path().contains("lib") {
@@ -751,8 +805,8 @@ impl State {
 
             // Unused Symbols
             if symbol.references.is_empty() {
-                warnings.push((symbol.location.uri.clone(), Diagnostic {
-                    message: "Unused".to_string(),
+                lints.push((symbol.location.uri.clone(), Diagnostic {
+                    message: format!("unused {}", symbol.typ()),
                     range: symbol.location.range.clone(),
                     severity: Some(DiagnosticSeverity::Warning),
                     .. Diagnostic::default()
@@ -760,11 +814,10 @@ impl State {
 
             // Symbols unused outside their file
             } else if symbol.is_global {
-                // TODO check if referenced from within a macro OR fix macro reference detection
                 let outer_refs = symbol.references.iter().filter(|r| r.uri != symbol.location.uri).count();
                 if outer_refs == 0 {
-                    warnings.push((symbol.location.uri.clone(), Diagnostic {
-                        message: "Used only in this file".to_string(),
+                    lints.push((symbol.location.uri.clone(), Diagnostic {
+                        message: format!("{} never used outside current file", symbol.typ()),
                         range: symbol.location.range.clone(),
                         severity: Some(DiagnosticSeverity::Warning),
                         .. Diagnostic::default()
@@ -772,7 +825,45 @@ impl State {
                 }
             }
         }
-        warnings
+
+        // Recommend to replace magic number integers with matching constants
+        let context = linker.context();
+        for (_, (inner, value)) in context.integers {
+            let location = Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index);
+
+            // Ignore integers inside macros and inside of a library folder
+            if inner.macro_call_id.is_some() || location.uri.path().contains("lib") {
+                continue;
+            }
+
+            let matching_constants: Vec<&&GBCSymbol> = constants.iter().filter(|symbol|
+                if let Some(ExpressionResult::Integer(v)) = symbol.result {
+                    let p = v.abs() as usize;
+                    if v == *value && !p.is_power_of_two() && (v > 8 || v < 0) && p != 0xFF && p != 0xFFFF && p % 10 != 0 {
+                        // Always consider constants in the local file, for word values also consider global symbols
+                        symbol.location.uri == location.uri || (p > 255 && symbol.is_global)
+
+                    } else {
+                        false
+                    }
+
+                } else {
+                    false
+                }
+
+            ).collect();
+            if !matching_constants.is_empty() {
+                for symbol in matching_constants {
+                    lints.push((location.uri.clone(), Diagnostic {
+                        message: format!("`{}` has the same value", symbol.name),
+                        range: location.range.clone(),
+                        severity: Some(DiagnosticSeverity::Hint),
+                        .. Diagnostic::default()
+                    }));
+                }
+            }
+        }
+        lints
     }
 
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {
@@ -809,12 +900,11 @@ impl State {
         });
     }
 
-    // TODO handle lint warnings as diagnostics
     async fn link(
         client: Arc<Client>,
         link_id: NumberOrString,
         workspace_path: PathBuf,
-        outer_symbols: Arc<Mutex<Option<Vec<GBCSymbol>>>>,
+        outer_symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Optimizations)>>>,
         outer_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
         outer_diagnostic_urls: Arc<Mutex<Vec<Url>>>,
         documents: Arc<Mutex<RefCell<HashMap<String, String>>>>
@@ -838,11 +928,10 @@ impl State {
         let mut compiler = Compiler::new();
         compiler.set_optimize_instructions();
         compiler.set_strip_debug_code();
-        compiler.set_linter_enabled();
 
         // Run linker
         let mut errors: Vec<(Url, Diagnostic)> = Vec::new();
-        let mut warnings: Vec<(Url, Diagnostic)> = Vec::new();
+        let mut lints: Vec<(Url, Diagnostic)> = Vec::new();
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
                 log::info!(&format!("Linked in {}ms", start.elapsed().as_millis()));
@@ -850,10 +939,11 @@ impl State {
 
                 // Generate and store new symbols
                 if let Ok(mut symbols) = outer_symbols.lock() {
-                    let s = Self::parse_symbols(linker);
-                    warnings.append(&mut Self::parse_warnings(&s));
+                    let s = Self::parse_symbols(&linker);
+                    lints.append(&mut Self::generate_lints(&linker, &s));
+                    let optimizations = Self::parse_optimizations(&linker);
                     log::info!(&format!("{} symbol(s)", s.len()));
-                    *symbols = Some(s);
+                    *symbols = Some((s, optimizations));
                 }
             },
             Err(err) => {
@@ -908,8 +998,8 @@ impl State {
         for (uri, err) in errors {
             diagnostics.entry(uri).or_insert_with(Vec::new).push(err);
         }
-        for (uri, warn) in warnings {
-            diagnostics.entry(uri).or_insert_with(Vec::new).push(warn);
+        for (uri, lint) in lints {
+            diagnostics.entry(uri).or_insert_with(Vec::new).push(lint);
         }
         for (uri, diagnostics) in &diagnostics {
             client.send_custom_notification::<PublishDiagnostics>(PublishDiagnosticsParams {

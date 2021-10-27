@@ -4,22 +4,27 @@ use std::collections::VecDeque;
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::expression::{OptionalDataExpression, Expression, ExpressionValue};
+use crate::lexer::InnerToken;
 use super::section::entry::{EntryData, SectionEntry};
+use crate::expression::{OptionalDataExpression, Expression, ExpressionValue};
 use super::util::instruction;
 
 
-// Low Level Instruction Optimizer --------------------------------------------
-pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, strip_debug: bool) -> bool {
+// Types ----------------------------------------------------------------------
+pub type OptimizerNotes = Vec<(InnerToken, String)>;
 
-    fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(u16, i32, &OptionalDataExpression, &[u8])> {
+
+// Low Level Instruction Optimizer --------------------------------------------
+pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut OptimizerNotes, strip_debug: bool) -> bool {
+
+    fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)> {
         if let Some(entry) = entries.get(i) {
             if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
                 if volatile {
                     None
 
                 } else {
-                    Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes))
+                    Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes, &entry.inner))
                 }
 
             } else {
@@ -37,14 +42,16 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, strip_debug: bo
     let mut optimized_entries = VecDeque::new();
     let mut optimized_length = 0;
     while i < entries.len() {
-        if let Some((op_code, offset, expression, bytes)) = get_instruction(&entries, i) {
+        if let Some((op_code, offset, expression, bytes, inner)) = get_instruction(&entries, i) {
             let b = get_instruction(&entries, i + 1);
             let c = get_instruction(&entries, i + 2);
             if let Some((remove_count, new_entries)) = optimize_instructions(
+                notes,
                 op_code,
                 offset,
                 expression,
                 bytes,
+                inner,
                 b,
                 c,
                 strip_debug
@@ -123,16 +130,17 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, strip_debug: bo
     } else {
         false
     }
-
 }
 
 fn optimize_instructions(
+    notes: &mut OptimizerNotes,
     op_code: u16,
     end_of_instruction: i32,
     expression: &OptionalDataExpression,
     bytes: &[u8],
-    b: Option<(u16, i32, &OptionalDataExpression, &[u8])>,
-    c: Option<(u16, i32, &OptionalDataExpression, &[u8])>,
+    inner: &InnerToken,
+    b: Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)>,
+    c: Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)>,
     strip_debug: bool
 
 ) -> Option<(usize, Vec<EntryData>)> {
@@ -144,11 +152,13 @@ fn optimize_instructions(
         // ld h,h
         // ld l,l
         (0x7F, _, _) | (0x49, _, _) | (0x52, _, _) | (0x5B, _, _) | (0x64, _, _)  | (0x6D, _, _) => {
+            notes.push((inner.clone(), "removed".to_string()));
             Some((0, vec![]))
         },
 
         // ld b,b
         (0x40, _, _) if strip_debug => {
+            notes.push((inner.clone(), "stripped".to_string()));
             Some((0, vec![]))
         },
 
@@ -156,7 +166,7 @@ fn optimize_instructions(
         // ld [hl],a
         // ->
         // ld [hl],d8
-        (0x3E, Some((0x77, _, _, _)), _) => {
+        (0x3E, Some((0x77, _, _, _, _)), _) => {
             Some((1, vec![EntryData::Instruction {
                 op_code: 0x36,
                 expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(bytes[1])))),
@@ -201,6 +211,7 @@ fn optimize_instructions(
         //
         // -> save 1 byte and 3 T-states
         (0x3E, _, _) if bytes[1] == 0x00 => {
+            notes.push((inner.clone(), "xor a".to_string()));
             Some((0, vec![EntryData::Instruction {
                 op_code: 175,
                 expression: None,
@@ -214,6 +225,7 @@ fn optimize_instructions(
         //
         // save 1 byte and 3 T-states
         (0xFE , _, _) if bytes[1] == 0x00 => {
+            notes.push((inner.clone(), "or a".to_string()));
             Some((0, vec![EntryData::Instruction {
                 op_code: 183,
                 expression: None,
@@ -258,7 +270,7 @@ fn optimize_instructions(
         // We only want jp's without that are not followed by a nop to
         // avoid messing with potential jump tables
         (0xC3, None, _) |
-        (0xC3, Some((0x01..=512, _, _, _)), _) => {
+        (0xC3, Some((0x01..=512, _, _, _, _)), _) => {
             let address = i32::from(bytes[1]) | (i32::from(bytes[2]) << 8);
             let relative = address - end_of_instruction;
 
@@ -266,6 +278,8 @@ fn optimize_instructions(
             // to reach the full jump range when the target is at a fixed distance
             // due to a rom section boundray
             if relative > -128 && relative < 127 {
+                notes.push((inner.clone(), "jr".to_string()));
+
                 // Without flags
                 if op_code == 0xC3 {
                     Some((0, vec![EntryData::Instruction {
@@ -297,6 +311,7 @@ fn optimize_instructions(
         // label:
         (0x18, _, _) => {
             if bytes[1] == 0 {
+                notes.push((inner.clone(), "removed".to_string()));
                 Some((0, vec![]))
 
             } else {
@@ -310,7 +325,8 @@ fn optimize_instructions(
         // jp   LABEL
         //
         // save 1 byte and 17 T-states
-        (0xCD, Some((0xC9, _, _, _)), _) => {
+        (0xCD, Some((0xC9, _, _, _, _)), _) => {
+            notes.push((inner.clone(), "jp".to_string()));
             Some((1, vec![EntryData::Instruction {
                 op_code: 0xC3,
                 expression: expression.clone(),
@@ -330,7 +346,7 @@ fn optimize_instructions(
         // and %0001_1111
         //
         // save 1 byte and 5 T-states
-        (319, Some((319, _, _, _)), Some((319, _, _, _))) => {
+        (319, Some((319, _, _, _, _)), Some((319, _, _, _, _))) => {
             Some((2, vec![
                 EntryData::Instruction {
                     op_code: 0x0F,

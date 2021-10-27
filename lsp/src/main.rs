@@ -20,6 +20,7 @@ use self::state::State;
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum InlayKind {
     TypeHint,
+    OptimizerHint,
     ParameterHint,
     ChainingHint,
 }

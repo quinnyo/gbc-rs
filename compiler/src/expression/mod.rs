@@ -108,7 +108,6 @@ impl Expression {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ExpressionValue {
     ConstantValue(InnerToken, Symbol),
-    LintInteger(InnerToken, i32),
     Integer(i32),
     Float(OrderedFloat<f32>),
     String(String),
@@ -121,7 +120,7 @@ impl ExpressionValue {
 
     fn is_constant(&self) -> bool {
         match self {
-            ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::LintInteger(_, _) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
+            ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
             ExpressionValue::OffsetAddress(_, _) | ExpressionValue::ParentLabelAddress(_, _) | ExpressionValue::ChildLabelAddress(_, _) => false
         }
     }
@@ -147,9 +146,14 @@ impl ExpressionResult {
 
     pub fn to_string(&self) -> String {
         match self {
-            ExpressionResult::Integer(i) => format!("{} (Integer)", i),
-            ExpressionResult::Float(f) => format!("{:.2} (Float)", f),
-            ExpressionResult::String(s) => format!("{:?} (String)", s)
+            ExpressionResult::Integer(i) => if *i <= 255 {
+                format!("{}", i)
+
+            } else {
+                format!("${:0>4X}", i)
+            },
+            ExpressionResult::Float(f) => format!("{:.2}", f),
+            ExpressionResult::String(s) => format!("{:?}", s)
         }
     }
 

@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::mem;
+use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
@@ -17,6 +18,8 @@ use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
 
 
 // Types ----------------------------------------------------------------------
+pub type IntegerMap = HashMap<(usize, usize, usize), (InnerToken, i32)>;
+
 #[derive(Copy, Clone, PartialEq)]
 enum ArgumentType {
     None,
@@ -55,7 +58,11 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
 });
 
 impl ExpressionToken {
-    fn try_from(token: ValueToken, linter_enabled: bool) -> Result<ExpressionToken, SourceError> {
+    fn try_from(
+        token: ValueToken,
+        integers: &mut IntegerMap
+
+    ) -> Result<ExpressionToken, SourceError> {
         match token {
             ValueToken::Segment(inner) => Ok(ExpressionToken::Segment(inner)),
             ValueToken::Reserved(inner) => Ok(ExpressionToken::Reserved(inner)),
@@ -79,7 +86,7 @@ impl ExpressionToken {
                 let mut expr_branches = Vec::with_capacity(branches.len());
                 for branch in branches {
                     expr_branches.push(branch.into_other(|tokens| {
-                        ExpressionStage::parse_expression(tokens, ArgumentType::None, linter_enabled)
+                        ExpressionStage::parse_expression(tokens, ArgumentType::None, integers)
                     })?);
                 }
                 Ok(ExpressionToken::IfStatement(
@@ -97,15 +104,15 @@ impl ExpressionToken {
 
                 Ok(ExpressionToken::ForStatement(inner, ForStatement {
                     binding,
-                    from: ExpressionStage::parse_expression(for_statement.from, ArgumentType::None, linter_enabled)?,
-                    to: ExpressionStage::parse_expression(for_statement.to, ArgumentType::None, linter_enabled)?,
-                    body: ExpressionStage::parse_expression(for_statement.body, ArgumentType::None, linter_enabled)?
+                    from: ExpressionStage::parse_expression(for_statement.from, ArgumentType::None, integers)?,
+                    to: ExpressionStage::parse_expression(for_statement.to, ArgumentType::None, integers)?,
+                    body: ExpressionStage::parse_expression(for_statement.body, ArgumentType::None, integers)?
                 }))
             },
             ValueToken::BlockStatement(inner, block) => {
                 Ok(ExpressionToken::BlockStatement(inner, match block {
-                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, ArgumentType::None, linter_enabled)?),
-                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, ArgumentType::None, linter_enabled)?)
+                    BlockStatement::Using(cmd, body) => BlockStatement::Using(cmd, ExpressionStage::parse_expression(body, ArgumentType::None, integers)?),
+                    BlockStatement::Volatile(body) => BlockStatement::Volatile(ExpressionStage::parse_expression(body, ArgumentType::None, integers)?)
                 }))
             },
             token => Err(token.error(
@@ -122,16 +129,17 @@ impl LexerStage for ExpressionStage {
 
     type Input = ValueStage;
     type Output = ExpressionToken;
-    type Data = ();
+    type Data = IntegerMap;
 
     fn from_tokens(
         tokens: Vec<<Self::Input as LexerStage>::Output>,
         _macro_calls: &mut Vec<MacroCall>,
-        _data: &mut Vec<Self::Data>,
-        linter_enabled: bool
+        data: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
-        let parsed_tokens = Self::parse_expression(tokens, ArgumentType::None, linter_enabled)?;
+        let mut integers: IntegerMap = HashMap::with_capacity(1024);
+        let parsed_tokens = Self::parse_expression(tokens, ArgumentType::None, &mut integers)?;
+        data.push(integers);
         Ok(parsed_tokens)
     }
 
@@ -142,7 +150,7 @@ impl ExpressionStage {
     fn parse_expression(
         tokens: Vec<ValueToken>,
         argument_type: ArgumentType,
-        linter_enabled: bool
+        integers: &mut IntegerMap
 
     ) -> Result<Vec<ExpressionToken>, SourceError> {
         let mut expression_tokens = Vec::with_capacity(tokens.len());
@@ -164,7 +172,7 @@ impl ExpressionStage {
                 return Err(token.error("Incomplete GLOBAL declaration, expected a CONST keyword before name.".to_string()));
 
             } else {
-                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, argument_type, linter_enabled)?);
+                expression_tokens.push(Self::parse_expression_tokens(&mut tokens, token, argument_type, integers)?);
             }
         }
         Ok(expression_tokens)
@@ -195,7 +203,7 @@ impl ExpressionStage {
         tokens: &mut TokenIterator<ValueToken>,
         token: ValueToken,
         argument_type: ArgumentType,
-        linter_enabled: bool
+        integers: &mut IntegerMap
 
     ) -> Result<ExpressionToken, SourceError> {
         // Check for start of expression
@@ -231,7 +239,7 @@ impl ExpressionStage {
             }
 
             // Try to build an expression tree from the tokens
-            let expr = ExpressionParser::parse_tokens(value_tokens, linter_enabled)?;
+            let expr = ExpressionParser::parse_tokens(value_tokens, integers)?;
             if expr.is_constant() {
                 Ok(ExpressionToken::ConstExpression(inner, expr))
 
@@ -242,12 +250,12 @@ impl ExpressionStage {
         // LabelCalls must be standlone and cannot be part of other expressions
         } else if current_typ == ValueTokenType::ParentLabelCall {
             let inner = token.inner().clone();
-            let expr = ExpressionParser::parse_tokens(vec![token], linter_enabled)?;
+            let expr = ExpressionParser::parse_tokens(vec![token], integers)?;
             Ok(ExpressionToken::Expression(inner, expr))
 
         } else if argument_type == ArgumentType::None {
             // Forward all non-expression tokens
-            ExpressionToken::try_from(token, linter_enabled)
+            ExpressionToken::try_from(token, integers)
 
         // Registers in LabelCalls
         } else if argument_type == ArgumentType::ParentLabelCall && current_typ == ValueTokenType::Register {
@@ -261,7 +269,7 @@ impl ExpressionStage {
         // Memory Locations in LabelCalls
         } else if argument_type == ArgumentType::ParentLabelCall && current_typ == ValueTokenType::OpenBracket {
             let token = tokens.get("while parsing memory location argument")?;
-            let expr = Self::parse_expression_tokens(tokens, token, ArgumentType::None, linter_enabled)?;
+            let expr = Self::parse_expression_tokens(tokens, token, ArgumentType::None, integers)?;
             tokens.expect(ValueTokenType::CloseBracket, None, "while parsing memory location argument")?;
             if let ExpressionToken::ConstExpression(inner, expr) | ExpressionToken::Expression(inner, expr) = expr {
                 Ok(ExpressionToken::Expression(inner.clone(), Expression::MemoryArgument {
@@ -280,8 +288,13 @@ impl ExpressionStage {
         }
     }
 
-    fn parse_expression_argument(tokens: Vec<ValueToken>, argument_type: ArgumentType, linter_enabled: bool) -> Result<Expression, SourceError> {
-        let mut expression_tokens = Self::parse_expression(tokens, argument_type, linter_enabled)?;
+    fn parse_expression_argument(
+        tokens: Vec<ValueToken>,
+        argument_type: ArgumentType,
+        integers: &mut IntegerMap
+
+    ) -> Result<Expression, SourceError> {
+        let mut expression_tokens = Self::parse_expression(tokens, argument_type, integers)?;
         if expression_tokens.len() > 1 {
             return Err(expression_tokens[1].error("Unexpected expression after argument.".to_string()));
         }
@@ -301,34 +314,41 @@ struct ExpressionParser {
     token: Option<ValueToken>,
     tokens: TokenIterator<ValueToken>,
     last_file_index: usize,
-    last_index: usize,
-    linter_support: bool
+    last_index: usize
 }
 
 impl ExpressionParser {
 
-    fn parse_tokens(tokens: Vec<ValueToken>, linter_support: bool) -> Result<Expression, SourceError> {
-        ExpressionParser::new(tokens, linter_support)?.parse_binary(0)
+    fn parse_tokens(
+        tokens: Vec<ValueToken>,
+        integers: &mut IntegerMap
+
+    ) -> Result<Expression, SourceError> {
+        ExpressionParser::new(tokens)?.parse_binary(0, integers)
     }
 
-    fn new(tokens: Vec<ValueToken>, linter_support: bool) -> Result<ExpressionParser, SourceError> {
+    fn new(tokens: Vec<ValueToken>) -> Result<ExpressionParser, SourceError> {
         let mut tokens = TokenIterator::new(tokens);
         let first = tokens.next();
         let mut parser = Self {
             token: None,
             tokens,
             last_file_index: 0,
-            last_index: 0,
-            linter_support
+            last_index: 0
         };
         parser.update(first);
         Ok(parser)
     }
 
-    fn parse_binary(&mut self, prec: usize) -> Result<Expression, SourceError> {
+    fn parse_binary(
+        &mut self,
+        prec: usize,
+        integers: &mut IntegerMap
+
+    ) -> Result<Expression, SourceError> {
 
         // Every potential binary expression starts with one unary
-        let mut left = self.parse_unary()?;
+        let mut left = self.parse_unary(integers)?;
 
         // Now we collect additional binary operators on the right as long as their
         // precedence is higher then the initial one
@@ -336,7 +356,7 @@ impl ExpressionParser {
             let op = self.assert_typ(ValueTokenType::Operator, "Unexpected end of expression after binary operator, expected a right-hand side value.")?;
             if let ValueToken::Operator { inner, typ } = op {
 
-                let right = self.parse_binary(typ.precedence() + typ.associativity())?;
+                let right = self.parse_binary(typ.precedence() + typ.associativity(), integers)?;
 
                 // Combine to a new left-hand side expression
                 left = Expression::Binary {
@@ -386,13 +406,17 @@ impl ExpressionParser {
         mem::replace(&mut self.token, token)
     }
 
-    fn parse_unary(&mut self) -> Result<Expression, SourceError> {
+    fn parse_unary(
+        &mut self,
+        integers: &mut IntegerMap
+
+    ) -> Result<Expression, SourceError> {
 
         // Parse unary operator and combine with it's right hand side value
         if self.is_unary() {
             let op = self.expect("Unexpected end of expression after unary operator, expected a right-hand side value.")?;
             if let ValueToken::Operator { inner, typ } = op {
-                let right = self.parse_binary(typ.precedence())?;
+                let right = self.parse_binary(typ.precedence(), integers)?;
                 Ok(Expression::Unary {
                     op: typ,
                     inner,
@@ -406,7 +430,7 @@ impl ExpressionParser {
         // Handle parenthesis
         } else if self.is_paren() {
             let _paren = self.expect("Unexpected end of expression after opening parenthesis, expected an inner expression.")?;
-            let left = self.parse_binary(0)?;
+            let left = self.parse_binary(0, integers)?;
             let _paren = self.assert_typ(ValueTokenType::CloseParen, "Expected a closing parenthesis after end of inner expression.")?;
             Ok(left)
 
@@ -423,14 +447,12 @@ impl ExpressionParser {
                 Some(ValueToken::Float { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::Float(value)),
                 ),
-                Some(ValueToken::Integer { inner, value }) => Ok(
-                    if self.linter_support {
-                        Expression::Value(ExpressionValue::LintInteger(inner, value))
-
-                    } else {
-                        Expression::Value(ExpressionValue::Integer(value))
-                    }
-                ),
+                Some(ValueToken::Integer { value, .. }) => {
+                    // TODO we need to be able to reference the constant in order to not
+                    // create hints about a constant being able to replace its own value
+                    // integers.insert((inner.file_index, inner.start_index, inner.end_index), (inner, value));
+                    Ok(Expression::Value(ExpressionValue::Integer(value)))
+                },
                 Some(ValueToken::String { value, .. }) => Ok(
                     Expression::Value(ExpressionValue::String(value)),
                 ),
@@ -443,7 +465,7 @@ impl ExpressionParser {
                 Some(ValueToken::BuiltinCall(inner, arguments)) => {
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
-                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::BuiltinCall, self.linter_support)?);
+                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::BuiltinCall, integers)?);
                     }
                     Ok(Expression::BuiltinCall {
                         name: inner.value.clone(),
@@ -454,7 +476,7 @@ impl ExpressionParser {
                 Some(ValueToken::ParentLabelCall(inner, id, Some(arguments))) => {
                     let mut args = Vec::with_capacity(arguments.len());
                     for tokens in arguments {
-                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::ParentLabelCall, self.linter_support)?);
+                        args.push(ExpressionStage::parse_expression_argument(tokens, ArgumentType::ParentLabelCall, integers)?);
                     }
                     Ok(Expression::ParentLabelCall {
                         name: inner.value.clone(),
@@ -546,13 +568,13 @@ mod test {
 
     #[track_caller]
     fn expr_lexer<S: Into<String>>(s: S) -> Lexer<ExpressionStage> {
-        Lexer::<ExpressionStage>::from_lexer(value_lex(s), false).expect("ExpressionLexer failed")
+        Lexer::<ExpressionStage>::from_lexer(value_lex(s)).expect("ExpressionLexer failed")
     }
 
     #[track_caller]
     fn expr_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        Lexer::<ExpressionStage>::from_lexer(value_lex(s), false).err().unwrap().to_string()
+        Lexer::<ExpressionStage>::from_lexer(value_lex(s)).err().unwrap().to_string()
     }
 
     fn tfe<S: Into<String>>(s: S) -> Vec<ExpressionToken> {

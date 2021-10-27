@@ -10,7 +10,7 @@ use ordered_float::OrderedFloat;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
-use crate::lexer::{InnerToken, Symbol, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
+use crate::lexer::{InnerToken, Symbol, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX, IntegerMap};
 use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionResult, OptionalDataExpression, Operator};
 
 
@@ -30,19 +30,17 @@ pub struct UsageInformation {
     pub constants: HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
     pub labels: HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
     pub expressions: HashMap<(FileIndex, usize), ExpressionResult>,
-    magic_constants: Vec<(ConstantIndex, InnerToken, i32)>,
-    magic_numbers: Vec<(InnerToken, i32)>
+    pub integers: HashMap<(usize, usize, usize), (InnerToken, i32)>
 }
 
 impl UsageInformation {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new(integers: IntegerMap) -> Self {
         Self {
             constants: HashMap::with_capacity(512),
             labels: HashMap::with_capacity(512),
             expressions: HashMap::with_capacity(1024),
-            magic_constants: Vec::with_capacity(512),
-            magic_numbers: Vec::with_capacity(512)
+            integers
         }
     }
 
@@ -79,14 +77,13 @@ pub struct EvaluatorContext {
     pub raw_labels: HashMap<(Symbol, usize, bool), InnerToken>,
     callable_labels: HashMap<usize, (InnerToken, Option<Vec<Register>>)>,
     inactive_labels: HashMap<usize, InnerToken>,
-    relative_address_offset: i32,
-    linter_enabled: bool
+    relative_address_offset: i32
 }
 
 impl EvaluatorContext {
 
     #[allow(clippy::new_without_default)]
-    pub fn new(linter_enabled: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             constants: HashMap::with_capacity(512),
             raw_constants: HashMap::with_capacity(512),
@@ -94,104 +91,8 @@ impl EvaluatorContext {
             raw_labels: HashMap::with_capacity(1024),
             callable_labels: HashMap::with_capacity(128),
             inactive_labels: HashMap::with_capacity(128),
-            relative_address_offset: 0,
-            linter_enabled
+            relative_address_offset: 0
         }
-    }
-
-    pub fn find_unused(&self, usage: &UsageInformation) -> Vec<(usize, Symbol, SourceError)> {
-        let mut locations = Vec::new();
-        for (index, c) in &self.raw_constants {
-            if let Some(files) = usage.constants.get(index) {
-                // Warn when non-default, global constants are only used in their file of
-                // declaration
-                // TODO must check if ANY reference is default instead of only this one
-                if !c.is_default && index.1.is_none() && files.len() == 1 {
-                    if files.iter().next().unwrap().0 == c.inner.file_index {
-                        locations.push((
-                            3,
-                            c.inner.value.clone(),
-                            c.inner.error(
-                                format!("Constant \"{}\" should be made non-global or default, since it is never used outside its declaration", c.inner.value)
-                            )
-                        ));
-
-                    } else if let Some((file, _, _)) = files.iter().nth(0) {
-                        locations.push((
-                            4,
-                            c.inner.value.clone(),
-                            c.inner.error(
-                                format!("Constant \"{}\" should be moved to another file, since it is never used at its declaration", c.inner.value)
-
-                            ).with_file(*file, "Constant is only used")
-                        ));
-                    }
-                }
-
-            } else {
-                locations.push((
-                    0,
-                    c.inner.value.clone(),
-                    c.inner.error(
-                        format!("Constant \"{}\" is never used, declared", c.inner.value)
-                    )
-                ));
-            }
-        }
-        for ((_, index, is_global), l) in &self.raw_labels {
-            if let Some(used_in_files) = usage.labels.get(index) {
-                if used_in_files.len() == 1 && used_in_files.iter().next().unwrap().0 == l.file_index && *is_global {
-                    locations.push((
-                        1,
-                        l.value.clone(),
-                        l.error(format!("Label \"{}\" should not be global, since it is never used outside its declaration", l.value))
-                    ));
-                }
-
-            } else {
-                locations.push((
-                    1,
-                    l.value.clone(),
-                    l.error(format!("Label \"{}\" is never referenced, declared", l.value))
-                ));
-            }
-        }
-        locations
-    }
-
-    pub fn find_magic_numbers(&self, usage: &UsageInformation) -> Vec<(usize, Symbol, SourceError)> {
-        let mut locations = Vec::new();
-        let mut seen = HashSet::new();
-        for (constant_index, integer_token, value) in &usage.magic_constants {
-            let id = (integer_token.file_index, integer_token.start_index);
-            if !seen.contains(&id) {
-                seen.insert(id);
-                locations.push((
-                    2,
-                    integer_token.value.clone(),
-                    integer_token.error(format!(
-                        "Fixed integer value (${:0>4x}) could be replaced with the constant \"{}\" that shares the same value",
-                        value,
-                        constant_index.0
-                    ))
-                ));
-            }
-        }
-        for (integer_token, value) in &usage.magic_numbers {
-            let id = (integer_token.file_index, integer_token.start_index);
-            if !seen.contains(&id) {
-                seen.insert(id);
-                locations.push((
-                    2,
-                    integer_token.value.clone(),
-                    integer_token.error(format!(
-                        "Fixed integer value (${:0>4x}) should be replaced with a constant",
-                        value
-                    ))
-                ));
-            }
-        }
-        locations
     }
 
     pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, is_private: bool, value: DataExpression) {
@@ -254,7 +155,7 @@ impl EvaluatorContext {
 
         for name in names {
             // Keep track of other constants used in the current constant's expression
-            let mut usage = UsageInformation::new();
+            let mut usage = UsageInformation::new(HashMap::new());
             let constant = self.raw_constants[&name].clone();
             let stack = vec![&name.0];
             let c = self.inner_const_resolve(
@@ -334,10 +235,7 @@ impl EvaluatorContext {
         if let Expression::ParentLabelCall { inner, id, args, .. } = expression {
             if let Some((outer, signature)) = self.callable_labels.get(id) {
 
-                if self.linter_enabled {
-                    usage.use_label(*id, inner);
-                }
-
+                usage.use_label(*id, inner);
                 if let Some(signature) = signature {
                     if signature.len() != args.len() {
                         Err(outer.error(
@@ -417,27 +315,22 @@ impl EvaluatorContext {
 
                         // Local Lookup
                         if let Some(value) = self.constants.get(&local_index) {
-                            if self.linter_enabled {
-                                usage.merge(&value.1);
-                                usage.use_constant(local_index, outer);
-                            }
+                            usage.merge(&value.1);
+                            usage.use_constant(local_index, inner);
                             value.0.clone()
 
                         // Global Lookup
                         } else if let Some(value) = self.constants.get(&global_index) {
-                            if self.linter_enabled {
-                                usage.merge(&value.1);
-                                usage.use_constant(global_index, outer);
-                            }
+                            usage.merge(&value.1);
+                            usage.use_constant(global_index, inner);
                             value.0.clone()
 
                         } else {
                             return Err(self.undeclared_const_error(inner, name));
                         }
                     },
-                    ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
-                    ExpressionValue::LintInteger(inner, i) => {
-                        self.lint_integer(usage, inner, *i);
+                    ExpressionValue::Integer(i) => {
+                        // usage.use_integer(*i, inner); TODO get from expression stage instead
                         ExpressionResult::Integer(*i)
                     },
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
@@ -446,28 +339,25 @@ impl EvaluatorContext {
                         let relative_address_offset = address_offset.expect("Address offset without supplied base address");
                         ExpressionResult::Integer(relative_address_offset + offset)
                     },
-                    ExpressionValue::ParentLabelAddress(outer, id) | ExpressionValue::ChildLabelAddress(outer, id) => {
-                        if self.linter_enabled {
-                            usage.use_label(*id, outer);
-                        }
-
-                        if let Some((inner, _)) = self.callable_labels.get(id) {
+                    ExpressionValue::ParentLabelAddress(inner, id) | ExpressionValue::ChildLabelAddress(inner, id) => {
+                        usage.use_label(*id, inner);
+                        if let Some((call_only, _)) = self.callable_labels.get(id) {
                             if is_call_instruction {
-                                return Err(outer.error(
+                                return Err(inner.error(
                                     "Reference to call-only label".to_string()
 
-                                ).with_reference(inner, "Label is declared as callable and must be invoked with arguments".to_string()));
+                                ).with_reference(call_only, "Label is declared as callable and must be invoked with arguments".to_string()));
                             }
                         }
 
                         if let Some(addr) = self.label_addresses.get(id) {
                             ExpressionResult::Integer(*addr as i32)
 
-                        } else if let Some(inner) = self.inactive_labels.get(id) {
-                            return Err(outer.error(
+                        } else if let Some(inactive) = self.inactive_labels.get(id) {
+                            return Err(inner.error(
                                 "Reference to unreachable label".to_string()
 
-                            ).with_reference(inner, "Label is declared inside currently inactive IF branch".to_string()));
+                            ).with_reference(inactive, "Label is declared inside currently inactive IF branch".to_string()));
 
                         } else {
                             panic!("Invalid label ID when resolving expression!");
@@ -551,18 +441,14 @@ impl EvaluatorContext {
 
                         // Local Lookup
                         if let Some(result) = self.constants.get(&local_index) {
-                            if self.linter_enabled {
-                                usage.merge(&result.1);
-                                usage.use_constant(local_index, outer);
-                            }
+                            usage.merge(&result.1);
+                            usage.use_constant(local_index, parent);
                             result.0.clone()
 
                         // Global Lookup
                         } else if let Some(result) = self.constants.get(&global_index) {
-                            if self.linter_enabled {
-                                usage.merge(&result.1);
-                                usage.use_constant(global_index, outer);
-                            }
+                            usage.merge(&result.1);
+                            usage.use_constant(global_index, parent);
                             result.0.clone()
 
                         // Local Declaration
@@ -595,9 +481,8 @@ impl EvaluatorContext {
                             return Err(self.undeclared_const_error(parent, name));
                         }
                     },
-                    ExpressionValue::Integer(i) => ExpressionResult::Integer(*i),
-                    ExpressionValue::LintInteger(inner, i) => {
-                        self.lint_integer(usage, inner, *i);
+                    ExpressionValue::Integer(i) => {
+                        // usage.use_integer(*i, inner); TODO get from expression stage instead
                         ExpressionResult::Integer(*i)
                     },
                     ExpressionValue::Float(f) => ExpressionResult::Float(*f),
@@ -629,25 +514,6 @@ impl EvaluatorContext {
                 unreachable!("Invalid constant expression containing ParentLabelCall");
             },
             _ => unreachable!()
-        }
-    }
-
-    fn lint_integer(&self, usage: &mut UsageInformation, inner: &InnerToken, i: i32) {
-        for (index, (result, _)) in &self.constants {
-            if let ExpressionResult::Integer(v) = result {
-                if i == *v && i > 255 {
-                    usage.magic_constants.push((
-                        index.clone(),
-                        inner.clone(),
-                        *v
-                    ));
-                    return;
-                }
-            }
-        }
-
-        if i > 8 && i != 0xFF {
-            usage.magic_numbers.push((inner.clone(), i));
         }
     }
 
@@ -688,7 +554,7 @@ impl EvaluatorContext {
         } else {
 
             // Keep track of other constants used in the current constant's expression
-            let mut constant_usage = UsageInformation::new();
+            let mut constant_usage = UsageInformation::new(HashMap::new());
 
             // Resolve constants that are not yet evaluated
             let mut child_stack = constant_stack.to_vec();
@@ -699,10 +565,8 @@ impl EvaluatorContext {
                 &mut constant_usage,
                 inner
             )?;
-            if self.linter_enabled {
-                usage.merge(&constant_usage);
-                usage.use_constant(declare_index.clone(), outer);
-            }
+            usage.merge(&constant_usage);
+            usage.use_constant(declare_index.clone(), outer);
             self.constants.insert(declare_index, (value.clone(), constant_usage));
             Ok(value)
         }
@@ -1167,6 +1031,7 @@ fn i2b(i: i32) -> bool {
 // Tests ----------------------------------------------------------------------
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use ordered_float::OrderedFloat;
     use crate::mocks::expr_lex;
     use crate::error::SourceError;
@@ -1184,8 +1049,8 @@ mod test {
     fn const_expression_result<S: Into<String>>(s: S) -> Result<ExpressionResult, SourceError> {
         let token = &expr_lex(s).tokens[0];
         if let ExpressionToken::ConstExpression(_, ref expr) = token {
-            let mut context = EvaluatorContext::new(false);
-            let mut usage = UsageInformation::new();
+            let mut context = EvaluatorContext::new();
+            let mut usage = UsageInformation::new(HashMap::new());
             let stack = Vec::new();
             let inner = InnerToken {
                 file_index: 0,

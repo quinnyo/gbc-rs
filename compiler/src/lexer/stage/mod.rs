@@ -37,8 +37,7 @@ pub trait LexerStage {
     fn from_tokens(
         _: Vec<<Self::Input as LexerStage>::Output>,
         _: &mut Vec<MacroCall>,
-        _: &mut Vec<Self::Data>,
-        _: bool
+        _: &mut Vec<Self::Data>
 
     ) -> Result<Vec<Self::Output>, SourceError> {
         Ok(Vec::new())
