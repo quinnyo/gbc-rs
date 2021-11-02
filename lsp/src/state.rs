@@ -28,6 +28,7 @@ use project::{ProjectConfig, ProjectReader};
 use compiler::{
     compiler::Compiler,
     lexer::{
+        MacroCall,
         stage::include::{IncludeStage, IncludeToken},
         LexerToken,
         LexerFile
@@ -69,6 +70,15 @@ pub struct InlayHintsParams {}
 
 type Optimizations = Vec<(Location, String)>;
 
+
+#[derive(Debug, Clone)]
+pub struct MacroExpansion {
+    name: String,
+    location: Location,
+    children: usize,
+    size: usize
+}
+
 #[derive(Debug, Clone)]
 pub struct GBCSymbol {
     pub kind: SymbolKind,
@@ -87,6 +97,7 @@ impl GBCSymbol {
     fn typ(&self) -> &str {
         match self.kind {
             SymbolKind::Constant => "constant",
+            SymbolKind::Constructor => "macro",
             SymbolKind::Function => "label",
             SymbolKind::Variable => "variable",
             SymbolKind::Field => "label",
@@ -115,6 +126,7 @@ impl GBCSymbol {
             selection_range: self.location.range,
             detail: Some(match self.kind {
                 SymbolKind::Constant => format!("= {}", self.value),
+                SymbolKind::Constructor => format!("MACRO{}", self.value),
                 SymbolKind::Function => format!("@ {}", self.value),
                 SymbolKind::Variable => format!("@ {}", self.value),
                 SymbolKind::Field => format!("@ {}", self.value),
@@ -132,7 +144,7 @@ pub struct State {
     documents: Arc<Mutex<RefCell<HashMap<String, String>>>>,
     tokens: Mutex<RefCell<HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>>>,
     workspace_path: Arc<Mutex<Option<PathBuf>>>,
-    symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Optimizations)>>>,
+    symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
     diagnostic_urls: Arc<Mutex<Vec<Url>>>,
     link_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
     link_gen: Arc<AtomicUsize>
@@ -254,6 +266,12 @@ impl State {
                 detail: Some(format!("= {}", symbol.value)),
                 .. CompletionItem::default()
             }),
+            SymbolKind::Constructor => Some(CompletionItem {
+                label: symbol.name,
+                kind: Some(CompletionItemKind::Constructor),
+                detail: Some(format!("MACRO{}", symbol.value)),
+                .. CompletionItem::default()
+            }),
             SymbolKind::Function => Some(CompletionItem {
                 label: symbol.name,
                 kind: Some(CompletionItemKind::Function),
@@ -298,7 +316,7 @@ impl State {
         };
 
         let uri = Url::from_file_path(current_file.clone()).ok();
-        let (symbols, optimizations) = self.get_symbols(current_file).await;
+        let (symbols, expansions, optimizations) = self.get_symbols(current_file).await;
         let mut hints: Vec<InlayHint> = symbols.into_iter().filter(|symbol| {
             // Hint if the symbol is from the current file
             Some(&symbol.location.uri) == uri.as_ref()
@@ -320,6 +338,14 @@ impl State {
             SymbolKind::Constant => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                range: Range {
+                    start: symbol.location.range.start,
+                    end: symbol.location.range.start
+                }
+            }),
+            SymbolKind::Constructor => Some(InlayHint {
+                kind: InlayKind::TypeHint,
+                label: format!("MACRO{} ({} calls)", symbol.value, symbol.references.len()),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
@@ -353,6 +379,36 @@ impl State {
 
         }).collect();
 
+        // Macro expansions
+        hints.append(&mut expansions.into_iter().filter(|exp| {
+            // Hint if the expression is from the current file
+            Some(&exp.location.uri) == uri.as_ref()
+
+        }).filter(|exp| {
+            // Don't generate hints for lines after the current error as they'll be
+            // cached and potentially incorrect
+            exp.location.range.start.line < first_error_line as u32
+
+        }).map(|exp| {
+            InlayHint {
+                kind: InlayKind::OptimizerHint,
+                label: if exp.children == 0 {
+                    format!("{} byte (expanded)", exp.size)
+
+                } else if exp.children == 1 {
+                    format!("{} byte ({} sub-expansion)", exp.size, exp.children)
+
+                } else {
+                    format!("{} byte ({} sub-expansions)", exp.size, exp.children)
+                },
+                range: Range {
+                    start: exp.location.range.start,
+                    end: exp.location.range.start
+                }
+            }
+        }).collect());
+
+        // Optimizer results
         hints.append(&mut optimizations.into_iter().filter(|(location, _)| {
             // Hint if the symbol is from the current file
             Some(&location.uri) == uri.as_ref()
@@ -385,6 +441,11 @@ impl State {
                 },
                 SymbolKind::Constant => {
                     Some(format!("CONST {}", symbol.name))
+                },
+                // TODO show expanded tokens, need to record expanded entries (already needed above)
+                // and then be able to to_string() them all again into source code
+                SymbolKind::Constructor => {
+                    Some(format!("MACRO {}{}", symbol.name, symbol.value))
                 },
                 SymbolKind::Function => {
                     Some(format!("{}:", symbol.name))
@@ -489,7 +550,7 @@ impl State {
         (config, reader)
     }
 
-    async fn get_symbols(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Optimizations) {
+    async fn get_symbols(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations) {
         let has_linker = if let Ok(symbols) = self.symbols.lock() {
             symbols.is_some()
 
@@ -508,10 +569,10 @@ impl State {
             ).await;
         }
         if let Ok(symbols) = self.symbols.lock() {
-            symbols.clone().unwrap_or_else(|| (Vec::new(), Vec::new()))
+            symbols.clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
 
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new())
         }
     }
 
@@ -581,7 +642,7 @@ impl State {
         }
     }
 
-    fn parse_symbols(linker: &Linker) -> Vec<GBCSymbol> {
+    fn parse_symbols(linker: &Linker) -> (Vec<GBCSymbol>, Vec<MacroExpansion>) {
         let mut symbols: Vec<GBCSymbol> = Vec::new();
         let context = linker.context();
 
@@ -589,7 +650,7 @@ impl State {
         for (index, constant) in context.constants {
             let token = &constant.inner;
             let name = token.value.to_string();
-            if let Some((result, _)) = context.constant_values.get(index) {
+            if let Some(result) = context.constant_values.get(index) {
                 let references = context.constant_usage.get(index).map(|refs| {
                     refs.iter().map(|(file_index, start_index, macro_call_id)| {
                         Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
@@ -628,10 +689,42 @@ impl State {
             });
         }
 
-        // Variables / Labels
+        // Macros
+        for def in context.macro_defs {
+            // ignore callable labels and only include normal macros
+            if !def.is_label {
+                // TODO also list builtin macros
+                symbols.push(GBCSymbol {
+                    kind: SymbolKind::Constructor,
+                    is_global: def.is_exported,
+                    in_macro: false,
+                    location: Self::location_from_file_index(context.files, def.name.file_index, def.name.start_index, def.name.end_index),
+                    name:  def.name.value.to_string(),
+                    width: 0,
+                    result: None,
+                    value: format!("({})", def.parameters.iter().map(|(_, name)| {
+                        format!("@{}", name.value)
+
+                    }).collect::<Vec<String>>().join(", ")),
+                    children: Vec::new(),
+                    references: context.macro_calls.iter().filter(|call| {
+                        call.name().value == def.name.value
+
+                    }).map(|call| {
+                        let name = call.name();
+                        Self::resolve_reference(&linker, name.file_index, name.start_index, name.macro_call_id, name.value.as_str().len())
+
+                    }).collect()
+                });
+            }
+        }
+
+        let mut macro_call_sizes: HashMap<usize, usize> = HashMap::with_capacity(32);
         let sections = linker.section_entries();
-        for entries in sections {
-            let mut entries = entries.iter().peekable();
+        for entry in sections {
+
+            // Variables / Labels
+            let mut entries = entry.iter().peekable();
             while let Some(entry) = entries.next() {
 
                 let file_index = entry.inner.file_index;
@@ -672,14 +765,22 @@ impl State {
                             symbols.push(label);
                             entries.next();
 
-                        // Collect Data
+                        // Collect Data Storage
                         } else if let EntryData::Data { bytes: Some(b), ..  } = data {
+                            if let Some(id) = inner.macro_call_id {
+                                let e = macro_call_sizes.entry(id).or_insert(0);
+                                *e += b.len();
+                            }
                             kind = SymbolKind::Field;
                             data_size += b.len();
                             entries.next();
 
                         // Variables
                         } else if let EntryData::Data { bytes: None, .. } = data {
+                            if let Some(id) = inner.macro_call_id {
+                                let e = macro_call_sizes.entry(id).or_insert(0);
+                                *e += *size;
+                            }
                             data_size = *size;
                             kind = SymbolKind::Variable;
                             entries.next();
@@ -687,6 +788,10 @@ impl State {
 
                         // Any other entry like an instruction
                         } else {
+                            if let Some(id) = inner.macro_call_id {
+                                let e = macro_call_sizes.entry(id).or_insert(0);
+                                *e += *size;
+                            }
                             data_size += *size;
                             entries.next();
                         }
@@ -695,6 +800,7 @@ impl State {
                         if inner.macro_call_id.is_none() {
                             end_index = end_index.max(inner.end_index);
                         }
+
                     }
 
                     // Find matching label in context
@@ -702,6 +808,8 @@ impl State {
                         if token.file_index == file_index && symbol == entry_name {
                             let name = symbol.to_string();
                             let address = context.label_addresses.get(label_id).unwrap_or(&0);
+
+                            // TODO record re-defitions of default constants as a reference
                             let references = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().map(|(file_index, start_index, macro_call_id)| {
                                     Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
@@ -710,7 +818,7 @@ impl State {
 
                             }).unwrap_or_else(Vec::new);
 
-                            // TODO for callable labels list register arguments
+                            // TODO show signature for callable labels, match by finding the macro with the same inner token
                             symbols.push(GBCSymbol {
                                 kind,
                                 is_global: *is_global,
@@ -732,6 +840,35 @@ impl State {
                         }
                     }
                 }
+            }
+        }
+
+        fn macro_child_size(calls: &[MacroCall], call_sizes: &HashMap<usize, usize>, parent_id: usize, size: &mut usize, children: &mut usize) {
+            // Find all calls within the given parent
+            for c in calls {
+                if c.parent_id() == Some(parent_id) {
+                    *children += 1;
+                    *size += *call_sizes.get(&c.id()).unwrap_or(&0);
+                    // Now recsurse to also find this macros children
+                    macro_child_size(calls, call_sizes, c.id(), size, children);
+                }
+            }
+        }
+
+        // Macro Calls for inlay hints
+        let mut macro_expansions = Vec::new();
+        for call in context.macro_calls {
+            if call.is_expansion() {
+                let name = call.name();
+                let mut size = *macro_call_sizes.get(&call.id()).unwrap_or(&0);
+                let mut children = 0;
+                macro_child_size(context.macro_calls, &macro_call_sizes, call.id(), &mut size, &mut children);
+                macro_expansions.push(MacroExpansion {
+                    name: name.value.to_string(),
+                    location: Self::location_from_file_index(context.files, name.file_index, name.start_index, name.end_index),
+                    children,
+                    size
+                });
             }
         }
 
@@ -763,10 +900,10 @@ impl State {
         });
 
         // Ignore everything outside of gbc files
-        unique_symbols.into_iter().filter(|s| {
+        (unique_symbols.into_iter().filter(|s| {
             s.location.uri.path().ends_with(".gbc")
 
-        }).collect()
+        }).collect(), macro_expansions)
     }
 
     fn parse_optimizations(linker: &Linker) -> Optimizations {
@@ -904,7 +1041,7 @@ impl State {
         client: Arc<Client>,
         link_id: NumberOrString,
         workspace_path: PathBuf,
-        outer_symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Optimizations)>>>,
+        outer_symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
         outer_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
         outer_diagnostic_urls: Arc<Mutex<Vec<Url>>>,
         documents: Arc<Mutex<RefCell<HashMap<String, String>>>>
@@ -939,11 +1076,11 @@ impl State {
 
                 // Generate and store new symbols
                 if let Ok(mut symbols) = outer_symbols.lock() {
-                    let s = Self::parse_symbols(&linker);
+                    let (s, m) = Self::parse_symbols(&linker);
                     lints.append(&mut Self::generate_lints(&linker, &s));
                     let optimizations = Self::parse_optimizations(&linker);
                     log::info!(&format!("{} symbol(s)", s.len()));
-                    *symbols = Some((s, optimizations));
+                    *symbols = Some((s, m, optimizations));
                 }
             },
             Err(err) => {

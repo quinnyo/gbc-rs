@@ -187,15 +187,15 @@ impl From<IncludeToken> for MacroToken {
 
 
 // Macro Definitions ----------------------------------------------------------
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MacroDefinition {
-    name: InnerToken,
+    pub name: InnerToken,
     pub parameters: Vec<(ExpressionArgumenType, InnerToken)>,
     body: Vec<IncludeToken>,
-    file_index: Option<usize>,
-    is_builtin: bool,
-    is_exported: bool,
-    is_label: bool
+    pub file_index: Option<usize>,
+    pub is_builtin: bool,
+    pub is_exported: bool,
+    pub is_label: bool
 }
 
 impl MacroDefinition {
@@ -218,11 +218,25 @@ impl MacroDefinition {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct MacroCall {
     id: usize,
+    parent_id: Option<usize>,
     name: InnerToken,
-    arguments: Vec<Vec<IncludeToken>>
+    arguments: Vec<Vec<IncludeToken>>,
+    is_expansion: bool
 }
 
 impl MacroCall {
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn parent_id(&self) -> Option<usize> {
+        self.parent_id
+    }
+
+    pub fn is_expansion(&self) -> bool {
+        self.is_expansion
+    }
+
     pub fn name(&self) -> &InnerToken {
         &self.name
     }
@@ -296,6 +310,7 @@ impl MacroStage {
         let tokens_without_macro_calls = Self::expand_macro_calls(
             tokens_without_macro_defs,
             &mut macro_call_id,
+            None,
             0,
             macro_calls,
             &BUILTIN_MACRO_DEFS,
@@ -548,6 +563,7 @@ impl MacroStage {
     fn expand_macro_calls(
         tokens: Vec<IncludeToken>,
         macro_call_id: &mut usize,
+        parent_macro_call_id: Option<usize>,
         expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
@@ -663,20 +679,21 @@ impl MacroStage {
                     )));
                 }
 
-                // Add Macro Call
-                macro_calls.push(MacroCall {
-                    id: *macro_call_id,
-                    name: token.clone().into_inner(),
-                    arguments: arg_tokens.clone()
-                });
-
                 // Replace callable labels
                 if macro_def.is_label {
+                    macro_calls.push(MacroCall {
+                        id: *macro_call_id,
+                        parent_id: parent_macro_call_id,
+                        name: token.clone().into_inner(),
+                        arguments: arg_tokens.clone(),
+                        is_expansion: false
+                    });
                     tokens_without_macro_calls.push(
                         Self::parse_label_call(
                             token.into_inner(),
                             arg_tokens,
                             macro_call_id,
+                            parent_macro_call_id,
                             expansion_depth,
                             macro_calls,
                             builtin_macro_defs,
@@ -687,11 +704,19 @@ impl MacroStage {
 
                 // Replace builtin calls
                 } else if macro_def.is_builtin {
+                    macro_calls.push(MacroCall {
+                        id: *macro_call_id,
+                        parent_id: parent_macro_call_id,
+                        name: token.clone().into_inner(),
+                        arguments: arg_tokens.clone(),
+                        is_expansion: false
+                    });
                     tokens_without_macro_calls.push(
                         Self::parse_builtin_call(
                             token.into_inner(),
                             arg_tokens,
                             macro_call_id,
+                            parent_macro_call_id,
                             expansion_depth,
                             macro_calls,
                             builtin_macro_defs,
@@ -702,6 +727,14 @@ impl MacroStage {
 
                 // Expand user calls
                 } else {
+                    macro_calls.push(MacroCall {
+                        id: *macro_call_id,
+                        parent_id: parent_macro_call_id,
+                        name: token.clone().into_inner(),
+                        arguments: arg_tokens.clone(),
+                        is_expansion: true
+                    });
+
                     let context = MacroContext {
                         def: &macro_def,
                         args: arg_tokens
@@ -728,12 +761,15 @@ impl MacroStage {
                         )));
                     }
 
+                    // Update macro call ids
+                    let parent_macro_call_id = *macro_call_id;
                     *macro_call_id += 1;
 
                     // Recursively expand any macros calls generate by the previous user macro call
                     tokens_without_macro_calls.append(&mut Self::expand_macro_calls(
                         expanded_macro_tokens,
                         macro_call_id,
+                        Some(parent_macro_call_id),
                         expansion_depth + 1,
                         macro_calls,
                         builtin_macro_defs,
@@ -753,6 +789,7 @@ impl MacroStage {
         inner: InnerToken,
         arg_tokens: Vec<Vec<IncludeToken>>,
         macro_call_id: &mut usize,
+        parent_macro_call_id: Option<usize>,
         expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
@@ -781,6 +818,7 @@ impl MacroStage {
             arguments.push(Self::expand_macro_calls(
                 expanded,
                 macro_call_id,
+                parent_macro_call_id,
                 expansion_depth,
                 macro_calls,
                 builtin_macro_defs,
@@ -795,6 +833,7 @@ impl MacroStage {
         inner: InnerToken,
         arg_tokens: Vec<Vec<IncludeToken>>,
         macro_call_id: &mut usize,
+        parent_macro_call_id: Option<usize>,
         expansion_depth: usize,
         macro_calls: &mut Vec<MacroCall>,
         builtin_macro_defs: &[MacroDefinition],
@@ -823,6 +862,7 @@ impl MacroStage {
             arguments.push(Self::expand_macro_calls(
                 expanded,
                 macro_call_id,
+                parent_macro_call_id,
                 expansion_depth,
                 macro_calls,
                 builtin_macro_defs,
@@ -1206,10 +1246,12 @@ mod test {
     }
 
     macro_rules! mcall {
-        ($id:expr, $name:expr, $args:expr) => {
+        ($id:expr, $parent:expr, $name:expr, $exp:expr, $args:expr) => {
             MacroCall {
                 id: $id,
+                parent_id: $parent,
                 name: $name,
+                is_expansion: $exp,
                 arguments: $args
             }
         }
@@ -1528,7 +1570,7 @@ mod test {
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-           mcall!(0, itk!(26, 38, "parent_label"), vec![
+           mcall!(0, None, itk!(26, 38, "parent_label"), false, vec![
                 vec![IncludeToken::NumberLiteral(
                    itk!(39, 40, "1")
                 )],
@@ -1554,7 +1596,7 @@ mod test {
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "DBG"), vec![])
+            mcall!(0, None, itk!(0, 3, "DBG"), false, vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
     }
@@ -1571,7 +1613,7 @@ mod test {
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "ABS"), vec![
+            mcall!(0, None, itk!(0, 3, "ABS"), false, vec![
                 vec![tk!(NumberLiteral, 4, 5, "4")]
             ])
         ]);
@@ -1590,7 +1632,7 @@ mod test {
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "ABS"), vec![
+            mcall!(0, None, itk!(0, 3, "ABS"), false, vec![
                 vec![IncludeToken::TokenGroup(
                     itk!(4, 5, "`"),
                     vec![
@@ -1616,7 +1658,7 @@ mod test {
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "MAX"), vec![
+            mcall!(0, None, itk!(0, 3, "MAX"), false, vec![
                 vec![tk!(NumberLiteral, 4, 5, "4")],
                 vec![tk!(NumberLiteral, 7, 8, "2")]
             ])
@@ -1649,7 +1691,7 @@ mod test {
            )
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "MAX"), vec![
+            mcall!(0, None, itk!(0, 3, "MAX"), false, vec![
                 vec![
                     tk!(OpenParen, 4, 5, "("),
                     tk!(NumberLiteral, 5, 6, "4"),
@@ -1751,7 +1793,7 @@ mod test {
             mtke!(NumberLiteral, 21, 22, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![])
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 1);
     }
@@ -1764,7 +1806,7 @@ mod test {
             mtke!(NumberLiteral, 4, 5, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![
                 vec![
                     tk!(NumberLiteral, 4, 5, "4")
                 ]
@@ -1784,7 +1826,7 @@ mod test {
             mtke!(CloseParen, 10, 11, ")", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![
                 vec![
                     tk!(OpenParen, 4, 5, "("),
                     tk!(NumberLiteral, 5, 6, "4"),
@@ -1805,7 +1847,7 @@ mod test {
             mtke!(Register, 7, 8, "b", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![
                 vec![IncludeToken::TokenGroup(
                     itk!(4, 5, "`"),
                     vec![
@@ -1827,7 +1869,7 @@ mod test {
             mtke!(NumberLiteral, 4, 5, "4", 0),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![
                 vec![
                     tk!(NumberLiteral, 4, 5, "4")
                 ],
@@ -1847,8 +1889,8 @@ mod test {
             mtke!(NumberLiteral, 47, 48, "8", 1),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![]),
-            mcall!(1, itke!(20, 23, "BAR", 0), vec![])
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![]),
+            mcall!(1, Some(0), itke!(20, 23, "BAR", 0), true, vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 2);
     }
@@ -1861,7 +1903,7 @@ mod test {
             mtke!(NumberLiteral, 53, 54, "8", 1),
         ]);
         assert_eq!(lexer.macro_calls, vec![
-            mcall!(0, itk!(0, 3, "FOO"), vec![
+            mcall!(0, None, itk!(0, 3, "FOO"), true, vec![
                 vec![IncludeToken::TokenGroup(
                     itk!(4, 5, "`"),
                     vec![
@@ -1871,7 +1913,7 @@ mod test {
                     ]
                 )]
             ]),
-            mcall!(1, itke!(5, 8, "BAR", 0), vec![])
+            mcall!(1, Some(0), itke!(5, 8, "BAR", 0), true, vec![])
         ]);
         assert_eq!(lexer.macro_calls_count(), 2);
     }

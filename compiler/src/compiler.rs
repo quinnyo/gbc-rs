@@ -13,7 +13,7 @@ use file_io::{FileReader, FileWriter, Logger};
 use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
 use crate::linker::{Linker, SegmentUsage};
-use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage, IntegerMap};
+use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage, IntegerMap, MacroDefinition};
 
 
 // Compiler Pipeline Implementation -------------------------------------------
@@ -72,40 +72,42 @@ impl Compiler {
     pub fn compile<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<(), CompilationError> {
         colored::control::set_override(!self.no_color);
         self.status(logger, "Compiling", format!("\"{}\" ...", file.display()));
-        let (entry_lexer, integers) = self.parse(logger, io, file)?;
-        let linker = self.link(logger, io, entry_lexer, integers)?;
+        let (entry_lexer, macro_defs, integers) = self.parse(logger, io, file)?;
+        let linker = self.link(logger, io, entry_lexer, macro_defs, integers)?;
         self.generate(logger, io, linker)?;
         Ok(())
     }
 
     pub fn create_linker<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
         colored::control::set_override(false);
-        let (entry_lexer, integers) = self.parse(logger, io, file)?;
-        self.link(logger, io, entry_lexer, integers)
+        let (entry_lexer, macro_defs, integers) = self.parse(logger, io, file)?;
+        self.link(logger, io, entry_lexer, macro_defs, integers)
     }
 }
 
 impl Compiler {
 
-    fn parse<T: FileReader>(&mut self, logger: &mut Logger, io: &T, file: PathBuf) -> Result<(Lexer<EntryStage>, IntegerMap), CompilationError> {
+    fn parse<T: FileReader>(&mut self, logger: &mut Logger, io: &T, file: PathBuf) -> Result<(Lexer<EntryStage>, Vec<MacroDefinition>, IntegerMap), CompilationError> {
         let start = Instant::now();
         let include_lexer = Lexer::<IncludeStage>::from_file(io, &file).map_err(|e| CompilationError::new("file inclusion", e))?;
         self.status(logger, "File IO", format!("completed in {}ms.", start.elapsed().as_millis()));
         let start = Instant::now();
-        let macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilationError::new("macro expansion", e))?;
+        let mut macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilationError::new("macro expansion", e))?;
+        let macro_defs = macro_lexer.data();
         let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilationError::new("value construction", e))?;
         let mut expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| CompilationError::new("expression construction", e))?;
         let integers = expr_lexer.data().remove(0);
         let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilationError::new("entry construction", e))?;
         self.status(logger, "Parsing", format!("completed in {}ms.", start.elapsed().as_millis()));
-        Ok((entry_lexer, integers))
+        Ok((entry_lexer, macro_defs, integers))
     }
 
-    fn link<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, entry_lexer: Lexer<EntryStage>, integers: IntegerMap) -> Result<Linker, CompilationError> {
+    fn link<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, entry_lexer: Lexer<EntryStage>, macro_defs: Vec<MacroDefinition>, integers: IntegerMap) -> Result<Linker, CompilationError> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
             io,
             entry_lexer,
+            macro_defs,
             integers,
             self.strip_debug_code,
             self.optimize_instructions

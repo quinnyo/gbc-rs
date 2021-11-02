@@ -22,7 +22,7 @@ pub type ConstantIndex = (Symbol, FileIndex);
 pub struct EvaluatorConstant {
     pub inner: InnerToken,
     is_default: bool,
-    expression: DataExpression,
+    expression: DataExpression
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -52,26 +52,11 @@ impl UsageInformation {
     fn use_label(&mut self, label: usize, outer: &InnerToken) {
         self.labels.entry(label).or_insert_with(HashSet::new).insert((outer.file_index, outer.start_index, outer.macro_call_id));
     }
-
-    fn merge(&mut self, other: &UsageInformation) {
-        for (index, files) in &other.constants {
-            let entry = self.constants.entry(index.clone()).or_insert_with(HashSet::new);
-            for f in files {
-                entry.insert(*f);
-            }
-        }
-        for (label, files) in &other.labels {
-            let entry = self.labels.entry(*label).or_insert_with(HashSet::new);
-            for f in files {
-                entry.insert(*f);
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EvaluatorContext {
-    pub constants: HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
+    pub constants: HashMap<ConstantIndex, ExpressionResult>,
     pub raw_constants: HashMap<ConstantIndex, EvaluatorConstant>,
     pub label_addresses: HashMap<usize, usize>,
     pub raw_labels: HashMap<(Symbol, usize, bool), InnerToken>,
@@ -95,7 +80,14 @@ impl EvaluatorContext {
         }
     }
 
-    pub fn declare_constant(&mut self, inner: InnerToken, is_default: bool, is_private: bool, value: DataExpression) {
+    pub fn declare_constant(
+        &mut self,
+        usage: &mut UsageInformation,
+        inner: InnerToken,
+        is_default: bool,
+        is_private: bool,
+        value: DataExpression
+    ) {
 
         let index = if is_private {
             (inner.value.clone(), Some(inner.file_index))
@@ -109,9 +101,15 @@ impl EvaluatorContext {
             // Constant does not yet exist at all, set either the default or actual value
             (_, None) => true,
             // Constant already exists as a default, override with it with the actual value
-            (false, Some(true)) => true,
+            (false, Some(true)) => {
+                usage.use_constant(index.clone(), &inner);
+                true
+            },
             // Don't override existing actual value with a later declared default
-            (true, Some(false)) => false,
+            (true, Some(false)) => {
+                usage.use_constant(index.clone(), &inner);
+                false
+            },
             // Should not happen due to expression and entry stages filtering this case out
             _ => {
                 unreachable!("Invalid constant declaration order: {} {:?}", is_default, existing_default)
@@ -147,7 +145,7 @@ impl EvaluatorContext {
     }
 
     // Constant Expressions ---------------------------------------------------
-    pub fn resolve_all_constants(&mut self) -> Result<(), SourceError> {
+    pub fn resolve_all_constants(&mut self, usage: &mut UsageInformation) -> Result<(), SourceError> {
         let mut names: Vec<ConstantIndex> = self.raw_constants.keys().cloned().collect();
         names.sort_by(|a, b| {
             a.0.as_str().cmp(&b.0.as_str())
@@ -155,16 +153,15 @@ impl EvaluatorContext {
 
         for name in names {
             // Keep track of other constants used in the current constant's expression
-            let mut usage = UsageInformation::new(HashMap::new());
             let constant = self.raw_constants[&name].clone();
             let stack = vec![&name.0];
             let c = self.inner_const_resolve(
                 &stack[..],
                 &constant.expression,
-                &mut usage,
+                usage,
                 &constant.inner
             )?;
-            self.constants.insert(name, (c, usage));
+            self.constants.insert(name, c);
         }
         Ok(())
     }
@@ -315,15 +312,13 @@ impl EvaluatorContext {
 
                         // Local Lookup
                         if let Some(value) = self.constants.get(&local_index) {
-                            usage.merge(&value.1);
                             usage.use_constant(local_index, inner);
-                            value.0.clone()
+                            value.clone()
 
                         // Global Lookup
                         } else if let Some(value) = self.constants.get(&global_index) {
-                            usage.merge(&value.1);
                             usage.use_constant(global_index, inner);
-                            value.0.clone()
+                            value.clone()
 
                         } else {
                             return Err(self.undeclared_const_error(inner, name));
@@ -441,15 +436,13 @@ impl EvaluatorContext {
 
                         // Local Lookup
                         if let Some(result) = self.constants.get(&local_index) {
-                            usage.merge(&result.1);
                             usage.use_constant(local_index, parent);
-                            result.0.clone()
+                            result.clone()
 
                         // Global Lookup
                         } else if let Some(result) = self.constants.get(&global_index) {
-                            usage.merge(&result.1);
                             usage.use_constant(global_index, parent);
-                            result.0.clone()
+                            result.clone()
 
                         // Local Declaration
                         } else if let Some(EvaluatorConstant { ref inner, ref expression, .. }) = self.raw_constants.get(&local_index).cloned() {
@@ -552,22 +545,17 @@ impl EvaluatorContext {
             ).with_reference(inner, "Initial declaration was"))
 
         } else {
-
-            // Keep track of other constants used in the current constant's expression
-            let mut constant_usage = UsageInformation::new(HashMap::new());
-
             // Resolve constants that are not yet evaluated
             let mut child_stack = constant_stack.to_vec();
             child_stack.push(name);
             let value = self.inner_const_resolve(
                 &child_stack,
                 expression,
-                &mut constant_usage,
+                usage,
                 inner
             )?;
-            usage.merge(&constant_usage);
             usage.use_constant(declare_index.clone(), outer);
-            self.constants.insert(declare_index, (value.clone(), constant_usage));
+            self.constants.insert(declare_index, value.clone());
             Ok(value)
         }
     }

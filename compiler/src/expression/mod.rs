@@ -194,7 +194,7 @@ impl ExpressionResult {
 
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ExpressionArgumenType {
     Any,
     Tokens,

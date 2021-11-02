@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 
 // Modules --------------------------------------------------------------------
+mod analyzer;
 mod optimizer;
 mod section;
 mod util;
@@ -17,11 +18,12 @@ use file_io::FileReader;
 // Internal Dependencies ------------------------------------------------------
 use crate::error::SourceError;
 use crate::lexer::stage::macros::MacroCall;
-use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol, IntegerMap};
+use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol, MacroDefinition, IntegerMap};
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{ConstantIndex, EvaluatorContext, EvaluatorConstant, UsageInformation};
-pub use self::optimizer::OptimizerNotes;
 use self::section::Section;
+pub use self::analyzer::AnalyzerNotes;
+pub use self::optimizer::OptimizerNotes;
 pub use self::section::entry::{SectionEntry, EntryData};
 
 
@@ -39,13 +41,15 @@ pub struct SegmentUsage {
 pub struct LinkerContext<'a> {
     pub files: &'a [LexerFile],
     pub constants: &'a HashMap<ConstantIndex, EvaluatorConstant>,
-    pub constant_values: &'a HashMap<ConstantIndex, (ExpressionResult, UsageInformation)>,
+    pub constant_values: &'a HashMap<ConstantIndex, ExpressionResult>,
     pub constant_usage: &'a HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
     pub labels: &'a HashMap<(Symbol, usize, bool), InnerToken>,
     pub label_addresses: &'a HashMap<usize, usize>,
     pub label_usage: &'a HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
     pub integers: &'a IntegerMap,
     pub optimizations: &'a OptimizerNotes,
+    pub analyzer_notes: &'a AnalyzerNotes,
+    pub macro_defs: &'a [MacroDefinition],
     pub macro_calls: &'a [MacroCall]
 }
 
@@ -57,7 +61,9 @@ pub struct Linker {
     context: EvaluatorContext,
     usage: UsageInformation,
     optimizations: OptimizerNotes,
+    analyzer_notes: AnalyzerNotes,
     macro_calls: Vec<MacroCall>,
+    macro_defs: Vec<MacroDefinition>,
     files: Vec<LexerFile>
 }
 
@@ -66,6 +72,7 @@ impl Linker {
     pub fn from_lexer<R: FileReader>(
         file_reader: &R,
         lexer: Lexer<EntryStage>,
+        macro_defs: Vec<MacroDefinition>,
         integers: IntegerMap,
         strip_debug: bool,
         optimize: bool
@@ -73,7 +80,16 @@ impl Linker {
     ) -> Result<Self, SourceError> {
         let files = lexer.files;
         let macro_calls = lexer.macro_calls;
-        let mut linker = Self::new(file_reader, lexer.tokens, macro_calls.clone(), integers, strip_debug, optimize).map_err(|err| {
+        let mut linker = Self::new(
+            file_reader,
+            lexer.tokens,
+            macro_calls.clone(),
+            macro_defs,
+            integers,
+            strip_debug,
+            optimize
+
+        ).map_err(|err| {
             err.extend_with_location_and_macros(&files, &macro_calls)
         })?;
         linker.files = files;
@@ -84,6 +100,7 @@ impl Linker {
         file_reader: &R,
         tokens: Vec<EntryToken>,
         macro_calls: Vec<MacroCall>,
+        macro_defs: Vec<MacroDefinition>,
         integers: IntegerMap,
         strip_debug: bool,
         optimize: bool
@@ -97,7 +114,7 @@ impl Linker {
 
         // Make sure that all constants are always evaluated even when they're not used by any
         // other expressions
-        context.resolve_all_constants()?;
+        context.resolve_all_constants(&mut usage)?;
 
         // Map entries to sections
         let mut section_index = 0;
@@ -166,8 +183,10 @@ impl Linker {
             }
         }
 
-        // Verify
+        // Verify / Analyze
+        let mut analyzer_notes = Vec::new();
         for s in sections.iter() {
+            analyzer::analyze_section_entries(&s.entries, &mut analyzer_notes);
             s.validate_jump_targets(&sections)?;
             s.validate_bounds()?;
         }
@@ -177,7 +196,9 @@ impl Linker {
             context,
             usage,
             optimizations,
+            analyzer_notes,
             macro_calls,
+            macro_defs,
             files: Vec::new()
         })
     }
@@ -201,6 +222,8 @@ impl Linker {
             label_usage: &self.usage.labels,
             integers: &self.usage.integers,
             optimizations: &self.optimizations,
+            analyzer_notes: &self.analyzer_notes,
+            macro_defs: &self.macro_defs[..],
             macro_calls: &self.macro_calls[..]
         }
     }
@@ -273,7 +296,7 @@ impl Linker {
             if let EntryToken::Constant { inner, is_default, is_private, value } = token {
                 if !inactive_labels_only {
                     if allow_constant_declaration {
-                        context.declare_constant(inner, is_default, is_private, value);
+                        context.declare_constant(usage, inner, is_default, is_private, value);
 
                     } else {
                         return Err(inner.error(
@@ -481,53 +504,53 @@ mod test {
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), false, false).expect("Linker failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> Linker {
-        Linker::from_lexer(reader, entry_lex(s.into()), HashMap::new(), false, false).expect("Linker failed")
+        Linker::from_lexer(reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_error_reader<R: FileReader, S: Into<String>>(reader: &R, s: S) -> String {
         colored::control::set_override(false);
-        Linker::from_lexer(reader, entry_lex(s.into()), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_child<S: Into<String>>(s: S, c: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), HashMap::new(), false, false).expect("Linker failed")
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), Vec::new(), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_error_child<S: Into<String>>(s: S, c: S) -> String {
         colored::control::set_override(false);
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
+        Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), Vec::new(), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), true, false).expect("Debug stripping failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), true, false).expect("Debug stripping failed")
     }
 
     pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), true, true).expect("Instruction optimization failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), true, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_optimize_keep_debug<S: Into<String>>(s: S) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex(s.into()), HashMap::new(), false, true).expect("Instruction optimization failed")
+        Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {
         let reader = MockFileReader::default();
-        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), HashMap::new(), false, false).expect("Binary Linker failed")
+        Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), Vec::new(), HashMap::new(), false, false).expect("Binary Linker failed")
     }
 
     pub fn linker_section_entries(linker: Linker) -> Vec<Vec<(usize, EntryData)>> {
@@ -590,6 +613,14 @@ mod test {
         assert_eq!(linker_error_child("CONST A 1 + B\nINCLUDE 'child.gb.s'", "CONST B 1"), "In file \"main.gb.s\" on line 1, column 13: Reference to undeclared constant \"B\".\n\nCONST A 1 + B\n            ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
         assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'child.gb.s'", "CONST B A"), "In file \"child.gb.s\" on line 1, column 9: Reference to undeclared constant \"A\".\n\nCONST B A\n        ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
         assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'child.gb.s'", "CONST B 1 + A"), "In file \"child.gb.s\" on line 1, column 13: Reference to undeclared constant \"A\".\n\nCONST B 1 + A\n            ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
+    }
+
+    #[test]
+    fn test_const_default_redeclaration() {
+        let s = linker_child("GLOBAL DEFAULT CONST foo 1\nINCLUDE 'child.gb.s'", "GLOBAL CONST foo 2");
+        println!("{:#?}", s.context().constants);
+        let s = linker_child("GLOBAL CONST foo 2\nINCLUDE 'child.gb.s'", "GLOBAL DEFAULT CONST foo 1");
+        println!("{:#?}", s.context().constants);
     }
 
     #[test]

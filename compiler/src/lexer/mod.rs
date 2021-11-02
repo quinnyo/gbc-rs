@@ -206,9 +206,9 @@ use self::stage::LexerStage;
 pub use self::stage::entry::{EntryStage, EntryToken};
 pub use self::stage::expression::{ExpressionStage, ExpressionToken, IntegerMap};
 pub use self::stage::include::IncludeStage;
-pub use self::stage::macros::{MacroStage, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
+pub use self::stage::macros::{MacroStage, MacroDefinition, BUILTIN_MACRO_DEFS, BUILTIN_MACRO_INDEX};
 pub use self::stage::value::ValueStage;
-use self::stage::macros::MacroCall;
+pub use self::stage::macros::MacroCall;
 
 
 // Internal Dependencies ------------------------------------------------------

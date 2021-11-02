@@ -138,7 +138,9 @@ impl LanguageServer for Backend {
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
-        if let Some(symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+        if let Some(mut symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+            // Include definition in reference list
+            symbol.references.push(symbol.location);
             Ok(Some(symbol.references))
 
         } else {
