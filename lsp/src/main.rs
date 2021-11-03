@@ -13,6 +13,7 @@ use serde_json::Value;
 
 // Modules --------------------------------------------------------------------
 mod analyzer;
+mod emulator;
 use self::analyzer::Analyzer;
 
 
@@ -75,6 +76,7 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.analyzer.shutdown().await;
         Ok(())
     }
 

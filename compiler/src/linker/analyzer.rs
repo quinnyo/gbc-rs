@@ -50,10 +50,10 @@ pub fn analyze_section_entries(entries: &Vec<SectionEntry>, notes: &mut Analyzer
 fn analyze_instructions(
     notes: &mut AnalyzerNotes,
     op_code: u16,
-    end_of_instruction: i32,
-    expression: &OptionalDataExpression,
+    _end_of_instruction: i32,
+    _expression: &OptionalDataExpression,
     bytes: &[u8],
-    inner: &InnerToken,
+    _inner: &InnerToken,
     b: Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)>,
     c: Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)>
 

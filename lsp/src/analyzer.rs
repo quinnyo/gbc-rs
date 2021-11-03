@@ -1,10 +1,10 @@
 // STD Dependencies -----------------------------------------------------------
-//use std::thread;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::path::PathBuf;
 use std::cell::RefCell;
-use std::sync::atomic::AtomicUsize;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::collections::{HashMap, HashSet};
 
 
@@ -38,7 +38,7 @@ use compiler::{
         AccessKind, Linker, SectionEntry, EntryData
     }
 };
-use crate::{InlayHint, InlayKind};
+use crate::{emulator, InlayHint, InlayKind};
 
 
 // Constants ------------------------------------------------------------------
@@ -84,6 +84,7 @@ pub struct GBCSymbol {
     pub is_global: bool,
     pub in_macro: bool,
     pub location: Location,
+    pub address: Option<usize>,
     pub name: String,
     pub value: String,
     pub width: usize,
@@ -201,7 +202,11 @@ pub struct Analyzer {
     symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
     diagnostic_urls: Arc<Mutex<Vec<Url>>>,
     link_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
-    link_gen: Arc<AtomicUsize>
+    link_gen: Arc<AtomicUsize>,
+    emulator: Arc<AtomicBool>,
+    emulator_queries: Arc<Mutex<VecDeque<u16>>>,
+    emulator_results: Arc<Mutex<HashMap<u16, u8>>>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Analyzer {
@@ -214,7 +219,11 @@ impl Analyzer {
             symbols: Arc::new(Mutex::new(None)),
             diagnostic_urls: Arc::new(Mutex::new(Vec::new())),
             link_error: Arc::new(Mutex::new(None)),
-            link_gen: Arc::new(AtomicUsize::new(0))
+            link_gen: Arc::new(AtomicUsize::new(0)),
+            emulator: Arc::new(AtomicBool::new(false)),
+            emulator_queries: Arc::new(Mutex::new(VecDeque::new())),
+            emulator_results: Arc::new(Mutex::new(HashMap::new())),
+            shutdown: Arc::new(AtomicBool::new(false))
         }
     }
 
@@ -224,6 +233,20 @@ impl Analyzer {
             message: Some("Ready".to_string())
 
         }).await;
+
+        let handle = Handle::current();
+        let client = self.client.clone();
+        let emulator = self.emulator.clone();
+        let queries = self.emulator_queries.clone();
+        let results = self.emulator_results.clone();
+        let shutdown = self.shutdown.clone();
+        handle.spawn(async move {
+            emulator::watch(client, emulator, shutdown, queries, results).await;
+        });
+    }
+
+    pub async fn shutdown(&self) {
+        self.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     // TODO handle deletion and renaming of files
@@ -487,6 +510,7 @@ impl Analyzer {
 
     pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
         if let Some(symbol) = self.symbol(current_file, line, col).await {
+            let value = self.query_symbol_memory_value(&symbol);
             let info = symbol.info();
             let location = symbol.location;
             let is_global = symbol.is_global;
@@ -719,6 +743,7 @@ impl Analyzer {
                     is_global: index.1.is_none(),
                     in_macro: token.macro_call_id.is_some(),
                     location: Self::location_from_file_index(context.files, constant.inner.file_index, constant.inner.start_index, constant.inner.end_index),
+                    address: None,
                     name,
                     width: 0,
                     result: Some(result.clone()),
@@ -741,6 +766,7 @@ impl Analyzer {
                 in_macro: section.inner.macro_call_id.is_some(),
                 location: Self::location_from_file_index(context.files, section.inner.file_index, section.inner.start_index, section.inner.end_index),
                 name: section.name.to_string(),
+                address: None,
                 width: 0,
                 result: None,
                 value: format!("{}[${:0>4X}-${:0>4X}][{}]", section.segment, section.start_address, section.end_address, section.bank),
@@ -763,6 +789,7 @@ impl Analyzer {
                     is_global: def.is_exported,
                     in_macro: false,
                     location: Self::location_from_file_index(context.files, def.name.file_index, def.name.start_index, def.name.end_index),
+                    address: None,
                     name:  def.name.value.to_string(),
                     width: 0,
                     result: None,
@@ -822,6 +849,7 @@ impl Analyzer {
                                 is_global: false,
                                 in_macro: inner.macro_call_id.is_some(),
                                 location: Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index),
+                                address: None,
                                 name: format!(".{}", name),
                                 width: 0,
                                 result: None,
@@ -930,6 +958,7 @@ impl Analyzer {
                                 is_global: *is_global,
                                 in_macro: token.macro_call_id.is_some(),
                                 location: Self::location_from_file_index(context.files, file_index, start_index, end_index),
+                                address: Some(*address),
                                 name,
                                 width: data_size,
                                 result: None,
@@ -1040,7 +1069,7 @@ impl Analyzer {
             }
 
             // Unused Symbols
-            if symbol.references.is_empty() && symbol.calls.is_empty() && symbol.reads.is_empty() && symbol.writes.is_empty() {
+            if symbol.references.is_empty() && symbol.calls.is_empty() && symbol.reads.is_empty() && symbol.writes.is_empty() && symbol.jumps.is_empty() {
                 lints.push((symbol.location.uri.clone(), Diagnostic {
                     message: format!("unused {}", symbol.typ()),
                     range: symbol.location.range.clone(),
@@ -1052,9 +1081,10 @@ impl Analyzer {
             } else if symbol.is_global {
                 let outer_refs = symbol.references.iter().filter(|r| r.uri != symbol.location.uri).count();
                 let outer_calls = symbol.calls.iter().filter(|r| r.uri != symbol.location.uri).count();
+                let outer_jumps = symbol.jumps.iter().filter(|r| r.uri != symbol.location.uri).count();
                 let outer_reads = symbol.reads.iter().filter(|r| r.uri != symbol.location.uri).count();
                 let outer_writes = symbol.writes.iter().filter(|r| r.uri != symbol.location.uri).count();
-                if outer_refs + outer_calls + outer_reads + outer_writes == 0 {
+                if outer_refs + outer_calls + outer_jumps + outer_reads + outer_writes == 0 {
                     lints.push((symbol.location.uri.clone(), Diagnostic {
                         message: format!("{} never used outside current file", symbol.typ()),
                         range: symbol.location.range.clone(),
@@ -1106,6 +1136,33 @@ impl Analyzer {
         lints
     }
 
+    fn query_symbol_memory_value(&self, symbol: &GBCSymbol) -> Option<u8> {
+        if let Some(address) = symbol.address {
+            if self.emulator.load(std::sync::atomic::Ordering::SeqCst) {
+                // Only query variables inside 16-bit memory map
+                if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
+                    log::info!("Querying emulator for variable value");
+                    if let Ok(mut q) = self.emulator_queries.lock() {
+                        q.push_back(address as u16);
+                        if symbol.width == 2 {
+                            q.push_back((address as u16).saturating_add(1));
+                        }
+                    }
+                    // TODO wait in a tight loop for a response, but have a timeout
+                    None
+
+                } else {
+                    None
+                }
+
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {
         let client = self.client.clone();
         let symbols = self.symbols.clone();
@@ -1154,7 +1211,7 @@ impl Analyzer {
             token: link_id.clone()
 
         }).await.ok();
-        client.show_progress_begin(link_id.clone(), "Linking...").await;
+        client.show_progress_begin(link_id.clone(), "Linking", "In Progress").await;
 
         // Start Linking Process
         let start = std::time::Instant::now();
@@ -1175,7 +1232,7 @@ impl Analyzer {
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
                 log::info!(&format!("Linked in {}ms", start.elapsed().as_millis()));
-                client.show_progress_end(link_id, "Linking complete").await;
+                client.show_progress_end(link_id, "Done").await;
 
                 // Generate and store new symbols
                 if let Ok(mut symbols) = outer_symbols.lock() {
