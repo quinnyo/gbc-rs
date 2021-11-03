@@ -325,8 +325,9 @@ fn optimize_instructions(
         // jp   LABEL
         //
         // save 1 byte and 17 T-states
-        (0xCD, Some((0xC9, _, _, _, _)), _) => {
+        (0xCD, Some((0xC9, _, _, _, ret_inner)), _) => {
             notes.push((inner.clone(), "jp".to_string()));
+            notes.push((ret_inner.clone(), "removed".to_string()));
             Some((1, vec![EntryData::Instruction {
                 op_code: 0xC3,
                 expression: expression.clone(),

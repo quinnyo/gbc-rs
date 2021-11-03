@@ -20,7 +20,7 @@ use crate::error::SourceError;
 use crate::lexer::{InnerToken, EntryToken, Symbol};
 use crate::expression::{Expression, ExpressionResult, DataExpression};
 use crate::expression::data::{DataAlignment, DataEndianess, DataStorage};
-use crate::expression::evaluator::{EvaluatorContext, UsageInformation};
+use crate::expression::evaluator::{AccessKind, EvaluatorContext, UsageInformation};
 use self::entry::{EntryData, SectionEntry};
 use super::util::{self, instruction};
 
@@ -783,7 +783,7 @@ impl Section {
                 }
             },
             DataStorage::Buffer(ref length, ref fill) => {
-                let length_or_string = context.resolve_dyn_expression(length, usage, None, false, inner)?;
+                let length_or_string = context.resolve_dyn_expression(length, usage, None, AccessKind::Reference, inner)?;
                 let fill = context.resolve_opt_dyn_expression(fill, usage, None, inner)?;
                 match (length_or_string, fill) {
                     // DS 15 "FOO"
@@ -837,11 +837,11 @@ impl Section {
         for (width, expression) in expressions {
             if *width == 1 {
                 data_bytes.push(
-                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner)?, "Invalid byte data")?
+                    util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, AccessKind::Reference, inner)?, "Invalid byte data")?
                 );
 
             } else {
-                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, false, inner)?, "Invalid word data")?;
+                let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, AccessKind::Reference, inner)?, "Invalid word data")?;
                 if *endianess == DataEndianess::Little {
                     data_bytes.push(word as u8);
                     data_bytes.push((word >> 8) as u8);
@@ -868,9 +868,23 @@ impl Section {
         if let Some(argument) = instruction::argument(op_code) {
 
             // Handle constant/offset -> op code mapping
-            let is_call_instruction = Instruction::is_call_op_code(op_code);
+            let access_kind = if Instruction::is_call_op_code(op_code) {
+                AccessKind::Call
+
+            } else if Instruction::is_jump_op_code(op_code) {
+                AccessKind::Jump
+
+            } else if Instruction::is_memory_read_op_code(op_code) {
+                AccessKind::MemoryRead
+
+            } else if Instruction::is_memory_write_op_code(op_code) {
+                AccessKind::MemoryWrite
+
+            } else {
+                AccessKind::Reference
+            };
             if let Some(offsets) = instruction::offsets(op_code) {
-                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner)?, "Invalid constant argument")?;
+                let value = util::integer_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, access_kind, inner)?, "Invalid constant argument")?;
                 let mut mapped_op_code = None;
                 for (constant_value, constant_op_code) in offsets {
                     if value == *constant_value as i32 {
@@ -895,11 +909,11 @@ impl Section {
                 let mut arg_bytes: Vec<u8> = match argument {
                     Argument::MemoryLookupByteValue | Argument::ByteValue => {
                         vec![
-                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner)?, "Invalid byte argument")?
+                            util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, access_kind, inner)?, "Invalid byte argument")?
                         ]
                     },
                     Argument::MemoryLookupWordValue | Argument::WordValue => {
-                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner)?, "Invalid word argument")?;
+                        let word = util::word_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, access_kind, inner)?, "Invalid word argument")?;
                         vec![
                             word as u8,
                             (word >> 8) as u8
@@ -909,12 +923,12 @@ impl Section {
                         // ldsp hl,X
                         if op_code == 248 {
                             vec![
-                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, is_call_instruction, inner)?, "Invalid signed byte argument")?
+                                util::byte_value(inner, context.resolve_dyn_expression(expression, usage, end_of_instruction, access_kind, inner)?, "Invalid signed byte argument")?
                             ]
 
                         // jr
                         } else if let Some(end_of_instruction) = end_of_instruction {
-                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), is_call_instruction, inner)?, "Invalid address")?;
+                            let address = util::address_word_value(inner, context.resolve_dyn_expression(expression, usage, Some(end_of_instruction), access_kind, inner)?, "Invalid address")?;
                             let target = address as i32 - end_of_instruction;
                             vec![
                                 util::signed_byte_value(inner, target, "").map_err(|mut e| {

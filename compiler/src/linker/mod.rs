@@ -22,6 +22,7 @@ use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryTo
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{ConstantIndex, EvaluatorContext, EvaluatorConstant, UsageInformation};
 use self::section::Section;
+pub use crate::expression::evaluator::AccessKind;
 pub use self::analyzer::AnalyzerNotes;
 pub use self::optimizer::OptimizerNotes;
 pub use self::section::entry::{SectionEntry, EntryData};
@@ -45,7 +46,7 @@ pub struct LinkerContext<'a> {
     pub constant_usage: &'a HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
     pub labels: &'a HashMap<(Symbol, usize, bool), InnerToken>,
     pub label_addresses: &'a HashMap<usize, usize>,
-    pub label_usage: &'a HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
+    pub label_usage: &'a HashMap<usize, HashSet<(usize, usize, Option<usize>, AccessKind)>>,
     pub integers: &'a IntegerMap,
     pub optimizations: &'a OptimizerNotes,
     pub analyzer_notes: &'a AnalyzerNotes,

@@ -32,7 +32,7 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        ProjectConfig::build(&config, &mut logger, true, false);
+        ProjectConfig::build(&config, &mut logger, true);
 
     // Debug Builds
     } else if matches.subcommand_matches("debug").is_some() {
@@ -40,15 +40,7 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        ProjectConfig::build(&config, &mut logger, false, false);
-
-    // Lint Builds
-    } else if matches.subcommand_matches("lint").is_some() {
-        let config = ProjectConfig::load(
-            &mut logger,
-            &ProjectReader::from_absolute(env::current_dir().unwrap())
-        );
-        ProjectConfig::build(&config, &mut logger, false, true);
+        ProjectConfig::build(&config, &mut logger, false);
 
     // Emulation
     } else if let Some(matches) = matches.subcommand_matches("emu") {
@@ -83,10 +75,6 @@ fn main() {
             let mut compiler = Compiler::new();
             if matches.occurrences_of("segments") > 0 {
                 compiler.set_print_segment_map();
-            }
-
-            if matches.occurrences_of("lint") > 0 {
-                compiler.set_linter_enabled();
             }
 
             if matches.occurrences_of("debug") == 0 {
@@ -130,7 +118,7 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
         return false;
     };
     if let Some(emulator) = config.emulator.get(name) {
-        ProjectConfig::build(&config, logger, !emulator.debug, false);
+        ProjectConfig::build(&config, logger, !emulator.debug);
         logger.status("Emulating", format!("Running \"{}\"...", emulator.command));
         logger.flush();
 

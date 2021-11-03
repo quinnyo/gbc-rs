@@ -35,7 +35,7 @@ use compiler::{
     },
     expression::ExpressionResult,
     linker::{
-        Linker, SectionEntry, EntryData
+        AccessKind, Linker, SectionEntry, EntryData
     }
 };
 use crate::{InlayHint, InlayKind};
@@ -73,7 +73,6 @@ type Optimizations = Vec<(Location, String)>;
 
 #[derive(Debug, Clone)]
 pub struct MacroExpansion {
-    name: String,
     location: Location,
     children: usize,
     size: usize
@@ -90,10 +89,65 @@ pub struct GBCSymbol {
     pub width: usize,
     pub result: Option<ExpressionResult>,
     pub children: Vec<GBCSymbol>,
-    pub references: Vec<Location>
+    pub references: Vec<Location>,
+    pub calls: Vec<Location>,
+    pub jumps: Vec<Location>,
+    pub reads: Vec<Location>,
+    pub writes: Vec<Location>
 }
 
 impl GBCSymbol {
+    fn info(&self) -> String {
+        let mut parts = Vec::with_capacity(3);
+        if self.width == 1 {
+            parts.push("1 byte".to_string());
+
+        } else if self.width > 1 {
+            parts.push(format!("{} bytes", self.width));
+        }
+
+        let refs = self.references.len();
+        if refs == 1 {
+            parts.push("1 ref".to_string());
+
+        } else if refs > 1 {
+            parts.push(format!("{} refs", refs));
+        }
+
+        let reads = self.reads.len();
+        if reads == 1 {
+            parts.push("1 read".to_string());
+
+        } else if reads > 1 {
+            parts.push(format!("{} reads", reads));
+        }
+
+        let writes = self.writes.len();
+        if writes == 1 {
+            parts.push("1 write".to_string());
+
+        } else if writes > 1 {
+            parts.push(format!("{} writes", writes));
+        }
+
+        let jumps = self.jumps.len();
+        if jumps == 1 {
+            parts.push("1 jump".to_string());
+
+        } else if jumps > 1 {
+            parts.push(format!("{} jumps", jumps));
+        }
+
+        let calls = self.calls.len();
+        if calls == 1 {
+            parts.push("1 call".to_string());
+
+        } else if calls > 1 {
+            parts.push(format!("{} calls", calls));
+        }
+        parts.join(", ")
+    }
+
     fn typ(&self) -> &str {
         match self.kind {
             SymbolKind::Constant => "constant",
@@ -117,6 +171,7 @@ impl GBCSymbol {
     }
 
     fn into_document_symbol(self) -> DocumentSymbol {
+        let info = self.info();
         DocumentSymbol {
             name: self.name,
             kind: self.kind,
@@ -127,9 +182,9 @@ impl GBCSymbol {
             detail: Some(match self.kind {
                 SymbolKind::Constant => format!("= {}", self.value),
                 SymbolKind::Constructor => format!("MACRO{}", self.value),
-                SymbolKind::Function => format!("@ {}", self.value),
-                SymbolKind::Variable => format!("@ {}", self.value),
-                SymbolKind::Field => format!("@ {}", self.value),
+                SymbolKind::Function => format!("{} ({})", self.value, info),
+                SymbolKind::Variable => format!("{} ({})", self.value, info),
+                SymbolKind::Field => format!("{}", self.value),
                 _ => self.value
             }),
             children: Some(self.children.into_iter().map(GBCSymbol::into_document_symbol).collect())
@@ -137,9 +192,8 @@ impl GBCSymbol {
     }
 }
 
-// State Abstraction ----------------------------------------------------------
-// TODO rename Analyzer
-pub struct State {
+// Analyzer Implementation ----------------------------------------------------
+pub struct Analyzer {
     client: Arc<Client>,
     documents: Arc<Mutex<RefCell<HashMap<String, String>>>>,
     tokens: Mutex<RefCell<HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>>>,
@@ -150,7 +204,7 @@ pub struct State {
     link_gen: Arc<AtomicUsize>
 }
 
-impl State {
+impl Analyzer {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -252,7 +306,7 @@ impl State {
     }
 }
 
-impl State {
+impl Analyzer {
     pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<CompletionItem> {
         let uri = Url::from_file_path(current_file.clone()).ok();
         return self.get_symbols(current_file).await.0.into_iter().filter(|symbol| {
@@ -337,7 +391,7 @@ impl State {
             }),
             SymbolKind::Constant => Some(InlayHint {
                 kind: InlayKind::TypeHint,
-                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
@@ -345,7 +399,7 @@ impl State {
             }),
             SymbolKind::Constructor => Some(InlayHint {
                 kind: InlayKind::TypeHint,
-                label: format!("MACRO{} ({} calls)", symbol.value, symbol.references.len()),
+                label: format!("MACRO{} ({})", symbol.value, symbol.info()),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
@@ -353,7 +407,7 @@ impl State {
             }),
             SymbolKind::Function => Some(InlayHint {
                 kind: InlayKind::TypeHint,
-                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
@@ -361,7 +415,7 @@ impl State {
             }),
             SymbolKind::Variable => Some(InlayHint {
                 kind: InlayKind::TypeHint,
-                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
@@ -369,7 +423,7 @@ impl State {
             }),
             SymbolKind::Field => Some(InlayHint {
                 kind: InlayKind::TypeHint,
-                label: format!("{} ({} refs)", symbol.value, symbol.references.len()),
+                label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
@@ -393,13 +447,13 @@ impl State {
             InlayHint {
                 kind: InlayKind::OptimizerHint,
                 label: if exp.children == 0 {
-                    format!("{} byte (expanded)", exp.size)
+                    format!("{} byte(s) (expanded)", exp.size)
 
                 } else if exp.children == 1 {
-                    format!("{} byte ({} sub-expansion)", exp.size, exp.children)
+                    format!("{} byte(s) ({} sub-expansion)", exp.size, exp.children)
 
                 } else {
-                    format!("{} byte ({} sub-expansions)", exp.size, exp.children)
+                    format!("{} byte(s) ({} sub-expansions)", exp.size, exp.children)
                 },
                 range: Range {
                     start: exp.location.range.start,
@@ -433,6 +487,7 @@ impl State {
 
     pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
         if let Some(symbol) = self.symbol(current_file, line, col).await {
+            let info = symbol.info();
             let location = symbol.location;
             let is_global = symbol.is_global;
             let m = match symbol.kind {
@@ -448,10 +503,10 @@ impl State {
                     Some(format!("MACRO {}{}", symbol.name, symbol.value))
                 },
                 SymbolKind::Function => {
-                    Some(format!("{}:", symbol.name))
+                    Some(format!("{}: ; ({})", symbol.name, info))
                 },
                 SymbolKind::Variable => {
-                    Some(format!("{}: {}", symbol.name, if symbol.width == 1 {
+                    Some(format!("{}: {}; ({})", symbol.name, if symbol.width == 1 {
                         "DB"
 
                     } else if symbol.width == 2 {
@@ -459,7 +514,8 @@ impl State {
 
                     } else {
                         "DS"
-                    }))
+
+                    }, info))
                 },
                 SymbolKind::Field => {
                     Some(format!("{}:", symbol.name))
@@ -496,7 +552,7 @@ impl State {
     }
 }
 
-impl State {
+impl Analyzer {
     fn parse_token(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(IncludeToken, LexerFile)> {
         let mut logger = Logger::new();
         logger.set_silent();
@@ -668,7 +724,11 @@ impl State {
                     result: Some(result.clone()),
                     value: result.to_string(),
                     children: Vec::new(),
-                    references
+                    references,
+                    calls: Vec::new(),
+                    jumps: Vec::new(),
+                    reads: Vec::new(),
+                    writes: Vec::new()
                 });
             }
         }
@@ -685,7 +745,11 @@ impl State {
                 result: None,
                 value: format!("{}[${:0>4X}-${:0>4X}][{}]", section.segment, section.start_address, section.end_address, section.bank),
                 children: Vec::new(),
-                references: Vec::new()
+                references: Vec::new(),
+                calls: Vec::new(),
+                jumps: Vec::new(),
+                reads: Vec::new(),
+                writes: Vec::new()
             });
         }
 
@@ -707,14 +771,18 @@ impl State {
 
                     }).collect::<Vec<String>>().join(", ")),
                     children: Vec::new(),
-                    references: context.macro_calls.iter().filter(|call| {
+                    references: Vec::new(),
+                    calls: context.macro_calls.iter().filter(|call| {
                         call.name().value == def.name.value
 
                     }).map(|call| {
                         let name = call.name();
                         Self::resolve_reference(&linker, name.file_index, name.start_index, name.macro_call_id, name.value.as_str().len())
 
-                    }).collect()
+                    }).collect(),
+                    jumps: Vec::new(),
+                    reads: Vec::new(),
+                    writes: Vec::new()
                 });
             }
         }
@@ -741,7 +809,10 @@ impl State {
 
                         // Encountered next parent label
                         if let EntryData::Label { is_local: false, .. } = data {
-                            break;
+                            // Ignore labels generated by macros
+                            if inner.macro_call_id.is_none() {
+                                break;
+                            }
                         }
 
                         // Child labels
@@ -756,7 +827,11 @@ impl State {
                                 result: None,
                                 value: "".to_string(),
                                 children: Vec::new(),
-                                references: Vec::new()
+                                references: Vec::new(),
+                                jumps: Vec::new(), // TODO figure out actual jumps here?
+                                calls: Vec::new(),
+                                reads: Vec::new(),
+                                writes: Vec::new()
                             };
                             children.push(label.clone());
                             label.name = name.clone();
@@ -809,9 +884,40 @@ impl State {
                             let name = symbol.to_string();
                             let address = context.label_addresses.get(label_id).unwrap_or(&0);
 
-                            // TODO record re-defitions of default constants as a reference
                             let references = context.label_usage.get(label_id).map(|refs| {
-                                refs.iter().map(|(file_index, start_index, macro_call_id)| {
+                                refs.iter().filter(|(_, _, _, access)| *access == AccessKind::Reference).map(|(file_index, start_index, macro_call_id, _)| {
+                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+
+                                }).collect()
+
+                            }).unwrap_or_else(Vec::new);
+
+                            let calls = context.label_usage.get(label_id).map(|refs| {
+                                refs.iter().filter(|(_, _, _, access)| *access == AccessKind::Call).map(|(file_index, start_index, macro_call_id, _)| {
+                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+
+                                }).collect()
+
+                            }).unwrap_or_else(Vec::new);
+
+                            let jumps = context.label_usage.get(label_id).map(|refs| {
+                                refs.iter().filter(|(_, _, _, access)| *access == AccessKind::Jump).map(|(file_index, start_index, macro_call_id, _)| {
+                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+
+                                }).collect()
+
+                            }).unwrap_or_else(Vec::new);
+
+                            let reads = context.label_usage.get(label_id).map(|refs| {
+                                refs.iter().filter(|(_, _, _, access)| *access == AccessKind::MemoryRead).map(|(file_index, start_index, macro_call_id, _)| {
+                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+
+                                }).collect()
+
+                            }).unwrap_or_else(Vec::new);
+
+                            let writes = context.label_usage.get(label_id).map(|refs| {
+                                refs.iter().filter(|(_, _, _, access)| *access == AccessKind::MemoryWrite).map(|(file_index, start_index, macro_call_id, _)| {
                                     Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
@@ -827,14 +933,13 @@ impl State {
                                 name,
                                 width: data_size,
                                 result: None,
-                                value: if data_size == 0 {
-                                    format!("${:0>4X}", address)
-
-                                } else {
-                                    format!("${:0>4X} ({} byte)", address, data_size)
-                                },
+                                value: format!("${:0>4X}", address),
                                 children,
-                                references
+                                references,
+                                calls,
+                                jumps,
+                                reads,
+                                writes
                             });
                             break;
                         }
@@ -849,7 +954,7 @@ impl State {
                 if c.parent_id() == Some(parent_id) {
                     *children += 1;
                     *size += *call_sizes.get(&c.id()).unwrap_or(&0);
-                    // Now recsurse to also find this macros children
+                    // Now recsurse to also find this macro's children
                     macro_child_size(calls, call_sizes, c.id(), size, children);
                 }
             }
@@ -864,7 +969,6 @@ impl State {
                 let mut children = 0;
                 macro_child_size(context.macro_calls, &macro_call_sizes, call.id(), &mut size, &mut children);
                 macro_expansions.push(MacroExpansion {
-                    name: name.value.to_string(),
                     location: Self::location_from_file_index(context.files, name.file_index, name.start_index, name.end_index),
                     children,
                     size
@@ -875,7 +979,6 @@ impl State {
         // Remove any duplicate symbols
         let mut symbol_locations = HashSet::new();
         let mut unique_symbols = Vec::new();
-        let mut dupes = 0;
         for s in symbols {
             let loc = (
                 s.location.uri.path().to_string(),
@@ -887,12 +990,8 @@ impl State {
             if !symbol_locations.contains(&loc) {
                 symbol_locations.insert(loc);
                 unique_symbols.push(s);
-
-            } else {
-                dupes += 1;
             }
         }
-        log::info!(&format!("Removed {} duplicate symbols", dupes));
 
         // Sort by Name
         unique_symbols.sort_by(|a, b| {
@@ -941,7 +1040,7 @@ impl State {
             }
 
             // Unused Symbols
-            if symbol.references.is_empty() {
+            if symbol.references.is_empty() && symbol.calls.is_empty() && symbol.reads.is_empty() && symbol.writes.is_empty() {
                 lints.push((symbol.location.uri.clone(), Diagnostic {
                     message: format!("unused {}", symbol.typ()),
                     range: symbol.location.range.clone(),
@@ -952,7 +1051,10 @@ impl State {
             // Symbols unused outside their file
             } else if symbol.is_global {
                 let outer_refs = symbol.references.iter().filter(|r| r.uri != symbol.location.uri).count();
-                if outer_refs == 0 {
+                let outer_calls = symbol.calls.iter().filter(|r| r.uri != symbol.location.uri).count();
+                let outer_reads = symbol.reads.iter().filter(|r| r.uri != symbol.location.uri).count();
+                let outer_writes = symbol.writes.iter().filter(|r| r.uri != symbol.location.uri).count();
+                if outer_refs + outer_calls + outer_reads + outer_writes == 0 {
                     lints.push((symbol.location.uri.clone(), Diagnostic {
                         message: format!("{} never used outside current file", symbol.typ()),
                         range: symbol.location.range.clone(),
@@ -964,6 +1066,7 @@ impl State {
         }
 
         // Recommend to replace magic number integers with matching constants
+        // TODO currently not working due to integer mapping logic in compiler being incompelte
         let context = linker.context();
         for (_, (inner, value)) in context.integers {
             let location = Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index);

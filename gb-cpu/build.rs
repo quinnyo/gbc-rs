@@ -119,6 +119,7 @@ struct OpCodeMap {
     cb_prefixed: Vec<OpCode>
 }
 
+#[allow(unused)]
 #[derive(Debug, Deserialize)]
 struct OpCode {
     #[serde(rename="Name")]
@@ -225,6 +226,7 @@ impl OpCode {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 struct Instruction {
     code: usize,

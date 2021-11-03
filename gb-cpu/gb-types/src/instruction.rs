@@ -23,6 +23,23 @@ impl Instruction {
         op_code == 0xCD
     }
 
+    pub fn is_jump_op_code(op_code: u16) -> bool {
+        op_code == 0xC2 || op_code == 0xC3 ||
+        op_code == 0xD2 || op_code == 0xCA ||
+        op_code == 0xDA || op_code == 0xE9 ||
+        op_code == 0x20 || op_code == 0x30 ||
+        op_code == 0x28 || op_code == 0x38 ||
+        op_code == 0x18
+    }
+
+    pub fn is_memory_read_op_code(op_code: u16) -> bool {
+        op_code == 0xF0 || op_code == 0xFA
+    }
+
+    pub fn is_memory_write_op_code(op_code: u16) -> bool {
+        op_code == 0xE0 || op_code == 0xEA || op_code == 0x08
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.code == 16 {
             // Pad STOP with a NOP

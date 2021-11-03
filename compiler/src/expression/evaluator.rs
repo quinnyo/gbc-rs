@@ -18,6 +18,15 @@ use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionR
 type FileIndex = Option<usize>;
 pub type ConstantIndex = (Symbol, FileIndex);
 
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
+pub enum AccessKind {
+    Call,
+    Jump,
+    MemoryRead,
+    MemoryWrite,
+    Reference
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct EvaluatorConstant {
     pub inner: InnerToken,
@@ -28,7 +37,7 @@ pub struct EvaluatorConstant {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UsageInformation {
     pub constants: HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
-    pub labels: HashMap<usize, HashSet<(usize, usize, Option<usize>)>>,
+    pub labels: HashMap<usize, HashSet<(usize, usize, Option<usize>, AccessKind)>>,
     pub expressions: HashMap<(FileIndex, usize), ExpressionResult>,
     pub integers: HashMap<(usize, usize, usize), (InnerToken, i32)>
 }
@@ -49,8 +58,8 @@ impl UsageInformation {
         entry.insert((outer.file_index, outer.start_index, outer.macro_call_id));
     }
 
-    fn use_label(&mut self, label: usize, outer: &InnerToken) {
-        self.labels.entry(label).or_insert_with(HashSet::new).insert((outer.file_index, outer.start_index, outer.macro_call_id));
+    fn use_label(&mut self, label: usize, outer: &InnerToken, access_kind: AccessKind) {
+        self.labels.entry(label).or_insert_with(HashSet::new).insert((outer.file_index, outer.start_index, outer.macro_call_id, access_kind));
     }
 }
 
@@ -199,11 +208,11 @@ impl EvaluatorContext {
         expression: &DataExpression,
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
-        is_call_instruction: bool,
+        access_kind: AccessKind,
         inner: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
-        self.inner_dyn_resolve_outer(expression, usage, address_offset, is_call_instruction, inner)
+        self.inner_dyn_resolve_outer(expression, usage, address_offset, access_kind, inner)
     }
 
     pub fn resolve_opt_dyn_expression(
@@ -215,7 +224,7 @@ impl EvaluatorContext {
 
     ) -> Result<Option<ExpressionResult>, SourceError> {
         if let Some(expr) = expression {
-            Ok(Some(self.inner_dyn_resolve_outer(expr, usage, address_offset, false, inner)?))
+            Ok(Some(self.inner_dyn_resolve_outer(expr, usage, address_offset, AccessKind::Reference, inner)?))
 
         } else {
             Ok(None)
@@ -232,7 +241,7 @@ impl EvaluatorContext {
         if let Expression::ParentLabelCall { inner, id, args, .. } = expression {
             if let Some((outer, signature)) = self.callable_labels.get(id) {
 
-                usage.use_label(*id, inner);
+                usage.use_label(*id, inner, AccessKind::Reference);
                 if let Some(signature) = signature {
                     if signature.len() != args.len() {
                         Err(outer.error(
@@ -271,11 +280,11 @@ impl EvaluatorContext {
         expression: &Expression,
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
-        is_call_instruction: bool,
+        access_kind: AccessKind,
         inner: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
-        match self.inner_dyn_resolve(expression, usage, address_offset, is_call_instruction, inner) {
+        match self.inner_dyn_resolve(expression, usage, address_offset, access_kind, inner) {
             Ok(result) => {
                 usage.expressions.insert((Some(inner.file_index), inner.start_index), result.clone());
                 Ok(result)
@@ -289,18 +298,18 @@ impl EvaluatorContext {
         expression: &Expression,
         usage: &mut UsageInformation,
         address_offset: Option<i32>,
-        is_call_instruction: bool,
+        access_kind: AccessKind,
         outer: &InnerToken
 
     ) -> Result<ExpressionResult, SourceError> {
         match expression {
             Expression::Binary { inner, op, left, right } => {
-                let left = self.inner_dyn_resolve(left, usage, address_offset, false, outer)?;
-                let right = self.inner_dyn_resolve(right, usage, address_offset, false, outer)?;
+                let left = self.inner_dyn_resolve(left, usage, address_offset, AccessKind::Reference, outer)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, AccessKind::Reference, outer)?;
                 Self::apply_binary_operator(&inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
-                let right = self.inner_dyn_resolve(right, usage, address_offset, false, outer)?;
+                let right = self.inner_dyn_resolve(right, usage, address_offset, AccessKind::Reference, outer)?;
                 Self::apply_unary_operator(&inner, op, right)
             },
             Expression::Value(value) => {
@@ -335,9 +344,9 @@ impl EvaluatorContext {
                         ExpressionResult::Integer(relative_address_offset + offset)
                     },
                     ExpressionValue::ParentLabelAddress(inner, id) | ExpressionValue::ChildLabelAddress(inner, id) => {
-                        usage.use_label(*id, inner);
+                        usage.use_label(*id, inner, access_kind);
                         if let Some((call_only, _)) = self.callable_labels.get(id) {
-                            if is_call_instruction {
+                            if access_kind == AccessKind::Call {
                                 return Err(inner.error(
                                     "Reference to call-only label".to_string()
 
@@ -367,7 +376,7 @@ impl EvaluatorContext {
                         arg,
                         usage,
                         address_offset,
-                        false,
+                        AccessKind::Reference,
                         inner
                     )?);
                 }

@@ -12,8 +12,8 @@ use serde_json::Value;
 
 
 // Modules --------------------------------------------------------------------
-mod state;
-use self::state::State;
+mod analyzer;
+use self::analyzer::Analyzer;
 
 
 // Types ----------------------------------------------------------------------
@@ -34,7 +34,7 @@ pub struct InlayHint {
 
 // Backend Implementation -----------------------------------------------------
 struct Backend {
-    state: State
+    analyzer: Analyzer
 }
 
 #[tower_lsp::async_trait]
@@ -42,11 +42,11 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         if let Some(folders) = params.workspace_folders {
             if let Some(folder) = folders.first() {
-                self.state.set_workspace_path(PathBuf::from(folder.uri.path()));
+                self.analyzer.set_workspace_path(PathBuf::from(folder.uri.path()));
             }
 
         } else if let Some(root_uri) = params.root_uri {
-            self.state.set_workspace_path(PathBuf::from(root_uri.path()));
+            self.analyzer.set_workspace_path(PathBuf::from(root_uri.path()));
         }
         Ok(InitializeResult {
             server_info: None,
@@ -71,7 +71,7 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        self.state.initialize().await
+        self.analyzer.initialize().await
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -80,30 +80,30 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         log::info!(&format!("Opened {}", params.text_document.uri.path()));
-        self.state.open_document(params.text_document.uri.path(), &params.text_document.text);
+        self.analyzer.open_document(params.text_document.uri.path(), &params.text_document.text);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         log::info!(&format!("Changed {}", params.text_document.uri.path()));
         if let Some(change) = params.content_changes.first() {
-            self.state.change_document(params.text_document.uri.path(), &change.text);
+            self.analyzer.change_document(params.text_document.uri.path(), &change.text);
         }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         log::info!(&format!("Saved {}", params.text_document.uri.path()));
-        self.state.save_document(params.text_document.uri.path());
+        self.analyzer.save_document(params.text_document.uri.path());
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         log::info!(&format!("Closed {}", params.text_document.uri.path()));
-        self.state.close_document(params.text_document.uri.path());
+        self.analyzer.close_document(params.text_document.uri.path());
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let pos = params.text_document_position_params;
         let file = pos.text_document.uri.path();
-        if let Some((detail, location)) = self.state.hover(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+        if let Some((detail, location)) = self.analyzer.hover(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
             Ok(Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
                     language: "gbc".to_string(),
@@ -120,14 +120,14 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
-        let completions = self.state.completions(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await;
+        let completions = self.analyzer.completions(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await;
         Ok(Some(CompletionResponse::Array(completions)))
     }
 
     async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
         let pos = params.text_document_position_params;
         let file = pos.text_document.uri.path();
-        if let Some(symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+        if let Some(symbol) = self.analyzer.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
             Ok(Some(GotoDefinitionResponse::Scalar(symbol.location)))
 
         } else {
@@ -138,10 +138,13 @@ impl LanguageServer for Backend {
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let pos = params.text_document_position;
         let file = pos.text_document.uri.path();
-        if let Some(mut symbol) = self.state.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
-            // Include definition in reference list
-            symbol.references.push(symbol.location);
-            Ok(Some(symbol.references))
+        if let Some(mut symbol) = self.analyzer.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
+            let mut references = symbol.references;
+            references.append(&mut symbol.calls);
+            references.append(&mut symbol.reads);
+            references.append(&mut symbol.writes);
+            references.push(symbol.location);
+            Ok(Some(references))
 
         } else {
             Ok(None)
@@ -149,13 +152,13 @@ impl LanguageServer for Backend {
     }
 
     async fn symbol(&self, _params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
-        let symbols = self.state.workspace_symbols().await;
+        let symbols = self.analyzer.workspace_symbols().await;
         Ok(Some(symbols))
     }
 
     async fn document_symbol(&self, params: DocumentSymbolParams) -> Result<Option<DocumentSymbolResponse>> {
         let file = params.text_document.uri.path();
-        let symbols = self.state.document_symbols(PathBuf::from(file)).await;
+        let symbols = self.analyzer.document_symbols(PathBuf::from(file)).await;
         Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 
@@ -164,7 +167,7 @@ impl LanguageServer for Backend {
             if let Some(Value::Object(text_document)) = map.get("textDocument") {
                 if let Some(Value::String(path)) = text_document.get("uri") {
                     let url = Url::parse(path).unwrap();
-                    let hints = self.state.inlay_hints(PathBuf::from(url.path())).await;
+                    let hints = self.analyzer.inlay_hints(PathBuf::from(url.path())).await;
                     return Ok(Some(serde_json::to_value(&hints).unwrap()))
                 }
             }
@@ -182,7 +185,7 @@ async fn main() {
 
     let (service, messages) = LspService::new(|client| {
         Backend {
-            state: State::new(Arc::new(client))
+            analyzer: Analyzer::new(Arc::new(client))
         }
     });
     Server::new(stdin, stdout)
