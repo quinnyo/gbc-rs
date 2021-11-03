@@ -1,9 +1,11 @@
 // STD Dependencies -----------------------------------------------------------
+use std::thread;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::path::PathBuf;
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::collections::{HashMap, HashSet};
 
@@ -394,7 +396,7 @@ impl Analyzer {
 
         let uri = Url::from_file_path(current_file.clone()).ok();
         let (symbols, expansions, optimizations) = self.get_symbols(current_file).await;
-        let mut hints: Vec<InlayHint> = symbols.into_iter().filter(|symbol| {
+        let symbols: Vec<GBCSymbol> = symbols.into_iter().filter(|symbol| {
             // Hint if the symbol is from the current file
             Some(&symbol.location.uri) == uri.as_ref()
 
@@ -403,7 +405,12 @@ impl Analyzer {
             // cached and potentially incorrect
             symbol.location.range.start.line < first_error_line as u32
 
-        }).flat_map(|symbol| match symbol.kind {
+        }).collect();
+
+        let symbol_refs: Vec<&GBCSymbol> = symbols.iter().collect();
+        let emulator_values = self.query_symbol_memory_values(&symbol_refs[..]);
+
+        let mut hints: Vec<InlayHint> = symbols.into_iter().enumerate().flat_map(|(i, symbol)| match symbol.kind {
             SymbolKind::Namespace => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{}", symbol.value),
@@ -436,14 +443,27 @@ impl Analyzer {
                     end: symbol.location.range.start
                 }
             }),
-            SymbolKind::Variable => Some(InlayHint {
-                kind: InlayKind::TypeHint,
-                label: format!("{} ({})", symbol.value, symbol.info()),
-                range: Range {
-                    start: symbol.location.range.start,
-                    end: symbol.location.range.start
-                }
-            }),
+            SymbolKind::Variable => {
+                let emulator_value = if let Some(value) = emulator_values[i] {
+                    if symbol.width == 1 {
+                        format!("  ${:0>2X} | {: <5} @ ", value, value)
+
+                    } else {
+                        format!("${:0>4X} | {: <5} @ ", value, value)
+                    }
+
+                } else {
+                    "".to_string()
+                };
+                Some(InlayHint {
+                    kind: InlayKind::TypeHint,
+                    label: format!("{}{} ({})", emulator_value, symbol.value, symbol.info()),
+                    range: Range {
+                        start: symbol.location.range.start,
+                        end: symbol.location.range.start
+                    }
+                })
+            },
             SymbolKind::Field => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({})", symbol.value, symbol.info()),
@@ -510,7 +530,7 @@ impl Analyzer {
 
     pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
         if let Some(symbol) = self.symbol(current_file, line, col).await {
-            let value = self.query_symbol_memory_value(&symbol);
+            let value = self.query_symbol_memory_values(&[&symbol])[0];
             let info = symbol.info();
             let location = symbol.location;
             let is_global = symbol.is_global;
@@ -530,7 +550,7 @@ impl Analyzer {
                     Some(format!("{}: ; ({})", symbol.name, info))
                 },
                 SymbolKind::Variable => {
-                    Some(format!("{}: {}; ({})", symbol.name, if symbol.width == 1 {
+                    Some(format!("{}: {}; ({}){}", symbol.name, if symbol.width == 1 {
                         "DB"
 
                     } else if symbol.width == 2 {
@@ -539,7 +559,17 @@ impl Analyzer {
                     } else {
                         "DS"
 
-                    }, info))
+                    }, info, if let Some(value) = value {
+                        if symbol.width == 1 {
+                            format!("\n\nEMULATED: ${:0>2X} / {}", value, value)
+
+                        } else {
+                            format!("\n\nEMULATED: ${:0>4X} / {}", value, value)
+                        }
+
+                    } else {
+                        "".to_string()
+                    }))
                 },
                 SymbolKind::Field => {
                     Some(format!("{}:", symbol.name))
@@ -1136,31 +1166,90 @@ impl Analyzer {
         lints
     }
 
-    fn query_symbol_memory_value(&self, symbol: &GBCSymbol) -> Option<u8> {
-        if let Some(address) = symbol.address {
-            if self.emulator.load(std::sync::atomic::Ordering::SeqCst) {
-                // Only query variables inside 16-bit memory map
-                if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
-                    log::info!("Querying emulator for variable value");
-                    if let Ok(mut q) = self.emulator_queries.lock() {
-                        q.push_back(address as u16);
-                        if symbol.width == 2 {
-                            q.push_back((address as u16).saturating_add(1));
-                        }
-                    }
-                    // TODO wait in a tight loop for a response, but have a timeout
-                    None
+    fn query_symbol_memory_values(&self, symbols: &[&GBCSymbol]) -> Vec<Option<u16>> {
 
-                } else {
-                    None
-                }
-
-            } else {
-                None
-            }
-        } else {
-            None
+        // Generate initial result set
+        let mut results = Vec::new();
+        for _ in 0..symbols.len() {
+            results.push(None)
         }
+
+        // Do nothing if no emulator is present
+        if !self.emulator.load(std::sync::atomic::Ordering::SeqCst) {
+            return results;
+        }
+
+        #[derive(Debug)]
+        enum PendingResult {
+            Done,
+            Invalid,
+            Byte(u16),
+            Word(u16, u16)
+        }
+
+        // Query emulator
+        let mut pending = Vec::with_capacity(symbols.len());
+        if let Ok(mut q) = self.emulator_queries.lock() {
+            for symbol in symbols {
+                if let Some(address) = symbol.address {
+                    if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
+                        let address = address as u16;
+                        if symbol.width == 1 {
+                            pending.push(PendingResult::Byte(address));
+                            q.push_back(address);
+
+                        } else {
+                            pending.push(PendingResult::Word(
+                                address,
+                                address.saturating_add(1)
+                            ));
+                            q.push_back(address);
+                            q.push_back(address.saturating_add(1));
+                        }
+
+                    } else {
+                        pending.push(PendingResult::Invalid);
+                    }
+                } else {
+                    pending.push(PendingResult::Invalid);
+                }
+                results.push(None);
+            }
+        }
+        log::info!(&format!("Query Pending: {:?}", pending));
+
+        // Wait for results from emulator
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(300) {
+            if let Ok(mut r) = self.emulator_results.lock() {
+                let mut waiting = 0;
+                for (i, pending) in pending.iter_mut().enumerate() {
+                    match pending {
+                        PendingResult::Byte(address) => {
+                            if let Some(value) = r.remove(address) {
+                                results[i] = Some(value as u16);
+                                *pending = PendingResult::Done;
+                            }
+                            waiting += 1;
+                        },
+                        PendingResult::Word(address_low, address_high) => {
+                            if r.contains_key(address_low) && r.contains_key(address_high) {
+                                results[i] = Some(r[address_low] as u16 | (r[address_high] as u16) << 8);
+                                *pending = PendingResult::Done;
+                            }
+                            waiting += 1;
+                        },
+                        _ => {}
+                    }
+                }
+                if waiting == 0 {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        log::info!(&format!("Query Results: {:?}", results));
+        results
     }
 
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {

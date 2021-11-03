@@ -63,7 +63,6 @@ async fn handle(
 ) {
     communicate(client, stream, shutdown, queries, move |msg| {
         if let Ok(status) = serde_json::from_str::<EmulatorStatus>(msg) {
-            //log::info!(&format!("Emulator Status: {:?}", status));
             Some(format!("{} via {} [{}]", status.title, status.emulator, if status.debugger == 1 {
                 "DEBUGGER"
 
@@ -81,7 +80,6 @@ async fn handle(
             if let Ok(mut r) = results.lock() {
                 r.insert(value.address, value.value);
             }
-            log::info!(&format!("AddressValue: {:?}", value));
             None
 
         } else {
