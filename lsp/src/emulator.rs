@@ -1,10 +1,10 @@
 // STD Dependencies -----------------------------------------------------------
 use std::io::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 use std::net::{SocketAddr, TcpStream};
+use std::collections::{HashMap, VecDeque};
 
 
 // External Dependencies ------------------------------------------------------
@@ -12,6 +12,10 @@ use serde::Deserialize;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp::lsp_types::{NumberOrString, WorkDoneProgressCreateParams};
+
+
+// Internal Dependencies ------------------------------------------------------
+use crate::types::{InlayHintsNotification, InlayHintsParams};
 
 
 // Types ----------------------------------------------------------------------
@@ -114,6 +118,7 @@ async fn communicate<C: FnMut(&str) -> Option<String>>(
     let mut status_timer = Instant::now();
     let mut buffer: Vec<u8> = Vec::new();
     let mut received = [0; 1024];
+    let mut update_hints = Instant::now();
     loop {
         // Close connection if LSP is shutting down
         if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
@@ -131,6 +136,12 @@ async fn communicate<C: FnMut(&str) -> Option<String>>(
         if status_timer.elapsed() > Duration::from_millis(250) {
             stream.write_all(&[0x00, 0xE0]).ok();
             status_timer = Instant::now();
+        }
+
+        // Send updated hints to client in a regular fashion
+        if update_hints.elapsed() > Duration::from_millis(5000) {
+            client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+            update_hints = Instant::now();
         }
 
         // TODO exit if no status is received for 1000ms

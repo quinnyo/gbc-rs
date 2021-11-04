@@ -7,31 +7,16 @@ use std::path::PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
-use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
 
 // Modules --------------------------------------------------------------------
 mod analyzer;
 mod emulator;
+mod parser;
+mod types;
 use self::analyzer::Analyzer;
 
-
-// Types ----------------------------------------------------------------------
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum InlayKind {
-    TypeHint,
-    OptimizerHint,
-    ParameterHint,
-    ChainingHint,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct InlayHint {
-    pub range: Range,
-    pub kind: InlayKind,
-    pub label: String,
-}
 
 // Backend Implementation -----------------------------------------------------
 struct Backend {
