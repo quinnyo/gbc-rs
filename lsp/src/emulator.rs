@@ -85,7 +85,8 @@ impl EmulatorConnection {
         let running = self.running.clone();
         let connection_closed = self.connection_closed.clone();
         handle.spawn(async move {
-            Self::connect(client, status, queries, results, running, shutdown, connection_closed).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+            Self::connect(client, rom_path, status, queries, results, running, shutdown, connection_closed).await;
         });
     }
 
@@ -105,6 +106,7 @@ impl EmulatorConnection {
 
     async fn connect(
         client: Arc<Client>,
+        rom_path: PathBuf,
         status: Arc<Mutex<Option<EmulatorStatus>>>,
         queries: Arc<Mutex<VecDeque<u16>>>,
         results: Arc<Mutex<HashMap<u16, u8>>>,
@@ -115,13 +117,14 @@ impl EmulatorConnection {
         let addr: SocketAddr = "127.0.0.1:8765".parse().unwrap();
         while running.load(Ordering::SeqCst) {
             if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(10)) {
-                log::info!("Emulator connected");
+                log::info!(&format!("Emulator connected for {}", rom_path.display()));
 
                 // Handle connection
                 let inner_results = results.clone();
                 Self::connection(
                     stream,
                     client.clone(),
+                    rom_path.clone(),
                     status.clone(),
                     queries.clone(),
                     shutdown.clone(),
@@ -144,7 +147,6 @@ impl EmulatorConnection {
                 }).await;
                 log::info!("Emulator disconnected");
             }
-            log::info!("Emulator connecting...");
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
         connection_closed.store(true, Ordering::SeqCst);
@@ -153,6 +155,7 @@ impl EmulatorConnection {
     async fn connection<C: FnMut(&str) -> Option<EmulatorStatus>>(
         mut stream: TcpStream,
         client: Arc<Client>,
+        rom_path: PathBuf,
         status: Arc<Mutex<Option<EmulatorStatus>>>,
         queries: Arc<Mutex<VecDeque<u16>>>,
         shutdown: Arc<AtomicBool>,
@@ -181,25 +184,19 @@ impl EmulatorConnection {
         let mut buffer: Vec<u8> = Vec::new();
         let mut received = [0; 1024];
         loop {
-            // Close connection if LSP is shutting down or emulator stopped sending status responses
+            // Close connection if LSP is shutting down...
             if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
                 log::info!("Emulator closing connection...");
                 break;
 
+            // ...or emulator stopped sending status responses
             } else if last_status_response.elapsed() > Duration::from_millis(2500) {
                 log::info!("Emulator no status within 2500ms...");
                 break;
             }
 
-            // Send address queries to emulator
-            if let Ok(mut q) = queries.try_lock() {
-                while let Some(address) = q.pop_front() {
-                    stream.write_all(&[address as u8, (address >> 8) as u8]).ok();
-                }
-            }
-
             // Receive messages from emulator
-            let mut new_status = None;
+            let mut received_status = None;
             match stream.read(&mut received) {
                 Ok(0) => break,
                 Ok(n) => {
@@ -209,7 +206,7 @@ impl EmulatorConnection {
                             let part = std::mem::replace(&mut buffer, Vec::new());
                             if let Ok(json) = String::from_utf8(part) {
                                 if let Some(s) = message(json.trim()) {
-                                    new_status = Some(s);
+                                    received_status = Some(s);
                                 }
                             }
                         }
@@ -228,19 +225,18 @@ impl EmulatorConnection {
             }
 
             // Forward emulation status to editor
-            if let Some(s) = new_status {
+            if let Some(s) = received_status {
 
                 // TODO verify file path and ROM crc and report mismatch / ignore any queries by
                 // not setting the status on the outside Analyzer
-
-                // Update Status Info in Analyzer
-                if let Ok(mut status) = status.lock() {
-                    *status = Some(s.clone());
-                }
+                let does_rom_match = PathBuf::from(&s.filename) == rom_path;
 
                 // Update Progress Report
                 let info = format!("{} via {}", s.title, s.emulator);
-                let message = if s.debugger == 1 {
+                let message = if !does_rom_match {
+                    format!("ROM path does not match")
+
+                } else if s.debugger == 1 {
                     format!("{} [STOPPED] [BRK @ ${:0>4X}]", info, s.pc)
 
                 } else if s.menu == 1 {
@@ -254,40 +250,58 @@ impl EmulatorConnection {
                 };
                 client.show_progress_report(token.clone(), message).await;
 
-                // Refresh hints
-                let refresh = if let Some(ref ls) = last_status {
-                    // Trigger in case of mode change
-                    if s.menu != ls.menu || s.debugger != ls.debugger || s.paused != ls.paused {
-                        true
-
-                    // Trigger when PC changes during active debugger
-                    } else if s.debugger == 1 && s.pc != ls.pc {
-                        true
-
-                    // Otherwise periodically update the hints
-                    } else if trigger_hints_refresh.elapsed() > Duration::from_millis(5000) {
-                        trigger_hints_refresh = Instant::now();
-                        true
-
-                    } else {
-                        false
+                // Only update and set status if ROM file matches
+                if does_rom_match {
+                    // Update Status Info in Analyzer
+                    if let Ok(mut status) = status.lock() {
+                        *status = Some(s.clone());
                     }
-                } else {
-                    true
-                };
-                if refresh {
-                    client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+
+                    // Refresh hints
+                    let refresh = if let Some(ref ls) = last_status {
+                        // Trigger in case of mode change
+                        if s.menu != ls.menu || s.debugger != ls.debugger || s.paused != ls.paused {
+                            true
+
+                        // Trigger when PC changes during active debugger
+                        } else if s.debugger == 1 && s.pc != ls.pc {
+                            true
+
+                        // Otherwise periodically update the hints
+                        } else if trigger_hints_refresh.elapsed() > Duration::from_millis(5000) {
+                            trigger_hints_refresh = Instant::now();
+                            true
+
+                        } else {
+                            false
+                        }
+                    } else {
+                        true
+                    };
+                    if refresh {
+                        client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+                    }
+                    last_status = Some(s);
                 }
                 last_status_response = Instant::now();
-                last_status = Some(s);
+            }
+
+            // Send address queries to emulator
+            if last_status.is_some() {
+                if let Ok(mut q) = queries.try_lock() {
+                    while let Some(address) = q.pop_front() {
+                        stream.write_all(&[address as u8, (address >> 8) as u8]).ok();
+                    }
+                }
             }
         }
-        // Update Editor Status
+
+        // Reset Editor Status
+        client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+        client.show_progress_end(token, "Emulating stopped").await;
         if let Ok(mut status) = status.lock() {
             *status = None;
         }
-        client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
-        client.show_progress_end(token, "Emulating stopped").await;
     }
 }
 

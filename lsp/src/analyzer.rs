@@ -73,6 +73,18 @@ impl Analyzer {
             message: Some("Ready".to_string())
 
         }).await;
+
+        // Load config and get path to output ROM file to start emulator connection
+        let workspace_path = if let Ok(ws) = self.workspace_path.lock() { ws.clone() } else { None };
+        if let Some(workspace_path) = workspace_path {
+            let config = ProjectConfig::try_load(&ProjectReader::from_absolute(workspace_path)).ok();
+            if let Some(config) = config {
+                self.emulator_connection.listen(config.rom.output).await;
+
+            } else {
+                self.emulator_connection.shutdown().await;
+            }
+        }
     }
 
     pub async fn shutdown(&self) {
@@ -81,14 +93,6 @@ impl Analyzer {
 
     // TODO handle deletion and renaming of files
     pub async fn set_workspace_path(&self, path: PathBuf) {
-        // Load config and get path to output ROM file to start emulator connection
-        let config = ProjectConfig::try_load(&ProjectReader::from_absolute(path.clone())).ok();
-        if let Some(config) = config {
-            self.emulator_connection.listen(config.rom.output).await;
-
-        } else {
-            self.emulator_connection.shutdown().await;
-        }
         if let Ok(mut workspace_path) = self.workspace_path.lock() {
             *workspace_path = Some(path);
         }
