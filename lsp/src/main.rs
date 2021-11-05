@@ -28,11 +28,11 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         if let Some(folders) = params.workspace_folders {
             if let Some(folder) = folders.first() {
-                self.analyzer.set_workspace_path(PathBuf::from(folder.uri.path()));
+                self.analyzer.set_workspace_path(PathBuf::from(folder.uri.path())).await;
             }
 
         } else if let Some(root_uri) = params.root_uri {
-            self.analyzer.set_workspace_path(PathBuf::from(root_uri.path()));
+            self.analyzer.set_workspace_path(PathBuf::from(root_uri.path())).await;
         }
         Ok(InitializeResult {
             server_info: None,

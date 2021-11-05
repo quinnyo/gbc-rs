@@ -8,11 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 // External Dependencies ------------------------------------------------------
 use tower_lsp::Client;
-use tower_lsp::lsp_types::Diagnostic;
-use tower_lsp::lsp_types::DiagnosticSeverity;
-use tower_lsp::lsp_types::{PublishDiagnosticsParams, SymbolKind, Url, Location};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, Location};
 use tower_lsp::lsp_types::{Range, Position, NumberOrString, WorkDoneProgressCreateParams};
-use tower_lsp::lsp_types::notification::PublishDiagnostics;
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 
 
@@ -44,22 +41,19 @@ impl Parser {
         workspace_path: PathBuf,
         outer_symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
         outer_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
-        outer_diagnostic_urls: Arc<Mutex<Vec<Url>>>,
+        outer_diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
         documents: Arc<Mutex<RefCell<HashMap<String, String>>>>
-    ) {
+
+    ) -> Option<()> {
+        // Try and load config for current workspace
+        let (config, mut reader) = Self::load_project(workspace_path, &documents)?;
+
         // Tell client about the linking
         client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
             token: link_id.clone()
 
         }).await.ok();
         client.show_progress_begin(link_id.clone(), "Linking", "In Progress").await;
-
-        // Start Linking Process
-        let start = std::time::Instant::now();
-        let mut logger = Logger::new();
-        logger.set_silent();
-
-        let (config, mut reader) = Self::load_project(&mut logger, workspace_path, &documents);
 
         // Create compiler
         let main_file = PathBuf::from(config.rom.input.file_name().unwrap());
@@ -68,6 +62,10 @@ impl Parser {
         compiler.set_strip_debug_code();
 
         // Run linker
+        let mut logger = Logger::new();
+        logger.set_silent();
+
+        let start = std::time::Instant::now();
         let mut errors: Vec<(Url, Diagnostic)> = Vec::new();
         let mut lints: Vec<(Url, Diagnostic)> = Vec::new();
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
@@ -78,7 +76,7 @@ impl Parser {
                 // Generate and store new symbols
                 if let Ok(mut symbols) = outer_symbols.lock() {
                     let (s, m) = Self::parse_symbols(&linker);
-                    lints.append(&mut Self::generate_lints(&linker, &s));
+                    lints.append(&mut Self::diagnostics(&linker, &s));
                     let optimizations = Self::parse_optimizations(&linker);
                     log::info!(&format!("{} symbol(s)", s.len()));
                     *symbols = Some((s, m, optimizations));
@@ -123,36 +121,28 @@ impl Parser {
             });
         }
 
-        // Send Diagnostics to client
-        let mut diagnostics = HashMap::new();
+        // Update diagnostics for all files
+        if let Ok(mut diagnostics) = outer_diagnostics.lock() {
+            let mut workspace_diagnostics = HashMap::new();
 
-        // Make sure to send empty diagnostics for any previous files so they get cleared
-        if let Ok(mut urls) = outer_diagnostic_urls.lock() {
-            for uri in urls.drain(0..) {
-                diagnostics.insert(uri, Vec::new());
+            // Make sure to send empty diagnostics for any previousy used files so they get cleared
+            for uri in diagnostics.keys() {
+                workspace_diagnostics.insert(uri.clone(), Vec::new());
             }
-        }
 
-        for (uri, err) in errors {
-            diagnostics.entry(uri).or_insert_with(Vec::new).push(err);
-        }
-        for (uri, lint) in lints {
-            diagnostics.entry(uri).or_insert_with(Vec::new).push(lint);
-        }
-        for (uri, diagnostics) in &diagnostics {
-            client.send_custom_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
-                uri: uri.clone(),
-                diagnostics: diagnostics.clone(),
-                version: None
-            }).await;
-        }
-
-        if let Ok(mut urls) = outer_diagnostic_urls.lock() {
-            *urls = diagnostics.into_keys().collect();
+            // Insert new diagnostics
+            for (uri, err) in errors {
+                workspace_diagnostics.entry(uri).or_insert_with(Vec::new).push(err);
+            }
+            for (uri, lint) in lints {
+                workspace_diagnostics.entry(uri).or_insert_with(Vec::new).push(lint);
+            }
+            *diagnostics = workspace_diagnostics;
         }
 
         // Trigger new inlay hint fetching
         client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+        Some(())
     }
 
     pub fn get_token(
@@ -163,10 +153,7 @@ impl Parser {
         col: usize
 
     ) -> Option<(IncludeToken, LexerFile)> {
-        let mut logger = Logger::new();
-        logger.set_silent();
-
-        let (_, reader) = Self::load_project(&mut logger, current_file.clone(), documents);
+        let (_, reader) = Self::load_project(current_file.clone(), documents)?;
         let relative_file = current_file.strip_prefix(reader.base_dir()).unwrap().to_path_buf();
 
         let data = if let Ok(tokens) = tokens.lock() {
@@ -199,7 +186,6 @@ impl Parser {
         }
         None
     }
-
 
     fn resolve_reference(linker: &Linker, file_index: usize, start_index: usize, macro_call_id: Option<usize>, l: usize) -> Location {
         let context = linker.context();
@@ -267,19 +253,23 @@ impl Parser {
         }
     }
 
-    fn load_project(logger: &mut Logger, workspace_path: PathBuf, documents: &Arc<Mutex<RefCell<HashMap<String, String>>>>) -> (ProjectConfig, ProjectReader) {
-        // TODO cache config
-        let config = ProjectConfig::load(logger, &ProjectReader::from_absolute(workspace_path));
-        let reader = ProjectReader::from_relative(config.rom.input.clone());
+    fn load_project(workspace_path: PathBuf, documents: &Arc<Mutex<RefCell<HashMap<String, String>>>>) -> Option<(ProjectConfig, ProjectReader)> {
+        if let Ok(config) = ProjectConfig::try_load(&ProjectReader::from_absolute(workspace_path)) {
+            let reader = ProjectReader::from_relative(config.rom.input.clone());
 
-        // Overlay LS files on file system reader
-        if let Ok(documents) = documents.lock() {
-            let documents = documents.borrow();
-            for (path, text) in &*documents {
-                reader.overlay_file(PathBuf::from(path), text.clone());
+            // Overlay LS files on file system reader
+            if let Ok(documents) = documents.lock() {
+                let documents = documents.borrow();
+                for (path, text) in &*documents {
+                    reader.overlay_file(PathBuf::from(path), text.clone());
+                }
             }
+
+            Some((config, reader))
+
+        } else {
+            None
         }
-        (config, reader)
     }
 
     fn parse_symbols(linker: &Linker) -> (Vec<GBCSymbol>, Vec<MacroExpansion>) {
@@ -608,7 +598,7 @@ impl Parser {
         }).collect()
     }
 
-    fn generate_lints(linker: &Linker, symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
+    fn diagnostics(linker: &Linker, symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
         let mut lints = Vec::new();
         let mut constants = Vec::new();
         for symbol in symbols {

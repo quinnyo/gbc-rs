@@ -1,13 +1,15 @@
 // STD Dependencies -----------------------------------------------------------
 use std::io::prelude::*;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 use std::net::{SocketAddr, TcpStream};
 use std::collections::{HashMap, VecDeque};
-
+use std::sync::atomic::Ordering;
 
 // External Dependencies ------------------------------------------------------
+use tokio::runtime::Handle;
 use serde::Deserialize;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
@@ -19,10 +21,11 @@ use crate::types::{InlayHintsNotification, InlayHintsParams};
 
 
 // Types ----------------------------------------------------------------------
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct EmulatorStatus {
     emulator: String,
     debugger: u8,
+    pc: u16,
     paused: u8,
     menu: u8,
     filename: String,
@@ -37,135 +40,254 @@ pub struct EmulatorAddressValue {
 }
 
 
-// Emulator Communication -----------------------------------------------------
-pub async fn watch(
+// Emulator Connection --------------------------------------------------------
+pub struct EmulatorConnection {
     client: Arc<Client>,
-    emulator: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
-    queries: Arc<Mutex<VecDeque<u16>>>,
-    results: Arc<Mutex<HashMap<u16, u8>>>
-) {
-    let addr: SocketAddr = "127.0.0.1:8765".parse().unwrap();
-    loop {
-        if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(10)) {
-            log::info!("Emulator attached");
-            emulator.store(true, std::sync::atomic::Ordering::SeqCst);
-            handle(client.clone(), stream, shutdown.clone(), queries.clone(), results.clone()).await;
-            emulator.store(false, std::sync::atomic::Ordering::SeqCst);
-            log::info!("Emulator detached");
+    running: Arc<AtomicBool>,
+    connection_closed: Arc<AtomicBool>,
+    pub status: Arc<Mutex<Option<EmulatorStatus>>>,
+    pub queries: Arc<Mutex<VecDeque<u16>>>,
+    pub results: Arc<Mutex<HashMap<u16, u8>>>,
+}
+
+impl EmulatorConnection {
+    pub fn new(client: Arc<Client>) -> Self {
+        Self {
+            client,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            running: Arc::new(AtomicBool::new(false)),
+            connection_closed: Arc::new(AtomicBool::new(false)),
+            status: Arc::new(Mutex::new(None)),
+            queries: Arc::new(Mutex::new(VecDeque::new())),
+            results: Arc::new(Mutex::new(HashMap::new())),
         }
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
-}
 
-async fn handle(
-    client: Arc<Client>,
-    stream: TcpStream,
-    shutdown: Arc<AtomicBool>,
-    queries: Arc<Mutex<VecDeque<u16>>>,
-    results: Arc<Mutex<HashMap<u16, u8>>>
-) {
-    communicate(client, stream, shutdown, queries, move |msg| {
-        if let Ok(status) = serde_json::from_str::<EmulatorStatus>(msg) {
-            Some(format!("{} via {} [{}]", status.title, status.emulator, if status.debugger == 1 {
-                "DEBUGGER"
+    pub async fn listen(&self, rom_path: PathBuf) {
 
-            } else if status.menu == 1 {
-                "MENU"
-
-            } else if status.paused == 1 {
-                "PAUSED"
-
-            } else {
-                "RUNNING"
-            }))
-
-        } else if let Ok(value) = serde_json::from_str::<EmulatorAddressValue>(msg) {
-            if let Ok(mut r) = results.lock() {
-                r.insert(value.address, value.value);
-            }
-            None
-
-        } else {
-            log::info!(&format!("Unknown Emulator Message: {:?}", msg));
-            None
+        // Stop any running instance of the emulator connection
+        if self.running.load(Ordering::SeqCst) {
+            self.shutdown().await;
         }
 
-    }).await;
-}
+        // Setup Running State
+        self.shutdown.store(false, Ordering::SeqCst);
+        self.running.store(true, Ordering::SeqCst);
+        self.connection_closed.store(false, Ordering::SeqCst);
 
-async fn communicate<C: FnMut(&str) -> Option<String>>(
-    client: Arc<Client>,
-    mut stream: TcpStream,
-    shutdown: Arc<AtomicBool>,
-    queries: Arc<Mutex<VecDeque<u16>>>,
-    mut message: C
-) {
-    // Setup Stream
-    stream.set_nodelay(true).ok();
-    stream.set_read_timeout(Some(Duration::from_millis(25))).ok();
-    stream.write_all(&[0x00, 0xE0]).ok();
+        let handle = Handle::current();
+        let client = self.client.clone();
+        let status = self.status.clone();
+        let queries = self.queries.clone();
+        let results = self.results.clone();
+        let shutdown = self.shutdown.clone();
+        let running = self.running.clone();
+        let connection_closed = self.connection_closed.clone();
+        handle.spawn(async move {
+            Self::connect(client, status, queries, results, running, shutdown, connection_closed).await;
+        });
+    }
 
-    // Report Progress to Editor
-    let token = NumberOrString::String("emulation".to_string());
-    client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
-        token: token.clone()
+    pub async fn shutdown(&self) {
+        if self.running.load(Ordering::SeqCst) {
+            // Setup shutdown state
+            self.shutdown.store(true, Ordering::SeqCst);
+            self.running.store(false, Ordering::SeqCst);
+            self.connection_closed.store(false, Ordering::SeqCst);
 
-    }).await.ok();
-    client.show_progress_begin(token.clone(), "Emulating", "Connecting...").await;
-
-    // Send and Receive Data from Emulator
-    let mut status_timer = Instant::now();
-    let mut buffer: Vec<u8> = Vec::new();
-    let mut received = [0; 1024];
-    let mut update_hints = Instant::now();
-    loop {
-        // Close connection if LSP is shutting down
-        if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
-            break;
-        }
-
-        // Handle emulator queries
-        if let Ok(mut q) = queries.try_lock() {
-            while let Some(address) = q.pop_front() {
-                stream.write_all(&[address as u8, (address >> 8) as u8]).ok();
+            // Wait for connection to be closed
+            while !self.connection_closed.load(Ordering::SeqCst) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
         }
+    }
 
-        // Query emulator status
-        if status_timer.elapsed() > Duration::from_millis(250) {
-            stream.write_all(&[0x00, 0xE0]).ok();
-            status_timer = Instant::now();
+    async fn connect(
+        client: Arc<Client>,
+        status: Arc<Mutex<Option<EmulatorStatus>>>,
+        queries: Arc<Mutex<VecDeque<u16>>>,
+        results: Arc<Mutex<HashMap<u16, u8>>>,
+        running: Arc<AtomicBool>,
+        shutdown: Arc<AtomicBool>,
+        connection_closed: Arc<AtomicBool>
+    ) {
+        let addr: SocketAddr = "127.0.0.1:8765".parse().unwrap();
+        while running.load(Ordering::SeqCst) {
+            if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(10)) {
+                log::info!("Emulator connected");
+
+                // Handle connection
+                let inner_results = results.clone();
+                Self::connection(
+                    stream,
+                    client.clone(),
+                    status.clone(),
+                    queries.clone(),
+                    shutdown.clone(),
+                    move |msg| {
+
+                    if let Ok(status) = serde_json::from_str::<EmulatorStatus>(msg) {
+                        Some(status)
+
+                    } else if let Ok(value) = serde_json::from_str::<EmulatorAddressValue>(msg) {
+                        if let Ok(mut r) = inner_results.lock() {
+                            r.insert(value.address, value.value);
+                        }
+                        None
+
+                    } else {
+                        log::info!(&format!("Unknown Emulator Message: {:?}", msg));
+                        None
+                    }
+
+                }).await;
+                log::info!("Emulator disconnected");
+            }
+            log::info!("Emulator connecting...");
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
+        connection_closed.store(true, Ordering::SeqCst);
+    }
 
-        // Send updated hints to client in a regular fashion
-        if update_hints.elapsed() > Duration::from_millis(5000) {
-            client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
-            update_hints = Instant::now();
-        }
+    async fn connection<C: FnMut(&str) -> Option<EmulatorStatus>>(
+        mut stream: TcpStream,
+        client: Arc<Client>,
+        status: Arc<Mutex<Option<EmulatorStatus>>>,
+        queries: Arc<Mutex<VecDeque<u16>>>,
+        shutdown: Arc<AtomicBool>,
+        mut message: C
+    ) {
+        // TCP Stream setup
+        stream.set_nodelay(true).ok();
+        stream.set_read_timeout(Some(Duration::from_millis(10))).ok();
+        stream.write_all(&[0x00, 0xE0]).ok();
 
-        // TODO exit if no status is received for 1000ms
-        match stream.read(&mut received) {
-            Ok(0) => break,
-            Ok(n) => {
-                for i in &received[0..n] {
-                    buffer.push(*i);
-                    if *i == '}' as u8 {
-                        let part = std::mem::replace(&mut buffer, Vec::new());
-                        if let Ok(json) = String::from_utf8(part) {
-                            if let Some(message) = message(json.trim()) {
-                                client.show_progress_report(token.clone(), message).await;
+        // Report Progress to Editor
+        let token = NumberOrString::String("emulation".to_string());
+        client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+            token: token.clone()
+
+        }).await.ok();
+        client.show_progress_begin(token.clone(), "Emulating", "Connecting...").await;
+
+        // Timers
+        let mut query_status_timer = Instant::now();
+        let mut trigger_hints_refresh = Instant::now();
+        let mut last_status_response = Instant::now();
+
+        // Handle Emulator connection
+        let mut last_status: Option<EmulatorStatus> = None;
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut received = [0; 1024];
+        loop {
+            // Close connection if LSP is shutting down or emulator stopped sending status responses
+            if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                log::info!("Emulator closing connection...");
+                break;
+
+            } else if last_status_response.elapsed() > Duration::from_millis(2500) {
+                log::info!("Emulator no status within 2500ms...");
+                break;
+            }
+
+            // Send address queries to emulator
+            if let Ok(mut q) = queries.try_lock() {
+                while let Some(address) = q.pop_front() {
+                    stream.write_all(&[address as u8, (address >> 8) as u8]).ok();
+                }
+            }
+
+            // Receive messages from emulator
+            let mut new_status = None;
+            match stream.read(&mut received) {
+                Ok(0) => break,
+                Ok(n) => {
+                    for i in &received[0..n] {
+                        buffer.push(*i);
+                        if *i == '}' as u8 {
+                            let part = std::mem::replace(&mut buffer, Vec::new());
+                            if let Ok(json) = String::from_utf8(part) {
+                                if let Some(s) = message(json.trim()) {
+                                    new_status = Some(s);
+                                }
                             }
                         }
                     }
+                },
+                Err(e) => if e.kind() != std::io::ErrorKind::WouldBlock {
+                    log::warn!(&format!("Emulator Error: {:?}", e.kind()));
+                    break;
                 }
-            },
-            Err(e) => if e.kind() != std::io::ErrorKind::WouldBlock {
-                log::warn!(&format!("Emulator Error: {:?}", e.kind()));
-                break;
+            }
+
+            // Query emulator status periodically
+            if query_status_timer.elapsed() > Duration::from_millis(200) {
+                stream.write_all(&[0x00, 0xE0]).ok();
+                query_status_timer = Instant::now();
+            }
+
+            // Forward emulation status to editor
+            if let Some(s) = new_status {
+
+                // TODO verify file path and ROM crc and report mismatch / ignore any queries by
+                // not setting the status on the outside Analyzer
+
+                // Update Status Info in Analyzer
+                if let Ok(mut status) = status.lock() {
+                    *status = Some(s.clone());
+                }
+
+                // Update Progress Report
+                let info = format!("{} via {}", s.title, s.emulator);
+                let message = if s.debugger == 1 {
+                    format!("{} [STOPPED] [BRK @ ${:0>4X}]", info, s.pc)
+
+                } else if s.menu == 1 {
+                    format!("{} [STOPPED] [IN MENU]", info)
+
+                } else if s.paused == 1 {
+                    format!("{} [PAUSED]", info)
+
+                } else {
+                    format!("{} [RUNNING]", info)
+                };
+                client.show_progress_report(token.clone(), message).await;
+
+                // Refresh hints
+                let refresh = if let Some(ref ls) = last_status {
+                    // Trigger in case of mode change
+                    if s.menu != ls.menu || s.debugger != ls.debugger || s.paused != ls.paused {
+                        true
+
+                    // Trigger when PC changes during active debugger
+                    } else if s.debugger == 1 && s.pc != ls.pc {
+                        true
+
+                    // Otherwise periodically update the hints
+                    } else if trigger_hints_refresh.elapsed() > Duration::from_millis(5000) {
+                        trigger_hints_refresh = Instant::now();
+                        true
+
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                };
+                if refresh {
+                    client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+                }
+                last_status_response = Instant::now();
+                last_status = Some(s);
             }
         }
+        // Update Editor Status
+        if let Ok(mut status) = status.lock() {
+            *status = None;
+        }
+        client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+        client.show_progress_end(token, "Emulating stopped").await;
     }
-    client.show_progress_end(token, "Emulating stopped").await;
 }
 

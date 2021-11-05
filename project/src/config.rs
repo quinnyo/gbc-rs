@@ -19,6 +19,8 @@ use crate::reader::ProjectReader;
 // GBC Project Configuration --------------------------------------------------
 #[derive(Debug, Deserialize)]
 pub struct ProjectConfig {
+    #[serde(default)]
+    file: PathBuf,
     pub rom: RomConfig,
     pub emulator: HashMap<String, EmulatorConfig>,
     #[serde(default)]
@@ -27,8 +29,11 @@ pub struct ProjectConfig {
 
 impl ProjectConfig {
     pub fn load(logger: &mut Logger, reader: &ProjectReader) -> ProjectConfig {
-        match Self::try_load(logger, reader) {
-            Ok(project) => project,
+        match Self::try_load(reader) {
+            Ok(project) => {
+                logger.info(format!("Loaded project configuration from {}", project.file.display()));
+                project
+            },
             Err(err) => {
                 logger.fail(Logger::format_error(
                     format!("Failed when trying to parse project configuration file!\n\n{}", err.to_string())
@@ -86,7 +91,7 @@ impl ProjectConfig {
         logger.finish(result);
     }
 
-    pub fn try_load(logger: &mut Logger, reader: &ProjectReader) -> Result<ProjectConfig, IOError> {
+    pub fn try_load(reader: &ProjectReader) -> Result<ProjectConfig, IOError> {
         let mut dir = reader.base_dir().clone();
         loop {
             let mut config_file = dir.clone();
@@ -109,7 +114,6 @@ impl ProjectConfig {
                 output_file.push(project.rom.output);
                 project.rom.output = output_file;
 
-                logger.info(format!("Loaded project configuration from {}", config_file.display()));
                 return Ok(project);
 
             } else if let Some(parent) = dir.parent() {

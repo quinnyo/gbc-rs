@@ -3,20 +3,21 @@ use std::thread;
 use std::path::PathBuf;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 
 
 // External Dependencies ------------------------------------------------------
 use tokio::runtime::Handle;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::DocumentSymbol;
-use tower_lsp::lsp_types::{Range, NumberOrString};
-use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
+use tower_lsp::lsp_types::{Diagnostic, DocumentSymbol, Range, NumberOrString};
+use tower_lsp::lsp_types::{PublishDiagnosticsParams, SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
+use tower_lsp::lsp_types::notification::PublishDiagnostics;
 
 
 // Internal Dependencies ------------------------------------------------------
+use project::{ProjectConfig, ProjectReader};
 use compiler::lexer::{
     stage::include::IncludeToken,
     LexerToken,
@@ -24,7 +25,7 @@ use compiler::lexer::{
 };
 
 use crate::{
-    emulator,
+    emulator::EmulatorConnection,
     parser::Parser,
     types::{
         ServerStatusParams, ServerStatusNotification,
@@ -45,30 +46,24 @@ pub struct Analyzer {
     tokens: Mutex<RefCell<HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>>>,
     workspace_path: Arc<Mutex<Option<PathBuf>>>,
     symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
-    diagnostic_urls: Arc<Mutex<Vec<Url>>>,
+    diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
     link_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
     link_gen: Arc<AtomicUsize>,
-    emulator: Arc<AtomicBool>,
-    emulator_queries: Arc<Mutex<VecDeque<u16>>>,
-    emulator_results: Arc<Mutex<HashMap<u16, u8>>>,
-    shutdown: Arc<AtomicBool>,
+    emulator_connection: Arc<EmulatorConnection>
 }
 
 impl Analyzer {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
-            client,
+            client: client.clone(),
             documents: Arc::new(Mutex::new(RefCell::new(HashMap::new()))),
             tokens: Mutex::new(RefCell::new(HashMap::new())),
             workspace_path: Arc::new(Mutex::new(None)),
             symbols: Arc::new(Mutex::new(None)),
-            diagnostic_urls: Arc::new(Mutex::new(Vec::new())),
+            diagnostics: Arc::new(Mutex::new(HashMap::new())),
             link_error: Arc::new(Mutex::new(None)),
             link_gen: Arc::new(AtomicUsize::new(0)),
-            emulator: Arc::new(AtomicBool::new(false)),
-            emulator_queries: Arc::new(Mutex::new(VecDeque::new())),
-            emulator_results: Arc::new(Mutex::new(HashMap::new())),
-            shutdown: Arc::new(AtomicBool::new(false))
+            emulator_connection: Arc::new(EmulatorConnection::new(client)),
         }
     }
 
@@ -78,24 +73,22 @@ impl Analyzer {
             message: Some("Ready".to_string())
 
         }).await;
-
-        let handle = Handle::current();
-        let client = self.client.clone();
-        let emulator = self.emulator.clone();
-        let queries = self.emulator_queries.clone();
-        let results = self.emulator_results.clone();
-        let shutdown = self.shutdown.clone();
-        handle.spawn(async move {
-            emulator::watch(client, emulator, shutdown, queries, results).await;
-        });
     }
 
     pub async fn shutdown(&self) {
-        self.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.emulator_connection.shutdown().await;
     }
 
     // TODO handle deletion and renaming of files
-    pub fn set_workspace_path(&self, path: PathBuf) {
+    pub async fn set_workspace_path(&self, path: PathBuf) {
+        // Load config and get path to output ROM file to start emulator connection
+        let config = ProjectConfig::try_load(&ProjectReader::from_absolute(path.clone())).ok();
+        if let Some(config) = config {
+            self.emulator_connection.listen(config.rom.output).await;
+
+        } else {
+            self.emulator_connection.shutdown().await;
+        }
         if let Ok(mut workspace_path) = self.workspace_path.lock() {
             *workspace_path = Some(path);
         }
@@ -212,8 +205,84 @@ impl Analyzer {
             }),
             _ => None
 
-        // TODO sort by relevance?
         }).collect();
+    }
+
+    pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
+        if let Some(symbol) = self.symbol(current_file, line, col).await {
+            let value = self.query_symbol_memory_values(&[&symbol])[0];
+            let info = symbol.info();
+            let location = symbol.location;
+            let is_global = symbol.is_global;
+            let m = match symbol.kind {
+                SymbolKind::Namespace => {
+                    Some(format!("SECTION \"{}\",{}", symbol.name, symbol.value))
+                },
+                SymbolKind::Constant => {
+                    Some(format!("CONST {}", symbol.name))
+                },
+                // TODO show expanded tokens, need to record expanded entries (already needed above)
+                // and then be able to to_string() them all again into source code
+                SymbolKind::Constructor => {
+                    Some(format!("MACRO {}{}", symbol.name, symbol.value))
+                },
+                SymbolKind::Function => {
+                    Some(format!("{}: ; ({})", symbol.name, info))
+                },
+                SymbolKind::Variable => {
+                    Some(format!("{}: {}; ({}){}", symbol.name, if symbol.width == 1 {
+                        "DB"
+
+                    } else if symbol.width == 2 {
+                        "DW"
+
+                    } else {
+                        "DS"
+
+                    }, info, if let Some(value) = value {
+                        if symbol.width == 1 {
+                            format!("\n\nEMULATED: ${:0>2X} / {}", value, value)
+
+                        } else {
+                            format!("\n\nEMULATED: ${:0>4X} / {}", value, value)
+                        }
+
+                    } else {
+                        "".to_string()
+                    }))
+                },
+                SymbolKind::Field => {
+                    Some(format!("{}:", symbol.name))
+                },
+                _ => None
+            };
+            m.map(|s| (if is_global {
+                format!("GLOBAL {}", s)
+
+            } else {
+                s
+            }, location))
+
+        } else {
+            None
+        }
+    }
+
+    pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<GBCSymbol> {
+        let current_file = PathBuf::from(current_file);
+        let uri = Url::from_file_path(&current_file).unwrap();
+        if let Some((token, _)) = Parser::get_token(&self.tokens, &self.documents, current_file.clone(), line, col) {
+            let symbol_name = token.inner().value.to_string();
+            let symbols = self.get_symbols(current_file).await.0;
+            symbols.into_iter().find(|symbol| {
+                // For child labels only search in the current file
+                symbol.name == symbol_name &&
+                    (symbol.kind != SymbolKind::Method || symbol.location.uri == uri)
+            })
+
+        } else {
+            None
+        }
     }
 
     pub async fn inlay_hints(&self, current_file: PathBuf) -> Vec<InlayHint> {
@@ -366,84 +435,15 @@ impl Analyzer {
                 }
             }
         }).collect());
+
+        // TODO emulator PC location with register info
+        // TODO show as diagnostic instead?
+        // TODO special InlayHint::DebuggerHint
+        // TODO show breakpoints as well?
+        if let Ok(status) = self.emulator_connection.status.lock() {
+            // TODO convert PC into file / line
+        }
         hints
-    }
-
-    pub async fn hover(&self, current_file: PathBuf, line: usize, col: usize) -> Option<(String, Location)> {
-        if let Some(symbol) = self.symbol(current_file, line, col).await {
-            let value = self.query_symbol_memory_values(&[&symbol])[0];
-            let info = symbol.info();
-            let location = symbol.location;
-            let is_global = symbol.is_global;
-            let m = match symbol.kind {
-                SymbolKind::Namespace => {
-                    Some(format!("SECTION \"{}\",{}", symbol.name, symbol.value))
-                },
-                SymbolKind::Constant => {
-                    Some(format!("CONST {}", symbol.name))
-                },
-                // TODO show expanded tokens, need to record expanded entries (already needed above)
-                // and then be able to to_string() them all again into source code
-                SymbolKind::Constructor => {
-                    Some(format!("MACRO {}{}", symbol.name, symbol.value))
-                },
-                SymbolKind::Function => {
-                    Some(format!("{}: ; ({})", symbol.name, info))
-                },
-                SymbolKind::Variable => {
-                    Some(format!("{}: {}; ({}){}", symbol.name, if symbol.width == 1 {
-                        "DB"
-
-                    } else if symbol.width == 2 {
-                        "DW"
-
-                    } else {
-                        "DS"
-
-                    }, info, if let Some(value) = value {
-                        if symbol.width == 1 {
-                            format!("\n\nEMULATED: ${:0>2X} / {}", value, value)
-
-                        } else {
-                            format!("\n\nEMULATED: ${:0>4X} / {}", value, value)
-                        }
-
-                    } else {
-                        "".to_string()
-                    }))
-                },
-                SymbolKind::Field => {
-                    Some(format!("{}:", symbol.name))
-                },
-                _ => None
-            };
-            m.map(|s| (if is_global {
-                format!("GLOBAL {}", s)
-
-            } else {
-                s
-            }, location))
-
-        } else {
-            None
-        }
-    }
-
-    pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<GBCSymbol> {
-        let current_file = PathBuf::from(current_file);
-        let uri = Url::from_file_path(&current_file).unwrap();
-        if let Some((token, _)) = Parser::get_token(&self.tokens, &self.documents, current_file.clone(), line, col) {
-            let symbol_name = token.inner().value.to_string();
-            let symbols = self.get_symbols(current_file).await.0;
-            symbols.into_iter().find(|symbol| {
-                // For child labels only search in the current file
-                symbol.name == symbol_name &&
-                    (symbol.kind != SymbolKind::Method || symbol.location.uri == uri)
-            })
-
-        } else {
-            None
-        }
     }
 }
 
@@ -462,9 +462,10 @@ impl Analyzer {
                 workspace_path,
                 self.symbols.clone(),
                 self.link_error.clone(),
-                self.diagnostic_urls.clone(),
+                self.diagnostics.clone(),
                 self.documents.clone()
             ).await;
+            Self::publish_diagnostics(self.client.clone(), self.diagnostics.clone()).await;
         }
         if let Ok(symbols) = self.symbols.lock() {
             symbols.clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
@@ -483,8 +484,10 @@ impl Analyzer {
         }
 
         // Do nothing if no emulator is present
-        if !self.emulator.load(std::sync::atomic::Ordering::SeqCst) {
-            return results;
+        if let Ok(status) = self.emulator_connection.status.lock() {
+            if status.is_none() {
+                return results;
+            }
         }
 
         #[derive(Debug)]
@@ -497,7 +500,7 @@ impl Analyzer {
 
         // Query emulator
         let mut pending = Vec::with_capacity(symbols.len());
-        if let Ok(mut q) = self.emulator_queries.lock() {
+        if let Ok(mut q) = self.emulator_connection.queries.lock() {
             for symbol in symbols {
                 if let Some(address) = symbol.address {
                     if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
@@ -529,7 +532,7 @@ impl Analyzer {
         // Wait for results from emulator
         let started = Instant::now();
         while started.elapsed() < Duration::from_millis(300) {
-            if let Ok(mut r) = self.emulator_results.lock() {
+            if let Ok(mut r) = self.emulator_connection.results.lock() {
                 let mut waiting = 0;
                 for (i, pending) in pending.iter_mut().enumerate() {
                     match pending {
@@ -563,7 +566,7 @@ impl Analyzer {
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {
         let client = self.client.clone();
         let symbols = self.symbols.clone();
-        let diagnostic_urls = self.diagnostic_urls.clone();
+        let diagnostics = self.diagnostics.clone();
         let link_gen = self.link_gen.clone();
         let link_error = self.link_error.clone();
         let documents = self.documents.clone();
@@ -574,24 +577,42 @@ impl Analyzer {
 
         let handle = Handle::current();
         handle.spawn(async move {
-            // Wait for debounce purposes TODO better way to do this i.e. canceling the previous
-            // task?
+            // Wait for debounce purposes
             tokio::time::sleep(tokio::time::Duration::from_millis(THREAD_DEBOUNCE)).await;
 
             // Check if still the latest link request
             let latest_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
             if thread_gen == latest_gen {
                 Parser::link(
-                    client,
+                    client.clone(),
                     NumberOrString::Number(thread_gen as i32),
                     workspace_path,
                     symbols,
                     link_error,
-                    diagnostic_urls,
+                    diagnostics.clone(),
                     documents
                 ).await;
+                Self::publish_diagnostics(client, diagnostics).await;
             }
         });
+    }
+
+    async fn publish_diagnostics(client: Arc<Client>, diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>) {
+        let diagnostics = if let Ok(diagnostics) = diagnostics.lock() {
+            diagnostics.clone()
+
+        } else {
+            HashMap::new()
+        };
+
+        // Send diagnostics for all files
+        for (uri, diagnostics) in &diagnostics {
+            client.send_custom_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
+                uri: uri.clone(),
+                diagnostics: diagnostics.clone(),
+                version: None
+            }).await;
+        }
     }
 }
 
