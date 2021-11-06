@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicUsize;
 // External Dependencies ------------------------------------------------------
 use tokio::runtime::Handle;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Diagnostic, DocumentSymbol, Range, NumberOrString};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Range, NumberOrString};
 use tower_lsp::lsp_types::{PublishDiagnosticsParams, SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
 use tower_lsp::lsp_types::notification::PublishDiagnostics;
 
@@ -25,7 +25,7 @@ use compiler::lexer::{
 };
 
 use crate::{
-    emulator::EmulatorConnection,
+    emulator::{EmulatorConnection, EmulatorCommand, EmulatorStatus},
     parser::Parser,
     types::{
         ServerStatusParams, ServerStatusNotification,
@@ -47,6 +47,7 @@ pub struct Analyzer {
     workspace_path: Arc<Mutex<Option<PathBuf>>>,
     symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
     diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
+    addresses: Arc<Mutex<HashMap<usize, Location>>>,
     link_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
     link_gen: Arc<AtomicUsize>,
     emulator_connection: Arc<EmulatorConnection>
@@ -54,16 +55,24 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn new(client: Arc<Client>) -> Self {
+        let addresses: Arc<Mutex<HashMap<usize, Location>>> = Arc::new(Mutex::new(HashMap::new()));
+        let diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let emulator_connection = Arc::new(EmulatorConnection::new(
+            client.clone(),
+            diagnostics.clone(),
+            addresses.clone()
+        ));
         Self {
-            client: client.clone(),
+            client,
             documents: Arc::new(Mutex::new(RefCell::new(HashMap::new()))),
             tokens: Mutex::new(RefCell::new(HashMap::new())),
             workspace_path: Arc::new(Mutex::new(None)),
             symbols: Arc::new(Mutex::new(None)),
-            diagnostics: Arc::new(Mutex::new(HashMap::new())),
+            diagnostics,
+            addresses,
             link_error: Arc::new(Mutex::new(None)),
             link_gen: Arc::new(AtomicUsize::new(0)),
-            emulator_connection: Arc::new(EmulatorConnection::new(client)),
+            emulator_connection
         }
     }
 
@@ -289,6 +298,29 @@ impl Analyzer {
         }
     }
 
+    pub async fn emulator_command(&self, command: EmulatorCommand) {
+        if let Ok(mut c) = self.emulator_connection.commands.lock() {
+            c.push_back(command);
+        }
+    }
+
+    pub async fn toggle_breakpoint(&self, location: Location) {
+        if let Some(address) = self.address_from_location(location) {
+            self.emulator_command(EmulatorCommand::DebuggerToggleBreakpoint(address)).await;
+        }
+    }
+
+    fn address_from_location(&self, location: Location) -> Option<u16> {
+        if let Ok(addresses) = self.addresses.lock() {
+            for (address, loc) in addresses.iter() {
+                if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
+                    return Some(*address as u16);
+                }
+            }
+        }
+        None
+    }
+
     pub async fn inlay_hints(&self, current_file: PathBuf) -> Vec<InlayHint> {
         // Get the line of the first error in the current file (if any)
         let first_error_line = if let Ok(error) = self.link_error.lock() {
@@ -439,14 +471,6 @@ impl Analyzer {
                 }
             }
         }).collect());
-
-        // TODO emulator PC location with register info
-        // TODO show as diagnostic instead?
-        // TODO special InlayHint::DebuggerHint
-        // TODO show breakpoints as well?
-        if let Ok(status) = self.emulator_connection.status.lock() {
-            // TODO convert PC into file / line
-        }
         hints
     }
 }
@@ -467,9 +491,17 @@ impl Analyzer {
                 self.symbols.clone(),
                 self.link_error.clone(),
                 self.diagnostics.clone(),
+                self.addresses.clone(),
                 self.documents.clone()
+
             ).await;
-            Self::publish_diagnostics(self.client.clone(), self.diagnostics.clone()).await;
+            Self::publish_diagnostics(
+                self.client.clone(),
+                self.diagnostics.clone(),
+                self.addresses.clone(),
+                self.emulator_connection.status.clone()
+
+            ).await;
         }
         if let Ok(symbols) = self.symbols.lock() {
             symbols.clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
@@ -504,22 +536,22 @@ impl Analyzer {
 
         // Query emulator
         let mut pending = Vec::with_capacity(symbols.len());
-        if let Ok(mut q) = self.emulator_connection.queries.lock() {
+        if let Ok(mut q) = self.emulator_connection.commands.lock() {
             for symbol in symbols {
                 if let Some(address) = symbol.address {
                     if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
                         let address = address as u16;
                         if symbol.width == 1 {
                             pending.push(PendingResult::Byte(address));
-                            q.push_back(address);
+                            q.push_back(EmulatorCommand::QueryAddressValue(address));
 
                         } else {
                             pending.push(PendingResult::Word(
                                 address,
                                 address.saturating_add(1)
                             ));
-                            q.push_back(address);
-                            q.push_back(address.saturating_add(1));
+                            q.push_back(EmulatorCommand::QueryAddressValue(address));
+                            q.push_back(EmulatorCommand::QueryAddressValue(address.saturating_add(1)));
                         }
 
                     } else {
@@ -531,7 +563,6 @@ impl Analyzer {
                 results.push(None);
             }
         }
-        log::info!(&format!("Query Pending: {:?}", pending));
 
         // Wait for results from emulator
         let started = Instant::now();
@@ -563,7 +594,6 @@ impl Analyzer {
             }
             thread::sleep(Duration::from_millis(10));
         }
-        log::info!(&format!("Query Results: {:?}", results));
         results
     }
 
@@ -571,9 +601,11 @@ impl Analyzer {
         let client = self.client.clone();
         let symbols = self.symbols.clone();
         let diagnostics = self.diagnostics.clone();
+        let addresses = self.addresses.clone();
         let link_gen = self.link_gen.clone();
         let link_error = self.link_error.clone();
         let documents = self.documents.clone();
+        let status = self.emulator_connection.status.clone();
 
         // Bump symbol generation
         link_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -594,15 +626,67 @@ impl Analyzer {
                     symbols,
                     link_error,
                     diagnostics.clone(),
+                    addresses.clone(),
                     documents
                 ).await;
-                Self::publish_diagnostics(client, diagnostics).await;
+                Self::publish_diagnostics(client, diagnostics, addresses, status.clone()).await;
             }
         });
     }
 
-    async fn publish_diagnostics(client: Arc<Client>, diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>) {
-        let diagnostics = if let Ok(diagnostics) = diagnostics.lock() {
+    pub async fn publish_diagnostics(
+        client: Arc<Client>,
+        diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
+        addresses: Arc<Mutex<HashMap<usize, Location>>>,
+        status: Arc<Mutex<Option<EmulatorStatus>>>
+    ) {
+        let diagnostics = if let Ok(mut diagnostics) = diagnostics.lock() {
+
+            // Remove any Information diagnostics
+            for (_, diagnostics) in diagnostics.iter_mut() {
+                *diagnostics = diagnostics.iter().cloned().filter(|d| {
+                    !d.message.starts_with("Debugger")
+
+                }).collect();
+            }
+
+            if let Ok(status) = status.lock() {
+                // Add debugger location
+                if let Some(status) = status.as_ref() {
+                    if let Ok(addresses) = addresses.lock() {
+                        for b in &status.breakpoints {
+                            if let Some(location) = addresses.get(&(b.address as usize)) {
+                                let info = Diagnostic {
+                                    message: format!("Debugger Breakpoint @ ${:0>4X}", b.address),
+                                    range: location.range,
+                                    severity: Some(DiagnosticSeverity::Warning),
+                                    .. Diagnostic::default()
+                                };
+                                diagnostics.entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
+                            }
+                        }
+                        if status.debugger == 1 {
+                            if let Some(location) = addresses.get(&(status.pc as usize)) {
+                                let info = Diagnostic {
+                                    message: format!(
+                                        "Debugger Halt\nAF={:0>4X}\nBC={:0>4X}\nDE={:0>4X}\nHL={:0>4X}\nSP={:0>4X}\nPC={:0>4X}",
+                                        status.registers[0],
+                                        status.registers[1],
+                                        status.registers[2],
+                                        status.registers[3],
+                                        status.registers[4],
+                                        status.pc,
+                                    ),
+                                    range: location.range,
+                                    severity: Some(DiagnosticSeverity::Hint),
+                                    .. Diagnostic::default()
+                                };
+                                diagnostics.entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
+                            }
+                        }
+                    }
+                }
+            }
             diagnostics.clone()
 
         } else {

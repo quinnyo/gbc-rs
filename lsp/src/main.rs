@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
+use serde::Deserialize;
 use serde_json::Value;
 
 
@@ -16,7 +17,16 @@ mod emulator;
 mod parser;
 mod types;
 use self::analyzer::Analyzer;
+use self::emulator::EmulatorCommand;
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperimentalParams {
+    command: String,
+    #[serde(default)]
+    range: Range,
+    text_document: TextDocumentIdentifier
+}
 
 // Backend Implementation -----------------------------------------------------
 struct Backend {
@@ -150,13 +160,32 @@ impl LanguageServer for Backend {
     }
 
     async fn experimental_any(&self, params: Value) -> Result<Option<Value>> {
-        if let Value::Object(map) = params {
-            if let Some(Value::Object(text_document)) = map.get("textDocument") {
-                if let Some(Value::String(path)) = text_document.get("uri") {
-                    let url = Url::parse(path).unwrap();
-                    let hints = self.analyzer.inlay_hints(PathBuf::from(url.path())).await;
+        if let Ok(params) = serde_json::from_value::<ExperimentalParams>(params) {
+            match params.command.as_str() {
+                "view/inlay_hints" => {
+                    let hints = self.analyzer.inlay_hints(PathBuf::from(params.text_document.uri.path())).await;
                     return Ok(Some(serde_json::to_value(&hints).unwrap()))
-                }
+                },
+                "debugger/toggle_breakpoint" => {
+                    self.analyzer.toggle_breakpoint(Location {
+                        uri: params.text_document.uri,
+                        range: params.range
+
+                    }).await;
+                },
+                "debugger/step" => {
+                    self.analyzer.emulator_command(EmulatorCommand::DebuggerStep).await;
+                },
+                "debugger/step_over" => {
+                    self.analyzer.emulator_command(EmulatorCommand::DebuggerStepOver).await;
+                },
+                "debugger/finish" => {
+                    self.analyzer.emulator_command(EmulatorCommand::DebuggerFinish).await;
+                },
+                "debugger/continue" => {
+                    self.analyzer.emulator_command(EmulatorCommand::DebuggerContinue).await;
+                },
+                _ => {}
             }
         }
         Ok(None)

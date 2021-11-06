@@ -42,6 +42,7 @@ impl Parser {
         outer_symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
         outer_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
         outer_diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
+        outer_addresses: Arc<Mutex<HashMap<usize, Location>>>,
         documents: Arc<Mutex<RefCell<HashMap<String, String>>>>
 
     ) -> Option<()> {
@@ -59,7 +60,6 @@ impl Parser {
         let main_file = PathBuf::from(config.rom.input.file_name().unwrap());
         let mut compiler = Compiler::new();
         compiler.set_optimize_instructions();
-        compiler.set_strip_debug_code();
 
         // Run linker
         let mut logger = Logger::new();
@@ -74,11 +74,16 @@ impl Parser {
                 client.show_progress_end(link_id, "Done").await;
 
                 // Generate and store new symbols
+                let (s, m) = Self::symbols(&linker);
+                log::info!(&format!("{} symbol(s)", s.len()));
+                lints.append(&mut Self::diagnostics(&linker, &s));
+
+                if let Ok(mut addresses) = outer_addresses.lock() {
+                    *addresses = Self::addresses(&linker);
+                }
+
                 if let Ok(mut symbols) = outer_symbols.lock() {
-                    let (s, m) = Self::parse_symbols(&linker);
-                    lints.append(&mut Self::diagnostics(&linker, &s));
-                    let optimizations = Self::parse_optimizations(&linker);
-                    log::info!(&format!("{} symbol(s)", s.len()));
+                    let optimizations = Self::optimizations(&linker);
                     *symbols = Some((s, m, optimizations));
                 }
             },
@@ -114,30 +119,22 @@ impl Parser {
             }
         }
 
-        // Update Error State
         if let Ok(mut error) = outer_error.lock() {
             *error = errors.first().map(|(url, diagnostic)| {
                 (url.clone(), diagnostic.range.start.line as usize, diagnostic.range.start.character as usize)
             });
         }
 
-        // Update diagnostics for all files
         if let Ok(mut diagnostics) = outer_diagnostics.lock() {
-            let mut workspace_diagnostics = HashMap::new();
-
-            // Make sure to send empty diagnostics for any previousy used files so they get cleared
-            for uri in diagnostics.keys() {
-                workspace_diagnostics.insert(uri.clone(), Vec::new());
+            for (_, diagnostics) in diagnostics.iter_mut() {
+                diagnostics.clear();
             }
-
-            // Insert new diagnostics
             for (uri, err) in errors {
-                workspace_diagnostics.entry(uri).or_insert_with(Vec::new).push(err);
+                diagnostics.entry(uri).or_insert_with(Vec::new).push(err);
             }
             for (uri, lint) in lints {
-                workspace_diagnostics.entry(uri).or_insert_with(Vec::new).push(lint);
+                diagnostics.entry(uri).or_insert_with(Vec::new).push(lint);
             }
-            *diagnostics = workspace_diagnostics;
         }
 
         // Trigger new inlay hint fetching
@@ -272,7 +269,25 @@ impl Parser {
         }
     }
 
-    fn parse_symbols(linker: &Linker) -> (Vec<GBCSymbol>, Vec<MacroExpansion>) {
+    fn addresses(linker: &Linker) -> HashMap<usize, Location> {
+        let mut addresses = HashMap::with_capacity(512);
+        let context = linker.context();
+        let sections = linker.section_entries();
+        for entries in sections {
+            for entry in entries {
+                let location = Self::location_from_file_index(
+                    &context.files,
+                    entry.inner.file_index,
+                    entry.inner.start_index,
+                    entry.inner.end_index
+                );
+                addresses.insert(entry.offset, location);
+            }
+        }
+        addresses
+    }
+
+    fn symbols(linker: &Linker) -> (Vec<GBCSymbol>, Vec<MacroExpansion>) {
         let mut symbols: Vec<GBCSymbol> = Vec::new();
         let context = linker.context();
 
@@ -584,7 +599,7 @@ impl Parser {
         }).collect(), macro_expansions)
     }
 
-    fn parse_optimizations(linker: &Linker) -> Optimizations {
+    fn optimizations(linker: &Linker) -> Optimizations {
         let context = linker.context();
         context.optimizations.into_iter().filter(|(inner, _)| {
             inner.macro_call_id.is_none()
