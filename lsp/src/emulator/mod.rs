@@ -1,24 +1,26 @@
 // STD Dependencies -----------------------------------------------------------
 use std::io::prelude::*;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 use std::net::{SocketAddr, TcpStream};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
+
 
 // External Dependencies ------------------------------------------------------
 use tokio::runtime::Handle;
 use serde::Deserialize;
-use tower_lsp::Client;
-use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
-use tower_lsp::lsp_types::{Diagnostic, Location, Url, NumberOrString, WorkDoneProgressCreateParams};
 
 
-use crate::analyzer::Analyzer;
 // Internal Dependencies ------------------------------------------------------
-use crate::types::{InlayHintsNotification, InlayHintsParams};
+use crate::state::State;
+
+
+// Modules --------------------------------------------------------------------
+mod status;
+pub use self::status::EmulatorStatus;
 
 
 // Types ----------------------------------------------------------------------
@@ -32,67 +34,32 @@ pub enum EmulatorCommand {
     DebuggerContinue,
 }
 
-#[derive(Debug, Default, Eq, PartialEq, Deserialize, Clone)]
-pub struct EmulatorBreakpoint {
-    pub address: u16,
-    pub bank: u16
-}
-
-#[derive(Debug, Default, Deserialize, Clone)]
-pub struct EmulatorStatus {
-    emulator: String,
-    pub debugger: u8,
-    pub pc: u16,
-    pub registers: [u16; 5],
-    paused: u8,
-    menu: u8,
-    pub breakpoints: Vec<EmulatorBreakpoint>,
-    filename: String,
-    crc: u32,
-    title: String
-}
-
 #[derive(Debug, Deserialize)]
 pub struct EmulatorAddressValue {
     address: u16,
     value: u8
 }
 
+
 // Emulator Connection --------------------------------------------------------
 pub struct EmulatorConnection {
-    client: Arc<Client>,
-    diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
-    addresses: Arc<Mutex<HashMap<usize, Location>>>,
+    state: State,
     shutdown: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
     connection_closed: Arc<AtomicBool>,
-    pub status: Arc<Mutex<Option<EmulatorStatus>>>,
-    pub commands: Arc<Mutex<VecDeque<EmulatorCommand>>>,
-    pub results: Arc<Mutex<HashMap<u16, u8>>>,
 }
 
 impl EmulatorConnection {
-    pub fn new(
-        client: Arc<Client>,
-        diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
-        addresses: Arc<Mutex<HashMap<usize, Location>>>
-
-    ) -> Self {
+    pub fn new(state: State) -> Self {
         Self {
-            client,
-            diagnostics,
-            addresses,
+            state,
             shutdown: Arc::new(AtomicBool::new(false)),
             running: Arc::new(AtomicBool::new(false)),
             connection_closed: Arc::new(AtomicBool::new(false)),
-            status: Arc::new(Mutex::new(None)),
-            commands: Arc::new(Mutex::new(VecDeque::new())),
-            results: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn listen(&self, rom_path: PathBuf) {
-
         // Stop any running instance of the emulator connection
         if self.running.load(Ordering::SeqCst) {
             self.shutdown().await;
@@ -104,29 +71,13 @@ impl EmulatorConnection {
         self.connection_closed.store(false, Ordering::SeqCst);
 
         let handle = Handle::current();
-        let client = self.client.clone();
-        let status = self.status.clone();
-        let diagnostics = self.diagnostics.clone();
-        let addresses = self.addresses.clone();
-        let commands = self.commands.clone();
-        let results = self.results.clone();
+        let state = self.state.clone();
         let shutdown = self.shutdown.clone();
         let running = self.running.clone();
         let connection_closed = self.connection_closed.clone();
         handle.spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-            Self::connect(
-                client,
-                rom_path,
-                status,
-                diagnostics,
-                addresses,
-                commands,
-                results,
-                running,
-                shutdown,
-                connection_closed
-            ).await;
+            Self::connect(state, rom_path, running, shutdown, connection_closed).await;
         });
     }
 
@@ -145,13 +96,8 @@ impl EmulatorConnection {
     }
 
     async fn connect(
-        client: Arc<Client>,
+        state: State,
         rom_path: PathBuf,
-        status: Arc<Mutex<Option<EmulatorStatus>>>,
-        diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
-        addresses: Arc<Mutex<HashMap<usize, Location>>>,
-        commands: Arc<Mutex<VecDeque<EmulatorCommand>>>,
-        results: Arc<Mutex<HashMap<u16, u8>>>,
         running: Arc<AtomicBool>,
         shutdown: Arc<AtomicBool>,
         connection_closed: Arc<AtomicBool>
@@ -162,15 +108,11 @@ impl EmulatorConnection {
                 log::info!(&format!("Emulator connected for {}", rom_path.display()));
 
                 // Handle connection
-                let inner_results = results.clone();
+                let inner_state = state.clone();
                 Self::connection(
                     stream,
-                    client.clone(),
+                    state.clone(),
                     rom_path.clone(),
-                    status.clone(),
-                    diagnostics.clone(),
-                    addresses.clone(),
-                    commands.clone(),
                     shutdown.clone(),
                     move |msg| {
 
@@ -178,9 +120,7 @@ impl EmulatorConnection {
                         Some(status)
 
                     } else if let Ok(value) = serde_json::from_str::<EmulatorAddressValue>(msg) {
-                        if let Ok(mut r) = inner_results.lock() {
-                            r.insert(value.address, value.value);
-                        }
+                        inner_state.results().insert(value.address, value.value);
                         None
 
                     } else {
@@ -198,12 +138,8 @@ impl EmulatorConnection {
 
     async fn connection<C: FnMut(&str) -> Option<EmulatorStatus>>(
         mut stream: TcpStream,
-        client: Arc<Client>,
+        state: State,
         rom_path: PathBuf,
-        status: Arc<Mutex<Option<EmulatorStatus>>>,
-        diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
-        addresses: Arc<Mutex<HashMap<usize, Location>>>,
-        commands: Arc<Mutex<VecDeque<EmulatorCommand>>>,
         shutdown: Arc<AtomicBool>,
         mut message: C
     ) {
@@ -213,17 +149,10 @@ impl EmulatorConnection {
         stream.write_all(&[0x00, 0x00, 0x00]).ok();
 
         // Report Progress to Editor
-        let token = NumberOrString::String("emulation".to_string());
-        client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
-            token: token.clone()
-
-        }).await.ok();
-        client.show_progress_begin(token.clone(), "Emulating", "Connecting...").await;
+        let progress_token = state.start_progress("Emulating", "Connecting...").await;
 
         // Clear any outstand commands
-        if let Ok(mut c) = commands.try_lock() {
-            c.clear();
-        }
+        state.commands().clear();
 
         // Timers
         let mut query_status_timer = Instant::now();
@@ -278,109 +207,84 @@ impl EmulatorConnection {
             // Forward emulation status to editor
             if let Some(s) = received_status {
 
-                // TODO verify file path and ROM crc and report mismatch / ignore any commands by
-                // not setting the status on the outside Analyzer
+                // TODO also compare CRC
                 let does_rom_match = PathBuf::from(&s.filename) == rom_path;
 
                 // Update Progress Report
-                let info = format!("{} via {}", s.title, s.emulator);
-                let message = if !does_rom_match {
-                    format!("ROM path does not match")
-
-                } else if s.debugger == 1 {
-                    format!("{} [STOPPED] [BRK @ ${:0>4X}]", info, s.pc)
-
-                } else if s.menu == 1 {
-                    format!("{} [STOPPED] [IN MENU]", info)
-
-                } else if s.paused == 1 {
-                    format!("{} [PAUSED]", info)
-
-                } else {
-                    format!("{} [RUNNING]", info)
-                };
-                client.show_progress_report(token.clone(), message).await;
+                state.update_progress(progress_token.clone(), s.to_status_message(does_rom_match)).await;
 
                 // Only update and set status if ROM file matches
                 if does_rom_match {
                     // Update Status Info in Analyzer
-                    if let Ok(mut status) = status.lock() {
-                        *status = Some(s.clone());
-                    }
-                    let mut update_diagnostics = false;
-                    let update_hints = if let Some(ref ls) = last_status {
+                    state.set_status(Some(s.clone()));
+                    let (update_hints, update_diagnostics, update_outline) = if let Some(ref ls) = last_status {
                         if s.debugger != ls.debugger {
-                            update_diagnostics = true;
-                            true
+                            (true, true, true)
 
                         } else if s.menu != ls.menu {
-                            true
+                            (true, false, false)
 
                         } else if s.paused != ls.paused {
-                            true
+                            (true, false, false)
 
                         // Trigger when PC changes during active debugger
                         } else if s.debugger == 1 && (s.pc != ls.pc) {
-                            update_diagnostics = true;
-                            true
+                            (true, true, true)
 
-                        // Otherwise periodically update the hints
-                        } else if trigger_hints_refresh.elapsed() > Duration::from_millis(5000) {
+                        // Otherwise periodically update the hints and outline
+                        } else if s.debugger == 0 && trigger_hints_refresh.elapsed() > Duration::from_millis(5000) {
                             trigger_hints_refresh = Instant::now();
-                            true
+                            (true, false, true)
 
                         } else if s.breakpoints != ls.breakpoints {
-                            log::info!(&format!("Breakpoints: {:?}", s.breakpoints));
-                            update_diagnostics = true;
-                            false
+                            (false, true, true)
 
                         } else {
-                            false
+                            (false, false, false)
                         }
                     } else {
-                        update_diagnostics = s.debugger == 1;
-                        true
+                        (true, s.debugger == 1, true)
                     };
                     if update_diagnostics {
-                        Analyzer::publish_diagnostics(
-                            client.clone(),
-                            diagnostics.clone(),
-                            addresses.clone(),
-                            status.clone()
-
+                        state.publish_diagnostics().await;
+                    }
+                    if update_outline {
+                        let (outline, locations) = s.to_outline(&state, does_rom_match);
+                        state.publish_emulator_outline(
+                            outline.split('\n').into_iter().map(|s| s.to_string()).collect(),
+                            locations
                         ).await;
                     }
                     if update_hints {
-                        client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+                        state.trigger_client_hints_refresh().await;
                     }
                     last_status = Some(s);
                 }
                 last_status_response = Instant::now();
             }
 
-            // Send commands to emulator
+            // Forward commands to emulator
             if last_status.is_some() {
-                if let Ok(mut c) = commands.try_lock() {
-                    while let Some(command) = c.pop_front() {
-                        match command {
-                            EmulatorCommand::QueryAddressValue(address) => {
-                                stream.write_all(&[0x80, address as u8, (address >> 8) as u8]).ok();
-                            },
-                            EmulatorCommand::DebuggerToggleBreakpoint(address) => {
-                                stream.write_all(&[0x10, address as u8, (address >> 8) as u8]).ok();
-                            },
-                            EmulatorCommand::DebuggerStep => {
-                                stream.write_all(&[0x20, 0x00, 0x00]).ok();
-                            },
-                            EmulatorCommand::DebuggerStepOver => {
-                                stream.write_all(&[0x21, 0x00, 0x00]).ok();
-                            },
-                            EmulatorCommand::DebuggerFinish => {
-                                stream.write_all(&[0x22, 0x00, 0x00]).ok();
-                            },
-                            EmulatorCommand::DebuggerContinue => {
-                                stream.write_all(&[0x23, 0x00, 0x00]).ok();
-                            }
+                let mut commands = state.commands();
+                while let Some(command) = commands.pop_front() {
+                    match command {
+                        EmulatorCommand::QueryAddressValue(address) => {
+                            stream.write_all(&[0x80, address as u8, (address >> 8) as u8]).ok();
+                        },
+                        EmulatorCommand::DebuggerToggleBreakpoint(address) => {
+                            stream.write_all(&[0x10, address as u8, (address >> 8) as u8]).ok();
+                        },
+                        EmulatorCommand::DebuggerStep => {
+                            stream.write_all(&[0x20, 0x00, 0x00]).ok();
+                        },
+                        EmulatorCommand::DebuggerStepOver => {
+                            stream.write_all(&[0x21, 0x00, 0x00]).ok();
+                        },
+                        EmulatorCommand::DebuggerFinish => {
+                            stream.write_all(&[0x22, 0x00, 0x00]).ok();
+                        },
+                        EmulatorCommand::DebuggerContinue => {
+                            stream.write_all(&[0x23, 0x00, 0x00]).ok();
                         }
                     }
                 }
@@ -388,13 +292,13 @@ impl EmulatorConnection {
         }
 
         // Reset Editor Status
-        if let Ok(mut status) = status.lock() {
-            *status = None;
-        }
+        state.set_status(None);
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        Analyzer::publish_diagnostics(client.clone(), diagnostics.clone(), addresses.clone(), status.clone()).await;
-        client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
-        client.show_progress_end(token, "Emulating stopped").await;
+
+        state.publish_diagnostics().await;
+        state.publish_emulator_outline(vec!["Emulator disconnected.".to_string()], HashMap::new()).await;
+        state.trigger_client_hints_refresh().await;
+        state.end_progress(progress_token, "Emulation stopped").await;
     }
 }
 

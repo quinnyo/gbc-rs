@@ -16,6 +16,7 @@ mod analyzer;
 mod emulator;
 mod parser;
 mod types;
+mod state;
 use self::analyzer::Analyzer;
 use self::emulator::EmulatorCommand;
 

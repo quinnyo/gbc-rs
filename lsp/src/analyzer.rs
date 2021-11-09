@@ -1,9 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::thread;
+use std::sync::Arc;
 use std::path::PathBuf;
-use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use std::sync::atomic::AtomicUsize;
 
@@ -11,21 +9,17 @@ use std::sync::atomic::AtomicUsize;
 // External Dependencies ------------------------------------------------------
 use tokio::runtime::Handle;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Range, NumberOrString};
-use tower_lsp::lsp_types::{PublishDiagnosticsParams, SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
-use tower_lsp::lsp_types::notification::PublishDiagnostics;
+use tower_lsp::lsp_types::{DocumentSymbol, Range};
+use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
 
 
 // Internal Dependencies ------------------------------------------------------
 use project::{ProjectConfig, ProjectReader};
-use compiler::lexer::{
-    stage::include::IncludeToken,
-    LexerToken,
-    LexerFile
-};
+use compiler::lexer::LexerToken;
 
 use crate::{
-    emulator::{EmulatorConnection, EmulatorCommand, EmulatorStatus},
+    state::State,
+    emulator::{EmulatorConnection, EmulatorCommand},
     parser::Parser,
     types::{
         ServerStatusParams, ServerStatusNotification,
@@ -41,50 +35,31 @@ const THREAD_DEBOUNCE: u64 = 250;
 
 // Analyzer Implementation ----------------------------------------------------
 pub struct Analyzer {
-    client: Arc<Client>,
-    documents: Arc<Mutex<RefCell<HashMap<String, String>>>>,
-    tokens: Mutex<RefCell<HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>>>,
-    workspace_path: Arc<Mutex<Option<PathBuf>>>,
-    symbols: Arc<Mutex<Option<(Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations)>>>,
-    diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
-    addresses: Arc<Mutex<HashMap<usize, Location>>>,
-    link_error: Arc<Mutex<Option<(Url, usize, usize)>>>,
+    state: State,
     link_gen: Arc<AtomicUsize>,
     emulator_connection: Arc<EmulatorConnection>
 }
 
 impl Analyzer {
     pub fn new(client: Arc<Client>) -> Self {
-        let addresses: Arc<Mutex<HashMap<usize, Location>>> = Arc::new(Mutex::new(HashMap::new()));
-        let diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let emulator_connection = Arc::new(EmulatorConnection::new(
-            client.clone(),
-            diagnostics.clone(),
-            addresses.clone()
-        ));
+        let state = State::from_client(client);
+        let emulator_connection = Arc::new(EmulatorConnection::new(state.clone()));
         Self {
-            client,
-            documents: Arc::new(Mutex::new(RefCell::new(HashMap::new()))),
-            tokens: Mutex::new(RefCell::new(HashMap::new())),
-            workspace_path: Arc::new(Mutex::new(None)),
-            symbols: Arc::new(Mutex::new(None)),
-            diagnostics,
-            addresses,
-            link_error: Arc::new(Mutex::new(None)),
+            state,
             link_gen: Arc::new(AtomicUsize::new(0)),
             emulator_connection
         }
     }
 
     pub async fn initialize(&self) {
-        self.client.send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
+        self.state.client().send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
             quiescent: true,
             message: Some("Ready".to_string())
 
         }).await;
 
         // Load config and get path to output ROM file to start emulator connection
-        let workspace_path = if let Ok(ws) = self.workspace_path.lock() { ws.clone() } else { None };
+        let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
             let config = ProjectConfig::try_load(&ProjectReader::from_absolute(workspace_path)).ok();
             if let Some(config) = config {
@@ -100,64 +75,38 @@ impl Analyzer {
         self.emulator_connection.shutdown().await;
     }
 
-    // TODO handle deletion and renaming of files
     pub async fn set_workspace_path(&self, path: PathBuf) {
-        if let Ok(mut workspace_path) = self.workspace_path.lock() {
-            *workspace_path = Some(path);
-        }
+        self.state.set_workspace_path(path);
     }
 
+    // TODO handle deletion and renaming of files
     pub fn open_document(&self, path: &str, text: &str) {
-        if let Ok(docs) = self.documents.lock() {
-            let mut docs = docs.borrow_mut();
-            docs.insert(path.to_string(), text.to_string());
-        }
+        self.state.documents().insert(path.to_string(), text.to_string());
         self.link_async(PathBuf::from(path));
     }
 
     pub fn change_document(&self, path: &str, text: &str) {
-        if let Ok(docs) = self.documents.lock() {
-            let mut docs = docs.borrow_mut();
-            docs.insert(path.to_string(), text.to_string());
-        }
-        if let Ok(tokens) = self.tokens.lock() {
-            let mut tokens = tokens.borrow_mut();
-            tokens.remove(&PathBuf::from(path));
-        }
+        self.state.tokens().remove(&PathBuf::from(path));
+        self.state.documents().insert(path.to_string(), text.to_string());
         self.link_async(PathBuf::from(path));
     }
 
     pub fn save_document(&self, path: &str) {
-        if let Ok(docs) = self.documents.lock() {
-            let mut docs = docs.borrow_mut();
-            docs.remove(path);
-        }
-        if let Ok(tokens) = self.tokens.lock() {
-            let mut tokens = tokens.borrow_mut();
-            tokens.remove(&PathBuf::from(path));
-        }
+        self.state.tokens().remove(&PathBuf::from(path));
+        self.state.documents().remove(path);
         self.link_async(PathBuf::from(path));
     }
 
     pub fn close_document(&self, path: &str) {
-        if let Ok(docs) = self.documents.lock() {
-            let mut docs = docs.borrow_mut();
-            docs.remove(path);
-        }
-        if let Ok(tokens) = self.tokens.lock() {
-            let mut tokens = tokens.borrow_mut();
-            tokens.remove(&PathBuf::from(path));
-        }
+        self.state.tokens().remove(&PathBuf::from(path));
+        self.state.documents().remove(path);
         self.link_async(PathBuf::from(path));
     }
+}
 
+impl Analyzer {
     pub async fn workspace_symbols(&self) -> Vec<SymbolInformation> {
-        let workspace_path = if let Ok(ws) = self.workspace_path.lock() {
-            ws.clone()
-
-        } else {
-            None
-        };
+        let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
             self.get_symbols(workspace_path).await.0.into_iter().filter(|symbol| {
                 symbol.kind != SymbolKind::Method
@@ -284,7 +233,7 @@ impl Analyzer {
     pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<GBCSymbol> {
         let current_file = PathBuf::from(current_file);
         let uri = Url::from_file_path(&current_file).unwrap();
-        if let Some((token, _)) = Parser::get_token(&self.tokens, &self.documents, current_file.clone(), line, col) {
+        if let Some((token, _)) = Parser::get_token(&self.state, current_file.clone(), line, col) {
             let symbol_name = token.inner().value.to_string();
             let symbols = self.get_symbols(current_file).await.0;
             symbols.into_iter().find(|symbol| {
@@ -299,9 +248,7 @@ impl Analyzer {
     }
 
     pub async fn emulator_command(&self, command: EmulatorCommand) {
-        if let Ok(mut c) = self.emulator_connection.commands.lock() {
-            c.push_back(command);
-        }
+        self.state.commands().push_back(command);
     }
 
     pub async fn toggle_breakpoint(&self, location: Location) {
@@ -311,11 +258,9 @@ impl Analyzer {
     }
 
     fn address_from_location(&self, location: Location) -> Option<u16> {
-        if let Ok(addresses) = self.addresses.lock() {
-            for (address, loc) in addresses.iter() {
-                if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
-                    return Some(*address as u16);
-                }
+        for (address, loc) in self.state.addresses().iter() {
+            if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
+                return Some(*address as u16);
             }
         }
         None
@@ -323,14 +268,9 @@ impl Analyzer {
 
     pub async fn inlay_hints(&self, current_file: PathBuf) -> Vec<InlayHint> {
         // Get the line of the first error in the current file (if any)
-        let first_error_line = if let Ok(error) = self.link_error.lock() {
-            if let Some((p, line, _)) = &*error {
-                if PathBuf::from(p.path()) == current_file {
-                    *line
-
-                } else {
-                    10_000_000
-                }
+        let first_error_line = if let Some((p, line, _)) = self.state.error().clone() {
+            if PathBuf::from(p.path()) == current_file {
+                line
 
             } else {
                 10_000_000
@@ -477,53 +417,25 @@ impl Analyzer {
 
 impl Analyzer {
     async fn get_symbols(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations) {
-        let has_linker = if let Ok(symbols) = self.symbols.lock() {
-            symbols.is_some()
-
-        } else {
-            false
-        };
+        let has_linker = self.state.symbols().is_some();
         if !has_linker {
-            Parser::link(
-                self.client.clone(),
-                NumberOrString::Number(0),
-                workspace_path,
-                self.symbols.clone(),
-                self.link_error.clone(),
-                self.diagnostics.clone(),
-                self.addresses.clone(),
-                self.documents.clone()
-
-            ).await;
-            Self::publish_diagnostics(
-                self.client.clone(),
-                self.diagnostics.clone(),
-                self.addresses.clone(),
-                self.emulator_connection.status.clone()
-
-            ).await;
+            Parser::link(workspace_path, self.state.clone()).await;
+            self.state.publish_diagnostics().await;
         }
-        if let Ok(symbols) = self.symbols.lock() {
-            symbols.clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
-
-        } else {
-            (Vec::new(), Vec::new(), Vec::new())
-        }
+        self.state.symbols().clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
     }
 
     fn query_symbol_memory_values(&self, symbols: &[&GBCSymbol]) -> Vec<Option<u16>> {
 
         // Generate initial result set
-        let mut results = Vec::new();
+        let mut result_set = Vec::new();
         for _ in 0..symbols.len() {
-            results.push(None)
+            result_set.push(None)
         }
 
         // Do nothing if no emulator is present
-        if let Ok(status) = self.emulator_connection.status.lock() {
-            if status.is_none() {
-                return results;
-            }
+        if self.state.status().is_none() {
+            return result_set;
         }
 
         #[derive(Debug)]
@@ -536,82 +448,72 @@ impl Analyzer {
 
         // Query emulator
         let mut pending = Vec::with_capacity(symbols.len());
-        if let Ok(mut q) = self.emulator_connection.commands.lock() {
-            for symbol in symbols {
-                if let Some(address) = symbol.address {
-                    if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
-                        let address = address as u16;
-                        if symbol.width == 1 {
-                            pending.push(PendingResult::Byte(address));
-                            q.push_back(EmulatorCommand::QueryAddressValue(address));
-
-                        } else {
-                            pending.push(PendingResult::Word(
-                                address,
-                                address.saturating_add(1)
-                            ));
-                            q.push_back(EmulatorCommand::QueryAddressValue(address));
-                            q.push_back(EmulatorCommand::QueryAddressValue(address.saturating_add(1)));
-                        }
+        for symbol in symbols {
+            if let Some(address) = symbol.address {
+                if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
+                    let address = address as u16;
+                    if symbol.width == 1 {
+                        pending.push(PendingResult::Byte(address));
+                        self.state.commands().push_back(EmulatorCommand::QueryAddressValue(address));
 
                     } else {
-                        pending.push(PendingResult::Invalid);
+                        pending.push(PendingResult::Word(
+                            address,
+                            address.saturating_add(1)
+                        ));
+                        self.state.commands().push_back(EmulatorCommand::QueryAddressValue(address));
+                        self.state.commands().push_back(EmulatorCommand::QueryAddressValue(address.saturating_add(1)));
                     }
+
                 } else {
                     pending.push(PendingResult::Invalid);
                 }
-                results.push(None);
+            } else {
+                pending.push(PendingResult::Invalid);
             }
+            result_set.push(None);
         }
 
         // Wait for results from emulator
         let started = Instant::now();
         while started.elapsed() < Duration::from_millis(300) {
-            if let Ok(mut r) = self.emulator_connection.results.lock() {
-                let mut waiting = 0;
-                for (i, pending) in pending.iter_mut().enumerate() {
-                    match pending {
-                        PendingResult::Byte(address) => {
-                            if let Some(value) = r.remove(address) {
-                                results[i] = Some(value as u16);
-                                *pending = PendingResult::Done;
-                            }
-                            waiting += 1;
-                        },
-                        PendingResult::Word(address_low, address_high) => {
-                            if r.contains_key(address_low) && r.contains_key(address_high) {
-                                results[i] = Some(r[address_low] as u16 | (r[address_high] as u16) << 8);
-                                *pending = PendingResult::Done;
-                            }
-                            waiting += 1;
-                        },
-                        _ => {}
-                    }
+            let mut results = self.state.results();
+            let mut waiting = 0;
+            for (i, pending) in pending.iter_mut().enumerate() {
+                match pending {
+                    PendingResult::Byte(address) => {
+                        if let Some(value) = results.remove(address) {
+                            result_set[i] = Some(value as u16);
+                            *pending = PendingResult::Done;
+                        }
+                        waiting += 1;
+                    },
+                    PendingResult::Word(address_low, address_high) => {
+                        if results.contains_key(address_low) && results.contains_key(address_high) {
+                            result_set[i] = Some(results[address_low] as u16 | (results[address_high] as u16) << 8);
+                            *pending = PendingResult::Done;
+                        }
+                        waiting += 1;
+                    },
+                    _ => {}
                 }
-                if waiting == 0 {
-                    break;
-                }
+            }
+            if waiting == 0 {
+                break;
             }
             thread::sleep(Duration::from_millis(10));
         }
-        results
+        result_set
     }
 
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {
-        let client = self.client.clone();
-        let symbols = self.symbols.clone();
-        let diagnostics = self.diagnostics.clone();
-        let addresses = self.addresses.clone();
-        let link_gen = self.link_gen.clone();
-        let link_error = self.link_error.clone();
-        let documents = self.documents.clone();
-        let status = self.emulator_connection.status.clone();
-
         // Bump symbol generation
+        let link_gen = self.link_gen.clone();
         link_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let thread_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
 
+        let thread_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
         let handle = Handle::current();
+        let state = self.state.clone();
         handle.spawn(async move {
             // Wait for debounce purposes
             tokio::time::sleep(tokio::time::Duration::from_millis(THREAD_DEBOUNCE)).await;
@@ -620,87 +522,12 @@ impl Analyzer {
             let latest_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
             if thread_gen == latest_gen {
                 Parser::link(
-                    client.clone(),
-                    NumberOrString::Number(thread_gen as i32),
                     workspace_path,
-                    symbols,
-                    link_error,
-                    diagnostics.clone(),
-                    addresses.clone(),
-                    documents
+                    state.clone()
                 ).await;
-                Self::publish_diagnostics(client, diagnostics, addresses, status.clone()).await;
+                state.publish_diagnostics().await;
             }
         });
-    }
-
-    pub async fn publish_diagnostics(
-        client: Arc<Client>,
-        diagnostics: Arc<Mutex<HashMap<Url, Vec<Diagnostic>>>>,
-        addresses: Arc<Mutex<HashMap<usize, Location>>>,
-        status: Arc<Mutex<Option<EmulatorStatus>>>
-    ) {
-        let diagnostics = if let Ok(mut diagnostics) = diagnostics.lock() {
-
-            // Remove any Information diagnostics
-            for (_, diagnostics) in diagnostics.iter_mut() {
-                *diagnostics = diagnostics.iter().cloned().filter(|d| {
-                    !d.message.starts_with("Debugger")
-
-                }).collect();
-            }
-
-            if let Ok(status) = status.lock() {
-                // Add debugger location
-                if let Some(status) = status.as_ref() {
-                    if let Ok(addresses) = addresses.lock() {
-                        for b in &status.breakpoints {
-                            if let Some(location) = addresses.get(&(b.address as usize)) {
-                                let info = Diagnostic {
-                                    message: format!("Debugger Breakpoint @ ${:0>4X}", b.address),
-                                    range: location.range,
-                                    severity: Some(DiagnosticSeverity::Warning),
-                                    .. Diagnostic::default()
-                                };
-                                diagnostics.entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
-                            }
-                        }
-                        if status.debugger == 1 {
-                            if let Some(location) = addresses.get(&(status.pc as usize)) {
-                                let info = Diagnostic {
-                                    message: format!(
-                                        "Debugger Halt\nAF={:0>4X}\nBC={:0>4X}\nDE={:0>4X}\nHL={:0>4X}\nSP={:0>4X}\nPC={:0>4X}",
-                                        status.registers[0],
-                                        status.registers[1],
-                                        status.registers[2],
-                                        status.registers[3],
-                                        status.registers[4],
-                                        status.pc,
-                                    ),
-                                    range: location.range,
-                                    severity: Some(DiagnosticSeverity::Hint),
-                                    .. Diagnostic::default()
-                                };
-                                diagnostics.entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
-                            }
-                        }
-                    }
-                }
-            }
-            diagnostics.clone()
-
-        } else {
-            HashMap::new()
-        };
-
-        // Send diagnostics for all files
-        for (uri, diagnostics) in &diagnostics {
-            client.send_custom_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
-                uri: uri.clone(),
-                diagnostics: diagnostics.clone(),
-                version: None
-            }).await;
-        }
     }
 }
 

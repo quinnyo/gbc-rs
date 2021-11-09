@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::collections::HashMap;
+
+
 // External Dependencies ------------------------------------------------------
 use serde::{Serialize, Deserialize};
 use tower_lsp::lsp_types::notification::Notification;
@@ -24,7 +28,6 @@ pub struct InlayHint {
     pub label: String,
 }
 
-
 pub enum ServerStatusNotification {}
 impl Notification for ServerStatusNotification {
     type Params = ServerStatusParams;
@@ -45,6 +48,25 @@ impl Notification for InlayHintsNotification {
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct InlayHintsParams {}
+
+pub enum DebuggerOutlineNotification {}
+impl Notification for DebuggerOutlineNotification {
+    type Params = DebuggerOutlineParams;
+    const METHOD: &'static str = "experimental/debuggerOutline";
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub struct DebuggerOutlineLocation {
+    pub filename: String,
+    pub line: usize,
+    pub character: usize
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub struct DebuggerOutlineParams {
+    pub lines: Vec<String>,
+    pub locations: HashMap<usize, DebuggerOutlineLocation>
+}
 
 pub type Optimizations = Vec<(Location, String)>;
 
