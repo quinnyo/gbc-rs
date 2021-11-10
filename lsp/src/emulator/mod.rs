@@ -109,12 +109,7 @@ impl EmulatorConnection {
 
                 // Handle connection
                 let inner_state = state.clone();
-                Self::connection(
-                    stream,
-                    state.clone(),
-                    rom_path.clone(),
-                    shutdown.clone(),
-                    move |msg| {
+                Self::connection( stream, state.clone(), rom_path.clone(), shutdown.clone(), move |msg| {
 
                     if let Ok(status) = serde_json::from_str::<EmulatorStatus>(msg) {
                         Some(status)

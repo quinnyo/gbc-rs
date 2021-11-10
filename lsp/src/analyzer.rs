@@ -22,7 +22,6 @@ use crate::{
     emulator::{EmulatorConnection, EmulatorCommand},
     parser::Parser,
     types::{
-        ServerStatusParams, ServerStatusNotification,
         InlayHint, InlayKind,
         GBCSymbol, MacroExpansion, Optimizations
     }
@@ -37,42 +36,39 @@ const THREAD_DEBOUNCE: u64 = 250;
 pub struct Analyzer {
     state: State,
     link_gen: Arc<AtomicUsize>,
-    emulator_connection: Arc<EmulatorConnection>
+    emulator: Arc<EmulatorConnection>
 }
 
 impl Analyzer {
     pub fn new(client: Arc<Client>) -> Self {
         let state = State::from_client(client);
-        let emulator_connection = Arc::new(EmulatorConnection::new(state.clone()));
+        let emulator = Arc::new(EmulatorConnection::new(state.clone()));
         Self {
             state,
             link_gen: Arc::new(AtomicUsize::new(0)),
-            emulator_connection
+            emulator
         }
     }
 
     pub async fn initialize(&self) {
-        self.state.client().send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
-            quiescent: true,
-            message: Some("Ready".to_string())
-
-        }).await;
+        self.state.update_server_status("Ready").await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
         // Load config and get path to output ROM file to start emulator connection
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
             let config = ProjectConfig::try_load(&ProjectReader::from_absolute(workspace_path)).ok();
             if let Some(config) = config {
-                self.emulator_connection.listen(config.rom.output).await;
+                self.emulator.listen(config.rom.output).await;
 
             } else {
-                self.emulator_connection.shutdown().await;
+                self.emulator.shutdown().await;
             }
         }
     }
 
     pub async fn shutdown(&self) {
-        self.emulator_connection.shutdown().await;
+        self.emulator.shutdown().await;
     }
 
     pub async fn set_workspace_path(&self, path: PathBuf) {

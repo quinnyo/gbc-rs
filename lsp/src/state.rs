@@ -19,6 +19,7 @@ use compiler::lexer::{stage::include::IncludeToken, LexerFile};
 use crate::{
     emulator::{EmulatorCommand, EmulatorStatus},
     types::{
+        ServerStatusParams, ServerStatusNotification,
         InlayHintsNotification, InlayHintsParams,
         DebuggerOutlineNotification, DebuggerOutlineParams, DebuggerOutlineLocation,
         GBCSymbol, MacroExpansion, Optimizations
@@ -177,6 +178,14 @@ impl State {
 }
 
 impl State {
+    pub async fn update_server_status<S: Into<String>>(&self, message: S) {
+        self.client.send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
+            quiescent: true,
+            message: Some(message.into())
+
+        }).await;
+    }
+
     pub async fn start_progress<S: Display>(&self, title: S, message: S) -> Option<NumberOrString> {
         let progress_id = self.progress_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let token = NumberOrString::Number(progress_id as i32);
