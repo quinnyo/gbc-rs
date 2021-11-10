@@ -23,6 +23,11 @@ Pre-compiled binaries:
 - [Examples and Libraries](https://gitlab.com/BonsaiDen/gb-lib/tree/master/examples) for getting started with GameBoy development
 
 
+## Additional Tooling
+
+- [gbc-analyzer](https://gitlab.com/BonsaiDen/gbc-rs/tree/master/lsp) a implementation of the language server protocol
+- [gbc-tools.nvim](https://gitlab.com/BonsaiDen/gbc-rs/tree/master/gbc-tools.nvim) a nvim plugin to use the custom features of the lsp implementation
+
 ## Supported Tools and Libraries
 
 - [gbt](https://gitlab.com/BonsaiDen/gbc-rs/tree/master/gbt) data conversion tool
