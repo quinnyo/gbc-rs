@@ -111,7 +111,7 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
     let config = if !optional {
         ProjectConfig::load(logger, &ProjectReader::from_absolute(env::current_dir().unwrap()))
 
-    } else if let Ok(project) = ProjectConfig::try_load(logger, &ProjectReader::from_absolute(env::current_dir().unwrap())) {
+    } else if let Ok(project) = ProjectConfig::try_load(&ProjectReader::from_absolute(env::current_dir().unwrap())) {
         project
 
     } else {
