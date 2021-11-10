@@ -20,14 +20,16 @@ mod state;
 use self::analyzer::Analyzer;
 use self::emulator::EmulatorCommand;
 
+
+// Structs --------------------------------------------------------------------
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExperimentalParams {
-    command: String,
+pub struct CommandDocumentParams {
     #[serde(default)]
     range: Range,
     text_document: TextDocumentIdentifier
 }
+
 
 // Backend Implementation -----------------------------------------------------
 struct Backend {
@@ -55,6 +57,17 @@ impl LanguageServer for Backend {
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        "view/inlay_hints".to_string(),
+                        "debugger/toggle_breakpoint".to_string(),
+                        "debugger/step".to_string(),
+                        "debugger/step_over".to_string(),
+                        "debugger/finish".to_string(),
+                        "debugger/continue".to_string()
+                    ],
+                    work_done_progress_options: Default::default(),
+                }),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
                     trigger_characters: Some(vec![".".to_string()]),
@@ -160,34 +173,32 @@ impl LanguageServer for Backend {
         Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 
-    async fn experimental_any(&self, params: Value) -> Result<Option<Value>> {
-        if let Ok(params) = serde_json::from_value::<ExperimentalParams>(params) {
-            match params.command.as_str() {
-                "view/inlay_hints" => {
-                    let hints = self.analyzer.inlay_hints(PathBuf::from(params.text_document.uri.path())).await;
-                    return Ok(Some(serde_json::to_value(&hints).unwrap()))
-                },
-                "debugger/toggle_breakpoint" => {
-                    self.analyzer.toggle_breakpoint(Location {
-                        uri: params.text_document.uri,
-                        range: params.range
+    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+        match params.command.as_str() {
+            "view/inlay_hints" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
+                let hints = self.analyzer.inlay_hints(PathBuf::from(params.text_document.uri.path())).await;
+                return Ok(Some(serde_json::to_value(&hints).unwrap()))
+            },
+            "debugger/toggle_breakpoint" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
+                self.analyzer.toggle_breakpoint(Location {
+                    uri: params.text_document.uri,
+                    range: params.range
 
-                    }).await;
-                },
-                "debugger/step" => {
-                    self.analyzer.emulator_command(EmulatorCommand::DebuggerStep).await;
-                },
-                "debugger/step_over" => {
-                    self.analyzer.emulator_command(EmulatorCommand::DebuggerStepOver).await;
-                },
-                "debugger/finish" => {
-                    self.analyzer.emulator_command(EmulatorCommand::DebuggerFinish).await;
-                },
-                "debugger/continue" => {
-                    self.analyzer.emulator_command(EmulatorCommand::DebuggerContinue).await;
-                },
-                _ => {}
-            }
+                }).await;
+            },
+            "debugger/step" => {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerStep).await;
+            },
+            "debugger/step_over" => {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerStepOver).await;
+            },
+            "debugger/finish" => {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerFinish).await;
+            },
+            "debugger/continue" => {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerContinue).await;
+            },
+            _ => {}
         }
         Ok(None)
     }

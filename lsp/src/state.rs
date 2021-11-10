@@ -9,9 +9,20 @@ use std::collections::{HashMap, VecDeque};
 
 // External Dependencies ------------------------------------------------------
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Location, NumberOrString, WorkDoneProgressCreateParams, PublishDiagnosticsParams, Url};
+use tower_lsp::lsp_types::{
+    Diagnostic, DiagnosticSeverity,
+    Url, Location, NumberOrString,
+    PublishDiagnosticsParams,
+    ProgressParams,
+    ProgressParamsValue,
+    WorkDoneProgress,
+    WorkDoneProgressBegin,
+    WorkDoneProgressReport,
+    WorkDoneProgressEnd,
+    WorkDoneProgressCreateParams,
+};
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
-use tower_lsp::lsp_types::notification::PublishDiagnostics;
+use tower_lsp::lsp_types::notification::{Progress, PublishDiagnostics};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -193,7 +204,15 @@ impl State {
             token: token.clone()
 
         }).await.is_ok() {
-            self.client.show_progress_begin(token.clone(), title, message).await;
+            self.client.send_custom_notification::<Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                    title: title.to_string(),
+                    cancellable: Some(false),
+                    message: Some(message.to_string()),
+                    percentage: None
+                }))
+            }).await;
             Some(token)
 
         } else {
@@ -203,13 +222,25 @@ impl State {
 
     pub async fn update_progress<S: Display>(&self, token: Option<NumberOrString>, message: S) {
         if let Some(token) = token {
-            self.client.show_progress_report(token, message).await;
+            self.client.send_custom_notification::<Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(WorkDoneProgressReport {
+                    cancellable: Some(false),
+                    message: Some(message.to_string()),
+                    percentage: None
+                }))
+            }).await;
         }
     }
 
     pub async fn end_progress<S: Display>(&self, token: Option<NumberOrString>, message: S) {
         if let Some(token) = token {
-            self.client.show_progress_end(token, message).await;
+            self.client.send_custom_notification::<Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                    message: Some(message.to_string())
+                }))
+            }).await;
         }
     }
 

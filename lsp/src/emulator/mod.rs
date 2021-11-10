@@ -109,7 +109,7 @@ impl EmulatorConnection {
 
                 // Handle connection
                 let inner_state = state.clone();
-                Self::connection( stream, state.clone(), rom_path.clone(), shutdown.clone(), move |msg| {
+                Self::connection(stream, state.clone(), rom_path.clone(), shutdown.clone(), move |msg| {
 
                     if let Ok(status) = serde_json::from_str::<EmulatorStatus>(msg) {
                         Some(status)
@@ -169,6 +169,15 @@ impl EmulatorConnection {
                 log::info!("Emulator no status within 2500ms...");
                 break;
             }
+
+            // TODO read directly from stream
+            // fn read_user_from_stream(tcp_stream: TcpStream) -> Result<User, Box<dyn Error>> {
+            //     let mut de = serde_json::Deserializer::from_reader(tcp_stream);
+            //
+            // TODO check with a non-blocking stream will this output ErrorKind::WouldBlock ?
+            //     let u = User::deserialize(&mut de)?;
+            //     Ok(u)
+            // }
 
             // Receive messages from emulator
             let mut received_status = None;

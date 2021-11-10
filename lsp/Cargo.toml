@@ -13,5 +13,5 @@ file-io = { version = "0.5.0", path = "../file-io" }
 serde_json = "1.0"
 log = "*"
 env_logger = "0.8.3"
-tower-lsp = { version = "0.14.1", path = "../../tower-lsp" }
+tower-lsp = "0.14.1"
 tokio = { version = "1.6", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "time"] }
