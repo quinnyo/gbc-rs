@@ -278,16 +278,16 @@ impl State {
                     self.diagnostics().entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
                 }
             }
-            if status.debugger == 1 {
+            if status.stopped {
                 if let Some(location) = self.addresses().get(&(status.pc as usize)) {
                     let info = Diagnostic {
                         message: format!(
                             "Debugger Halt\nAF={:0>4X}\nBC={:0>4X}\nDE={:0>4X}\nHL={:0>4X}\nSP={:0>4X}\nPC={:0>4X}",
-                            status.registers[0],
-                            status.registers[1],
-                            status.registers[2],
-                            status.registers[3],
-                            status.registers[4],
+                            status.registers.af,
+                            status.registers.bc,
+                            status.registers.de,
+                            status.registers.hl,
+                            status.registers.sp,
                             status.pc,
                         ),
                         range: location.range,

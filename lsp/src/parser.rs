@@ -51,10 +51,9 @@ impl Parser {
         let mut lints: Vec<(Url, Diagnostic)> = Vec::new();
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
-
                 let (s, m) = Self::symbols(&linker);
                 let optimizations = Self::optimizations(&linker);
-                log::info!(&format!("{} symbol(s)", s.len()));
+                log::info!("{} symbol(s)", s.len());
 
                 lints.append(&mut Self::diagnostics(&linker, &s));
                 state.set_addresses(Self::addresses(&linker));
@@ -77,7 +76,7 @@ impl Parser {
                 state.set_symbols((s, m, optimizations));
 
                 state.end_progress(progress_token, "Done").await;
-                log::info!(&format!("Linked in {}ms", start.elapsed().as_millis()));
+                log::info!("Linked in {}ms", start.elapsed().as_millis());
             },
             Err(err) => {
                 if let Some((path, line, col, message)) = err.into_diagnostic() {

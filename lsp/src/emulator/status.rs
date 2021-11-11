@@ -21,18 +21,28 @@ pub struct EmulatorAddressInfo {
 
 // Emulator Status -----------------------------------------------------------
 #[derive(Debug, Default, Deserialize, Clone)]
+pub struct EmulatorRegisters {
+    pub af: u16,
+    pub bc: u16,
+    pub de: u16,
+    pub hl: u16,
+    pub sp: u16,
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct EmulatorStatus {
-    pub(in crate::emulator) name: String,
-    pub(in crate::emulator) paused: u8,
-    pub(in crate::emulator) menu: u8,
-    pub(in crate::emulator) filename: String,
-    pub(in crate::emulator) crc: u32,
-    pub(in crate::emulator) title: String,
-    pub debugger: u8,
+    pub name: String,
+    pub paused: bool,
+    pub menu: bool,
+    pub filename: String,
+    pub crc: u32,
+
+    pub title: String,
+    pub stopped: bool,
     pub pc: u16,
     pub bank: u16,
-    pub registers: [u16; 5],
-    pub ime: u8,
+    pub registers: EmulatorRegisters,
+    pub ime: bool,
     pub breakpoints: Vec<EmulatorAddressInfo>,
     pub backtrace: Vec<EmulatorAddressInfo>,
 }
@@ -43,13 +53,13 @@ impl EmulatorStatus {
         if !does_rom_match {
             format!("ROM path does not match")
 
-        } else if self.debugger == 1 {
+        } else if self.stopped {
             format!("{} [STOPPED] [BRK @ ${:0>4X}]", info, self.pc)
 
-        } else if self.menu == 1 {
+        } else if self.menu {
             format!("{} [STOPPED] [IN MENU]", info)
 
-        } else if self.paused == 1 {
+        } else if self.paused {
             format!("{} [PAUSED]", info)
 
         } else {
@@ -118,40 +128,36 @@ impl EmulatorStatus {
         };
 
         // Registers
-        let f = self.registers[0] as u8;
+        let f = self.registers.af as u8;
         outline.push_str(&format!(
             "\nRegisters:\n  AF = ${:0>4X} ({}{}{}{})\n  BC = ${:0>4X} ({})\n  DE = ${:0>4X} ({})\n  HL = ${:0>4X} ({})\n  SP = ${:0>4X} ({})\n  PC = ${:0>4X} ({})\n  IME = {}\n\nBacktrace:\n",
-            self.registers[0],
+            self.registers.af,
             if (f & 16) == 16 { "C" } else { "-" },
             if (f & 32) == 32 { "H" } else { "-" },
             if (f & 64) == 64 { "N" } else { "-" },
             if (f & 128) == 128 { "Z" } else { "-" },
-            self.registers[1],
-            resolve_symbol_with_offset(self.registers[1], self.bank, 5),
-            self.registers[2],
-            resolve_symbol_with_offset(self.registers[2], self.bank, 6),
-            self.registers[3],
-            resolve_symbol_with_offset(self.registers[3], self.bank, 7),
-            self.registers[4],
-            resolve_symbol_with_offset(self.registers[4], self.bank, 8),
+            self.registers.bc,
+            resolve_symbol_with_offset(self.registers.bc, self.bank, 5),
+            self.registers.de,
+            resolve_symbol_with_offset(self.registers.de, self.bank, 6),
+            self.registers.hl,
+            resolve_symbol_with_offset(self.registers.hl, self.bank, 7),
+            self.registers.sp,
+            resolve_symbol_with_offset(self.registers.sp, self.bank, 8),
             self.pc,
             resolve_symbol_with_offset(self.pc, self.bank, 9),
-            if self.ime == 1 { "Enabled"} else { "Disabled"}
+            if self.ime { "Enabled"} else { "Disabled"}
         ));
 
         // Backtrace
-        let mut traces = vec![(self.pc, self.bank)];
-        for b in self.backtrace.iter().rev() {
-            traces.push((b.address, b.bank));
-        }
-        let breakpoint_offset = 15 + traces.len();
-        for (i, (address, bank)) in traces.into_iter().enumerate() {
+        let breakpoint_offset = 15 + self.backtrace.len();
+        for (i, b) in self.backtrace.iter().enumerate() {
             outline.push_str(&format!(
                 "{: >2}. {} (${:0>2X}:${:0>4X})\n",
                 i + 1,
-                resolve_symbol_with_offset(address, bank, 13 + i),
-                bank,
-                address
+                resolve_symbol_with_offset(b.address, b.bank, 13 + i),
+                b.bank,
+                b.address
             ));
         }
 
