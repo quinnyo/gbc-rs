@@ -1,13 +1,13 @@
 // STD Dependencies -----------------------------------------------------------
 use std::thread;
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::sync::atomic::AtomicUsize;
 
 
 // External Dependencies ------------------------------------------------------
 use tokio::runtime::Handle;
+use tokio::task::JoinHandle;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{DocumentSymbol, Range};
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
@@ -35,7 +35,7 @@ const THREAD_DEBOUNCE: u64 = 250;
 // Analyzer Implementation ----------------------------------------------------
 pub struct Analyzer {
     state: State,
-    link_gen: Arc<AtomicUsize>,
+    link: Arc<Mutex<Option<JoinHandle<()>>>>,
     emulator: Arc<EmulatorConnection>
 }
 
@@ -45,7 +45,7 @@ impl Analyzer {
         let emulator = Arc::new(EmulatorConnection::new(state.clone()));
         Self {
             state,
-            link_gen: Arc::new(AtomicUsize::new(0)),
+            link: Arc::new(Mutex::new(None)),
             emulator
         }
     }
@@ -503,27 +503,18 @@ impl Analyzer {
     }
 
     fn link_async(&self, workspace_path: PathBuf) where Self: 'static {
-        // Bump symbol generation
-        let link_gen = self.link_gen.clone();
-        link_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let thread_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
-        let handle = Handle::current();
-        let state = self.state.clone();
-        handle.spawn(async move {
-            // Wait for debounce purposes
-            tokio::time::sleep(tokio::time::Duration::from_millis(THREAD_DEBOUNCE)).await;
-
-            // Check if still the latest link request
-            let latest_gen = link_gen.load(std::sync::atomic::Ordering::SeqCst);
-            if thread_gen == latest_gen {
-                Parser::link(
-                    workspace_path,
-                    state.clone()
-                ).await;
-                state.publish_diagnostics().await;
+        if let Ok(mut l) = self.link.lock() {
+            if let Some(l) = l.take() {
+                log::info!("Linking aborted");
+                l.abort();
             }
-        });
+            let state = self.state.clone();
+            *l = Some(Handle::current().spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(THREAD_DEBOUNCE)).await;
+                Parser::link(workspace_path, state.clone()).await;
+                state.publish_diagnostics().await;
+            }));
+        }
     }
 }
 
