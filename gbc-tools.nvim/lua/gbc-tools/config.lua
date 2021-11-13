@@ -5,7 +5,7 @@ local M = {}
 local defaults = {
     width = 45,
     position = 'right',
-    tools = { -- rust-tools options
+    tools = { -- gbc-tools options
         -- automatically set inlay hints (type hints)
         -- There is an issue due to which the hints are not applied on the first
         -- opened file. For now, write to the file to trigger a reapplication of

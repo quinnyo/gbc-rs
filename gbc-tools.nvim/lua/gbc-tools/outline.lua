@@ -26,13 +26,6 @@ M.View = {
         cursorcolumn = false,
         colorcolumn = '0',
         wrap = false
-    },
-    bufopts = {
-        { name = 'swapfile', val = false },
-        { name = 'buftype', val = 'nofile' },
-        { name = 'modifiable', val = false },
-        { name = 'filetype', val = 'NvimTree' },
-        { name = 'bufhidden', val = 'hide' }
     }
 }
 
@@ -122,7 +115,7 @@ end
 local function refresh_view()
     if M.state.outline_buf then
         if M.View.lines == nil or #M.View.lines == 0 then
-            M.View.lines = { "No Emulator connected." }
+            M.View.lines = { "Status: No emulator connected." }
         end
         vim.api.nvim_buf_set_option(M.state.outline_buf, "modifiable", true)
         vim.api.nvim_buf_set_lines(M.state.outline_buf, 0, -1, false, M.View.lines)
@@ -145,22 +138,6 @@ end
 
 function M.on_enter()
     M.View.parent = M.View.parent or vim.fn.win_getid(vim.fn.winnr("#"))
-    --buf = vim.api.nvim_win_get_buf(self.parent),
-    --cursor = vim.api.nvim_win_get_cursor(self.parent),
-    --local filename = vim.api.nvim_buf_get_name(bufnr)
-    --local uri = vim.uri_from_bufnr(bufnr)
-    --local buf = uri and vim.uri_to_bufnr(uri) or bufnr
-    --
-    --vim.api.nvim_win_set_cursor(win, { item.start.line + 1, item.start.character })
---function View.switch_to(win, buf)
---  if win then
---    vim.api.nvim_set_current_win(win)
---    if buf then
---      vim.api.nvim_win_set_buf(win, buf)
---    end
---  end
---end
-  --vim.api.nvim_win_set_cursor(win, { item.start.line + 1, item.start.character })
 end
 
 function M.handler(_, result)

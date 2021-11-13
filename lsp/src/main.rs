@@ -64,7 +64,8 @@ impl LanguageServer for Backend {
                         "debugger/step".to_string(),
                         "debugger/step_over".to_string(),
                         "debugger/finish".to_string(),
-                        "debugger/continue".to_string()
+                        "debugger/continue".to_string(),
+                        "debugger/undo".to_string()
                     ],
                     work_done_progress_options: Default::default(),
                 }),
@@ -197,6 +198,9 @@ impl LanguageServer for Backend {
             },
             "debugger/continue" => {
                 self.analyzer.emulator_command(EmulatorCommand::DebuggerContinue).await;
+            },
+            "debugger/undo" => {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerUndo).await;
             },
             _ => {}
         }

@@ -34,6 +34,7 @@ pub enum EmulatorCommand {
     DebuggerStepOver,
     DebuggerFinish,
     DebuggerContinue,
+    DebuggerUndo
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,7 +138,7 @@ impl EmulatorConnection {
         // TCP Stream setup
         stream.set_nodelay(true).ok();
         stream.set_read_timeout(Some(Duration::from_millis(10))).ok();
-        stream.write_all(&[0x00, 0x00, 0x00]).ok();
+        stream.write_all(&[0x00]).ok();
 
         // Handle Emulator connection
         let mut last_status: Option<EmulatorStatus> = None;
@@ -225,7 +226,7 @@ impl EmulatorConnection {
 
             // Query emulator status periodically
             if status_query_timer.elapsed() > Duration::from_millis(200) {
-                sender.write_all(&[0x00, 0x00, 0x00]).ok();
+                sender.write_all(&[0x00]).ok();
                 status_query_timer = Instant::now();
             }
 
@@ -241,16 +242,19 @@ impl EmulatorConnection {
                             sender.write_all(&[0x10, address as u8, (address >> 8) as u8]).ok();
                         },
                         EmulatorCommand::DebuggerStep => {
-                            sender.write_all(&[0x20, 0x00, 0x00]).ok();
+                            sender.write_all(&[0x20]).ok();
                         },
                         EmulatorCommand::DebuggerStepOver => {
-                            sender.write_all(&[0x21, 0x00, 0x00]).ok();
+                            sender.write_all(&[0x21]).ok();
                         },
                         EmulatorCommand::DebuggerFinish => {
-                            sender.write_all(&[0x22, 0x00, 0x00]).ok();
+                            sender.write_all(&[0x22]).ok();
                         },
                         EmulatorCommand::DebuggerContinue => {
-                            sender.write_all(&[0x23, 0x00, 0x00]).ok();
+                            sender.write_all(&[0x23]).ok();
+                        },
+                        EmulatorCommand::DebuggerUndo => {
+                            sender.write_all(&[0x24]).ok();
                         }
                     }
                 }
@@ -262,7 +266,7 @@ impl EmulatorConnection {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         state.publish_diagnostics().await;
-        state.publish_emulator_outline(vec!["Emulator disconnected.".to_string()], HashMap::new()).await;
+        state.publish_emulator_outline(vec![], HashMap::new()).await;
         state.trigger_client_hints_refresh().await;
         state.end_progress(progress_token, "Emulation stopped").await;
     }
