@@ -35,7 +35,7 @@ impl Parser {
         let (config, mut reader) = Self::load_project(&state, workspace_path)?;
 
         // Tell client about the linking
-        let progress_token = state.start_progress("Linking", "In Progres...").await;
+        let progress_token = state.start_progress("Linker", "Running...").await;
 
         // Create compiler
         let main_file = PathBuf::from(config.rom.input.file_name().unwrap());
@@ -51,30 +51,25 @@ impl Parser {
         let mut lints: Vec<(Url, Diagnostic)> = Vec::new();
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
-                let (s, m) = Self::symbols(&linker);
+                // TODO generate diff with old section
+                // - check if entry type and address remained unchanged
+                // - if so, check if value has changed and generate a diff to be send to the emulator
+                let (symbols, macros) = Self::symbols(&linker);
                 let optimizations = Self::optimizations(&linker);
-                log::info!("{} symbol(s)", s.len());
+                let mut labels: Vec<(u16, String, String, usize, usize)> = symbols.iter().filter(|s| s.address.is_some()).map(|s| (
+                    s.address.unwrap_or(0) as u16,
+                    s.name.clone(),
+                    s.location.uri.path().to_string(),
+                    s.location.range.start.line as usize,
+                    s.location.range.start.character as usize
 
-                lints.append(&mut Self::diagnostics(&linker, &s));
+                )).collect();
+                labels.sort_by(|a, b| a.0.cmp(&b.0));
+
+                lints.append(&mut Self::diagnostics(&linker, &symbols));
+                state.set_labels(labels);
+                state.set_symbols((symbols, macros, optimizations));
                 state.set_addresses(Self::addresses(&linker));
-
-                let mut l: Vec<(u16, String, String, usize, usize)> = s.iter().filter(|s| s.address.is_some()).map(|s| {
-                    (
-                        s.address.unwrap_or(0) as u16,
-                        s.name.clone(),
-                        s.location.uri.path().to_string(),
-                        s.location.range.start.line as usize,
-                        s.location.range.start.character as usize
-                    )
-
-                }).collect();
-                l.sort_by(|a, b| {
-                    a.0.cmp(&b.0)
-                });
-                state.set_labels(l);
-
-                state.set_symbols((s, m, optimizations));
-
                 state.end_progress(progress_token, "Done").await;
                 log::info!("Linked in {}ms", start.elapsed().as_millis());
             },
@@ -110,10 +105,10 @@ impl Parser {
             }
         }
 
+        // Update diagnostics
         state.set_error(errors.first().map(|(url, diagnostic)| {
             (url.clone(), diagnostic.range.start.line as usize, diagnostic.range.start.character as usize)
         }));
-
         for (_, diagnostics) in state.diagnostics().iter_mut() {
             diagnostics.clear();
         }
