@@ -273,10 +273,10 @@ impl Linker {
         segments
     }
 
-    pub fn into_rom_buffer(self) -> Vec<u8> {
+    pub fn to_rom_buffer(&self) -> Vec<u8> {
         let required_rom_size = Self::required_rom_size(&self.sections);
         let mut buffer: Vec<u8> = std::iter::repeat(0u8).take(required_rom_size).collect();
-        for s in self.sections {
+        for s in &self.sections {
             s.write_to_rom_buffer(&mut buffer[..]);
         }
         buffer

@@ -47,6 +47,15 @@ local function setupCommands()
         GBCDebuggerOutlineClose = {
 			require("gbc-tools.outline").close,
         },
+        GBCEmulatorStart = {
+			require("gbc-tools.emulator").start,
+        },
+        GBCEmulatorStop = {
+			require("gbc-tools.emulator").stop,
+        },
+        GBCBuildRom = {
+			require("gbc-tools.build").rom,
+        },
 	})
 end
 

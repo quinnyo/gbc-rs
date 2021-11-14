@@ -1,23 +1,27 @@
 // STD Dependencies -----------------------------------------------------------
-use std::error::Error;
-use std::io::prelude::*;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
-use std::net::{SocketAddr, TcpStream};
+use std::error::Error;
+use std::path::PathBuf;
+use std::io::prelude::*;
+use std::process::Stdio;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
+use std::process::{Child, Command};
+use std::net::{SocketAddr, TcpStream};
 
 
 // External Dependencies ------------------------------------------------------
+use serde::Deserialize;
 use serde_json::de::IoRead;
 use tokio::runtime::Handle;
-use serde::Deserialize;
+use tower_lsp::lsp_types::Location;
 
 
 // Internal Dependencies ------------------------------------------------------
 use crate::state::State;
+use compiler::linker::SectionEntry;
 
 
 // Modules --------------------------------------------------------------------
@@ -26,10 +30,35 @@ pub use self::status::EmulatorStatus;
 
 
 // Types ----------------------------------------------------------------------
+pub struct EmulatorProcess {
+    child: Child,
+    entries: Vec<SectionEntry>
+}
+
+impl EmulatorProcess {
+    pub fn launch_for_rom(rom_path: PathBuf, entries: Vec<SectionEntry>) -> Option<Self> {
+        match Command::new("sameboy").stdin(Stdio::piped()).arg(rom_path).spawn() {
+            Ok(child) => Some(Self {
+                child,
+                entries
+            }),
+            Err(_) => None
+        }
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(stdin) = self.child.stdin.as_mut() {
+            stdin.write_all(b"quit").ok();
+        }
+    }
+}
+
+
 #[derive(Debug)]
 pub enum EmulatorCommand {
-    QueryAddressValue(u16),
-    DebuggerToggleBreakpoint(u16),
+    ReadAddressValue(u16),
+    WriteAddressValue(u16, u8),
+    DebuggerToggleBreakpoint(Location),
     DebuggerStep,
     DebuggerStepOver,
     DebuggerFinish,
@@ -235,11 +264,19 @@ impl EmulatorConnection {
                 let mut commands = state.commands();
                 while let Some(command) = commands.pop_front() {
                     match command {
-                        EmulatorCommand::QueryAddressValue(address) => {
+                        EmulatorCommand::ReadAddressValue(address) => {
                             sender.write_all(&[0x80, address as u8, (address >> 8) as u8]).ok();
                         },
-                        EmulatorCommand::DebuggerToggleBreakpoint(address) => {
-                            sender.write_all(&[0x10, address as u8, (address >> 8) as u8]).ok();
+                        EmulatorCommand::WriteAddressValue(address, value) => {
+                            sender.write_all(&[0x40, address as u8, (address >> 8) as u8, value]).ok();
+                        },
+                        EmulatorCommand::DebuggerToggleBreakpoint(location) => {
+                            for (address, loc) in state.addresses().iter() {
+                                if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
+                                    sender.write_all(&[0x10, *address as u8, (*address >> 8) as u8]).ok();
+                                    break;
+                                }
+                            }
                         },
                         EmulatorCommand::DebuggerStep => {
                             sender.write_all(&[0x20]).ok();

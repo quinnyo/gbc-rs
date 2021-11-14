@@ -1,6 +1,4 @@
 local utils = require("gbc-tools.utils.utils")
-local popup = require("popup")
-
 local M = {}
 
 function M.toggle_breakpoint() 

@@ -212,9 +212,9 @@ pub struct Generator {
 
 impl Generator {
 
-    pub fn from_linker(linker: Linker) -> Self {
+    pub fn from_linker(linker: &Linker) -> Self {
         Self {
-            buffer: linker.into_rom_buffer()
+            buffer: linker.to_rom_buffer()
         }
     }
 

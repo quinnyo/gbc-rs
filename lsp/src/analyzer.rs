@@ -19,7 +19,7 @@ use compiler::lexer::LexerToken;
 
 use crate::{
     state::State,
-    emulator::{EmulatorConnection, EmulatorCommand},
+    emulator::{EmulatorConnection, EmulatorCommand, EmulatorProcess},
     parser::Parser,
     types::{
         InlayHint, InlayKind,
@@ -97,6 +97,42 @@ impl Analyzer {
         self.state.tokens().remove(&PathBuf::from(path));
         self.state.documents().remove(path);
         self.link_async(PathBuf::from(path));
+    }
+}
+
+impl Analyzer {
+    pub async fn build_rom(&self) {
+        let workspace_path = self.state.workspace_path().clone();
+        if let Some(workspace_path) = workspace_path {
+            Parser::build(workspace_path, self.state.clone()).await;
+        }
+    }
+}
+
+impl Analyzer {
+    pub async fn emulator_start(&self) {
+        if self.state.emulator().is_none() {
+            let workspace_path = self.state.workspace_path().clone();
+            if let Some(workspace_path) = workspace_path {
+                if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
+                    log::info!("Build \"{}\" ({} entries)", rom_path.display(), entries.len());
+                    if let Some(process) = EmulatorProcess::launch_for_rom(rom_path, entries) {
+                        self.state.set_emulator(Some(process));
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn emulator_stop(&self) {
+        if let Some(process) = self.state.emulator().as_mut() {
+            process.stop();
+        }
+        self.state.set_emulator(None);
+    }
+
+    pub async fn emulator_command(&self, command: EmulatorCommand) {
+        self.state.commands().push_back(command);
     }
 }
 
@@ -241,25 +277,6 @@ impl Analyzer {
         } else {
             None
         }
-    }
-
-    pub async fn emulator_command(&self, command: EmulatorCommand) {
-        self.state.commands().push_back(command);
-    }
-
-    pub async fn toggle_breakpoint(&self, location: Location) {
-        if let Some(address) = self.address_from_location(location) {
-            self.emulator_command(EmulatorCommand::DebuggerToggleBreakpoint(address)).await;
-        }
-    }
-
-    fn address_from_location(&self, location: Location) -> Option<u16> {
-        for (address, loc) in self.state.addresses().iter() {
-            if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
-                return Some(*address as u16);
-            }
-        }
-        None
     }
 
     pub async fn inlay_hints(&self, current_file: PathBuf) -> Vec<InlayHint> {
@@ -450,15 +467,15 @@ impl Analyzer {
                     let address = address as u16;
                     if symbol.width == 1 {
                         pending.push(PendingResult::Byte(address));
-                        self.state.commands().push_back(EmulatorCommand::QueryAddressValue(address));
+                        self.state.commands().push_back(EmulatorCommand::ReadAddressValue(address));
 
                     } else {
                         pending.push(PendingResult::Word(
                             address,
                             address.saturating_add(1)
                         ));
-                        self.state.commands().push_back(EmulatorCommand::QueryAddressValue(address));
-                        self.state.commands().push_back(EmulatorCommand::QueryAddressValue(address.saturating_add(1)));
+                        self.state.commands().push_back(EmulatorCommand::ReadAddressValue(address));
+                        self.state.commands().push_back(EmulatorCommand::ReadAddressValue(address.saturating_add(1)));
                     }
 
                 } else {

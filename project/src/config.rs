@@ -35,9 +35,10 @@ impl ProjectConfig {
                 project
             },
             Err(err) => {
-                logger.fail(Logger::format_error(
+                logger.error(Logger::format_error(
                     format!("Failed when trying to parse project configuration file!\n\n{}", err.to_string())
-                ))
+                ));
+                std::process::exit(1);
             }
         }
     }
@@ -51,7 +52,7 @@ impl ProjectConfig {
         compiler.create_linker(logger, &mut reader, main_file)
     }
 
-    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool) {
+    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool) -> Result<Linker, CompilationError> {
         let mut reader = ProjectReader::from_relative(project.rom.input.clone());
         let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
 
@@ -87,8 +88,16 @@ impl ProjectConfig {
         builder.recursive(true);
         builder.create(output_dir).expect("Failed to create output directory");
 
-        let result = compiler.compile(logger, &mut reader, main_file);
-        logger.finish(result);
+        match compiler.compile(logger, &mut reader, main_file) {
+            Ok(linker) => {
+                logger.flush();
+                Ok(linker)
+            },
+            Err(err) => {
+                logger.error(err.to_string());
+                Err(err)
+            }
+        }
     }
 
     pub fn try_load(reader: &ProjectReader) -> Result<ProjectConfig, IOError> {
@@ -136,9 +145,9 @@ pub struct RomConfig {
 #[derive(Debug, Default, Deserialize)]
 pub struct ReportConfig {
     #[serde(default)]
-    info: bool,
+    pub info: bool,
     #[serde(default)]
-    segments: bool
+    pub segments: bool
 }
 
 #[derive(Debug, Clone, Deserialize)]

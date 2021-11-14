@@ -66,6 +66,14 @@ impl SectionEntry {
         }
     }
 
+    pub fn is_rom(&self) -> bool {
+        match &self.data {
+            EntryData::Instruction { .. } => true,
+            EntryData::Data { bytes: Some(_), .. } => true,
+            _ => false
+        }
+    }
+
     pub fn write_to_rom_buffer(&self, buffer: &mut [u8]) {
         match &self.data {
             EntryData::Instruction { bytes, .. } => {

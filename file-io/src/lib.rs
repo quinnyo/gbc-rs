@@ -1,6 +1,4 @@
 // STD Dependencies -----------------------------------------------------------
-use std::fmt;
-use std::process;
 use std::path::PathBuf;
 use std::io::Error as IOError;
 
@@ -105,13 +103,6 @@ impl Logger {
         self.output.join("\n")
     }
 
-    pub fn finish<E: fmt::Display>(&mut self, result: Result<(), E>) {
-        match result {
-            Ok(_) => self.flush(),
-            Err(err) => self.fail(err.to_string())
-        }
-    }
-
     pub fn flush(&mut self) {
         if !self.output.is_empty() {
             println!("{}", self.to_string());
@@ -119,12 +110,11 @@ impl Logger {
         self.output.clear();
     }
 
-    pub fn fail<S: Into<String>>(&self, s: S) -> ! {
+    pub fn error<S: Into<String>>(&self, s: S) {
         if !self.output.is_empty() {
             println!("{}", self.to_string());
         }
         eprintln!("{}", s.into());
-        process::exit(1)
     }
 
 }

@@ -42,13 +42,14 @@ impl Parser {
         let mut compiler = Compiler::new();
         compiler.set_optimize_instructions();
 
-        // Run linker
         let mut logger = Logger::new();
         logger.set_silent();
 
         let start = std::time::Instant::now();
         let mut errors: Vec<(Url, Diagnostic)> = Vec::new();
         let mut lints: Vec<(Url, Diagnostic)> = Vec::new();
+
+        // Run linker
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
                 // TODO generate diff with old section
@@ -122,6 +123,31 @@ impl Parser {
         // Trigger new inlay hint fetching
         state.client().send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
         Some(())
+    }
+
+    pub async fn build(workspace_path: PathBuf, state: State) -> Option<(Vec<SectionEntry>, PathBuf)> {
+        // Try and load config for current workspace
+        let (mut config, _) = Self::load_project(&state, workspace_path)?;
+        config.report.segments = false;
+        config.report.info = false;
+
+        // Tell client about the build
+        let progress_token = state.start_progress("Build", "Running...").await;
+
+        let mut logger = Logger::new();
+        logger.set_silent();
+
+        // Run compiler
+        match ProjectConfig::build(&config, &mut logger, false) {
+            Ok(linker) => {
+                state.end_progress(progress_token, "Complete").await;
+                Some((Self::rom_entries(&linker), config.rom.output))
+            },
+            Err(_) => {
+                state.end_progress(progress_token, "Failed").await;
+                None
+            }
+        }
     }
 
     pub fn get_token(
@@ -257,6 +283,19 @@ impl Parser {
             }
         }
         addresses
+    }
+
+    fn rom_entries(linker: &Linker) -> Vec<SectionEntry> {
+        let sections = linker.section_entries();
+        let mut entries = Vec::with_capacity(512);
+        for section in sections {
+            for entry in section {
+                if entry.is_rom() {
+                    entries.push(entry.clone());
+                }
+            }
+        }
+        entries
     }
 
     fn symbols(linker: &Linker) -> (Vec<GBCSymbol>, Vec<MacroExpansion>) {

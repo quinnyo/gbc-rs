@@ -1,11 +1,10 @@
 // STD Dependencies -----------------------------------------------------------
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{self, Command};
 
 
 // External Dependencies ------------------------------------------------------
-use decompiler::Decompiler;
 use project::{ProjectConfig, ProjectReader};
 use file_io::Logger;
 use compiler::compiler::Compiler;
@@ -32,7 +31,9 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        ProjectConfig::build(&config, &mut logger, true);
+        if ProjectConfig::build(&config, &mut logger, true).is_err() {
+            process::exit(1);
+        }
 
     // Debug Builds
     } else if matches.subcommand_matches("debug").is_some() {
@@ -40,15 +41,18 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        ProjectConfig::build(&config, &mut logger, false);
+        if ProjectConfig::build(&config, &mut logger, false).is_err() {
+            process::exit(1);
+        }
 
     // Emulation
     } else if let Some(matches) = matches.subcommand_matches("emu") {
         let name = matches.value_of("EMULATOR").unwrap();
         if !try_emulator(&mut logger, false, name) {
-            logger.fail(Logger::format_error(
+            logger.error(Logger::format_error(
                 format!("No emulator configuration for \"{}\".", name)
             ));
+            process::exit(1);
         }
 
     // De- / Compilation
@@ -63,12 +67,6 @@ fn main() {
         // If the file does not exist, check if it is a configured emulator shortcut
         if !main.is_file() && try_emulator(&mut logger, true, &main.display().to_string()) {
             // Empty
-
-        // Decompile
-        } else if matches.occurrences_of("decompile") > 0 {
-            let mut decompiler = Decompiler::new();
-            let result = decompiler.decompile_file(&mut logger, &mut reader, main_file);
-            logger.finish(result);
 
         // Compile
         } else {
@@ -97,8 +95,15 @@ fn main() {
                 compiler.set_generate_symbols(PathBuf::from(map));
             }
 
-            let result = compiler.compile(&mut logger, &mut reader, main_file);
-            logger.finish(result);
+            match compiler.compile(&mut logger, &mut reader, main_file) {
+                Ok(_) => {
+                    logger.flush();
+                },
+                Err(err) => {
+                    logger.error(err.to_string());
+                    process::exit(1);
+                }
+            }
         }
 
     } else {
@@ -118,7 +123,9 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
         return false;
     };
     if let Some(emulator) = config.emulator.get(name) {
-        ProjectConfig::build(&config, logger, !emulator.debug);
+        if ProjectConfig::build(&config, logger, !emulator.debug).is_err() {
+            process::exit(1);
+        }
         logger.status("Emulating", format!("Running \"{}\"...", emulator.command));
         logger.flush();
 

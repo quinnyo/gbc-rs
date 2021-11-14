@@ -69,13 +69,13 @@ impl Compiler {
         self.optimize_instructions = true;
     }
 
-    pub fn compile<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<(), CompilationError> {
+    pub fn compile<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
         colored::control::set_override(!self.no_color);
         self.status(logger, "Compiling", format!("\"{}\" ...", file.display()));
         let (entry_lexer, macro_defs, integers) = self.parse(logger, io, file)?;
         let linker = self.link(logger, io, entry_lexer, macro_defs, integers)?;
-        self.generate(logger, io, linker)?;
-        Ok(())
+        self.generate(logger, io, &linker)?;
+        Ok(linker)
     }
 
     pub fn create_linker<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
@@ -137,7 +137,7 @@ impl Compiler {
         Ok(linker)
     }
 
-    fn generate<T: FileWriter>(&mut self, logger: &mut Logger, io: &mut T, linker: Linker) -> Result<(), CompilationError> {
+    fn generate<T: FileWriter>(&mut self, logger: &mut Logger, io: &mut T, linker: &Linker) -> Result<(), CompilationError> {
         let start = Instant::now();
         let mut generator = Generator::from_linker(linker);
 

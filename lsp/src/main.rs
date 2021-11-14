@@ -65,7 +65,10 @@ impl LanguageServer for Backend {
                         "debugger/step_over".to_string(),
                         "debugger/finish".to_string(),
                         "debugger/continue".to_string(),
-                        "debugger/undo".to_string()
+                        "debugger/undo".to_string(),
+                        "emulator/start".to_string(),
+                        "emulator/stop".to_string(),
+                        "build/rom".to_string()
                     ],
                     work_done_progress_options: Default::default(),
                 }),
@@ -181,11 +184,11 @@ impl LanguageServer for Backend {
                 return Ok(Some(serde_json::to_value(&hints).unwrap()))
             },
             "debugger/toggle_breakpoint" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
-                self.analyzer.toggle_breakpoint(Location {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerToggleBreakpoint(Location {
                     uri: params.text_document.uri,
                     range: params.range
 
-                }).await;
+                })).await;
             },
             "debugger/step" => {
                 self.analyzer.emulator_command(EmulatorCommand::DebuggerStep).await;
@@ -201,6 +204,15 @@ impl LanguageServer for Backend {
             },
             "debugger/undo" => {
                 self.analyzer.emulator_command(EmulatorCommand::DebuggerUndo).await;
+            },
+            "emulator/start" => {
+                self.analyzer.emulator_start().await;
+            },
+            "emulator/stop" => {
+                self.analyzer.emulator_stop().await;
+            },
+            "build/rom" => {
+                self.analyzer.build_rom().await;
             },
             _ => {}
         }

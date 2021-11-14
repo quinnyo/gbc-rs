@@ -28,7 +28,7 @@ use tower_lsp::lsp_types::notification::{Progress, PublishDiagnostics};
 // Internal Dependencies ------------------------------------------------------
 use compiler::lexer::{stage::include::IncludeToken, LexerFile};
 use crate::{
-    emulator::{EmulatorCommand, EmulatorStatus},
+    emulator::{EmulatorCommand, EmulatorStatus, EmulatorProcess},
     types::{
         ServerStatusParams, ServerStatusNotification,
         InlayHintsNotification, InlayHintsParams,
@@ -60,7 +60,7 @@ pub struct State {
     error: Arc<Mutex<Option<Error>>>,
     diagnostics: Arc<Mutex<DiagnosticsMap>>,
 
-    // Parsed Symbols
+    // Symbol Data
     symbols: Arc<Mutex<Option<SymbolData>>>,
 
     // Document Data
@@ -73,6 +73,7 @@ pub struct State {
     labels: Arc<Mutex<LabelList>>,
 
     // Emulator
+    emulator: Arc<Mutex<Option<EmulatorProcess>>>,
     status: Arc<Mutex<Option<EmulatorStatus>>>,
     commands: Arc<Mutex<CommandQueue>>,
     results: Arc<Mutex<ResultMap>>,
@@ -85,21 +86,33 @@ impl State {
             client,
             progress_id: Arc::new(AtomicUsize::new(0)),
 
+            // Diagnostics
             error: Arc::new(Mutex::new(None)),
             diagnostics: Arc::new(Mutex::new(HashMap::new())),
 
+            // Symbol Data
             symbols: Arc::new(Mutex::new(None)),
 
+            // Document Data
             workspace_path: Arc::new(Mutex::new(None)),
             documents: Arc::new(Mutex::new(HashMap::new())),
             tokens: Arc::new(Mutex::new(HashMap::new())),
 
+            // Address<->Location Lookup
             addresses: Arc::new(Mutex::new(HashMap::new())),
             labels: Arc::new(Mutex::new(Vec::new())),
 
+            // Emulator
+            emulator: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(None)),
             commands: Arc::new(Mutex::new(VecDeque::new())),
             results: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn set_emulator(&self, p: Option<EmulatorProcess>) {
+        if let Ok(mut process) = self.emulator.lock() {
+            *process = p;
         }
     }
 
@@ -137,6 +150,10 @@ impl State {
         if let Ok(mut data) = self.symbols.lock() {
             *data = Some(symbols);
         }
+    }
+
+    pub fn emulator<'a>(&'a self) -> MutexGuard<'a, Option<EmulatorProcess>> {
+        self.emulator.lock().expect("Emulator Lock failed")
     }
 
     pub fn commands<'a>(&'a self) -> MutexGuard<'a, CommandQueue> {
