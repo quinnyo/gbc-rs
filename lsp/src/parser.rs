@@ -35,7 +35,7 @@ impl Parser {
         let (config, mut reader) = Self::load_project(&state, workspace_path)?;
 
         // Tell client about the linking
-        let progress_token = state.start_progress("Linker", "Running...").await;
+        let progress_token = state.start_progress("Linking", "In Progres...").await;
 
         // Create compiler
         let main_file = PathBuf::from(config.rom.input.file_name().unwrap());

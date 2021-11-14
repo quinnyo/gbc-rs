@@ -82,6 +82,7 @@ impl EmulatorStatus {
         }
     }
 
+    // TODO forward line info to client, so that we can jump to the locations from the outline window
     pub(in crate::emulator) fn to_outline(
         &self,
         data: &State,
@@ -118,7 +119,8 @@ impl EmulatorStatus {
                 }
             }
 
-            // Use location from addresses if available otherwise fallback to closest matching label
+            // TODO use location from addresses if available otherwise fallback to last
+            // matching label
             if let Some(location) = data.addresses().get(&(address as usize)) {
                 locations.insert(line, DebuggerOutlineLocation {
                     filename: location.uri.path().to_string(),
