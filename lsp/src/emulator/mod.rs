@@ -3,12 +3,10 @@ use std::sync::Arc;
 use std::error::Error;
 use std::path::PathBuf;
 use std::io::prelude::*;
-use std::process::Stdio;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
-use std::process::{Child, Command};
 use std::net::{SocketAddr, TcpStream};
 
 
@@ -21,39 +19,16 @@ use tower_lsp::lsp_types::Location;
 
 // Internal Dependencies ------------------------------------------------------
 use crate::state::State;
-use compiler::linker::SectionEntry;
 
 
 // Modules --------------------------------------------------------------------
 mod status;
+mod process;
 pub use self::status::EmulatorStatus;
+pub use self::process::EmulatorProcess;
 
 
 // Types ----------------------------------------------------------------------
-pub struct EmulatorProcess {
-    child: Child,
-    entries: Vec<SectionEntry>
-}
-
-impl EmulatorProcess {
-    pub fn launch_for_rom(rom_path: PathBuf, entries: Vec<SectionEntry>) -> Option<Self> {
-        match Command::new("sameboy").stdin(Stdio::piped()).arg(rom_path).spawn() {
-            Ok(child) => Some(Self {
-                child,
-                entries
-            }),
-            Err(_) => None
-        }
-    }
-
-    pub fn stop(&mut self) {
-        if let Some(stdin) = self.child.stdin.as_mut() {
-            stdin.write_all(b"quit").ok();
-        }
-    }
-}
-
-
 #[derive(Debug)]
 pub enum EmulatorCommand {
     ReadAddressValue(u16),

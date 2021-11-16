@@ -5,6 +5,16 @@ use crate::expression::data::{DataAlignment, DataEndianess};
 
 
 // Types ----------------------------------------------------------------------
+#[derive(Debug, Eq, PartialEq)]
+pub enum EntryDataTyp {
+    Marker,
+    Label,
+    Data,
+    Instruction,
+    Block
+}
+
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum EntryData {
     Marker {
@@ -35,6 +45,18 @@ pub enum EntryData {
     }
 }
 
+impl EntryData {
+    fn typ(&self) -> EntryDataTyp {
+        match self {
+            Self::Marker { .. } => EntryDataTyp::Marker,
+            Self::Label { .. } => EntryDataTyp::Label,
+            Self::Data { .. } => EntryDataTyp::Data,
+            Self::Instruction { .. } => EntryDataTyp::Instruction,
+            Self::Block { .. } => EntryDataTyp::Block
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SectionEntry {
     pub inner: InnerToken,
@@ -45,7 +67,6 @@ pub struct SectionEntry {
 }
 
 impl SectionEntry {
-
     pub fn new_unsized(section_id: usize, inner: InnerToken, data: EntryData) -> Self {
         SectionEntry {
             inner,
@@ -63,6 +84,18 @@ impl SectionEntry {
             offset: 0,
             size,
             data
+        }
+    }
+
+    pub fn typ(&self) -> EntryDataTyp {
+        self.data.typ()
+    }
+
+    pub fn rom_bytes(&self) -> Option<&[u8]> {
+        match &self.data {
+            EntryData::Instruction { bytes, .. } => Some(bytes),
+            EntryData::Data { bytes: Some(bytes), .. } => Some(bytes),
+            _ => None
         }
     }
 

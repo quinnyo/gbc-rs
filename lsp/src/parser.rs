@@ -52,11 +52,12 @@ impl Parser {
         // Run linker
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
-                // TODO generate diff with old section
-                // - check if entry type and address remained unchanged
-                // - if so, check if value has changed and generate a diff to be send to the emulator
+                log::info!("Linked in {}ms", start.elapsed().as_millis());
+
+                let start = std::time::Instant::now();
                 let (symbols, macros) = Self::symbols(&linker);
                 let optimizations = Self::optimizations(&linker);
+
                 let mut labels: Vec<(u16, String, String, usize, usize)> = symbols.iter().filter(|s| s.address.is_some()).map(|s| (
                     s.address.unwrap_or(0) as u16,
                     s.name.clone(),
@@ -68,11 +69,16 @@ impl Parser {
                 labels.sort_by(|a, b| a.0.cmp(&b.0));
 
                 lints.append(&mut Self::diagnostics(&linker, &symbols));
+                state.set_addresses(Self::addresses(&linker));
                 state.set_labels(labels);
                 state.set_symbols((symbols, macros, optimizations));
-                state.set_addresses(Self::addresses(&linker));
                 state.end_progress(progress_token, "Done").await;
-                log::info!("Linked in {}ms", start.elapsed().as_millis());
+                log::info!("Analyzed in {}ms", start.elapsed().as_millis());
+
+                // Generate ROM entry diff for running emulator process
+                if let Some(process) = state.emulator().as_mut() {
+                    process.update_entries(Self::rom_entries(&linker));
+                }
             },
             Err(err) => {
                 if let Some((path, line, col, message)) = err.into_diagnostic() {
@@ -106,18 +112,23 @@ impl Parser {
             }
         }
 
-        // Update diagnostics
+        // Update error
         state.set_error(errors.first().map(|(url, diagnostic)| {
             (url.clone(), diagnostic.range.start.line as usize, diagnostic.range.start.character as usize)
         }));
-        for (_, diagnostics) in state.diagnostics().iter_mut() {
-            diagnostics.clear();
-        }
-        for (uri, err) in errors {
-            state.diagnostics().entry(uri).or_insert_with(Vec::new).push(err);
-        }
-        for (uri, lint) in lints {
-            state.diagnostics().entry(uri).or_insert_with(Vec::new).push(lint);
+
+        // Update diagnostics
+        {
+            let mut diagnostics = state.diagnostics();
+            for (_, diagnostics) in diagnostics.iter_mut() {
+                diagnostics.clear();
+            }
+            for (uri, err) in errors {
+                diagnostics.entry(uri).or_insert_with(Vec::new).push(err);
+            }
+            for (uri, lint) in lints {
+                diagnostics.entry(uri).or_insert_with(Vec::new).push(lint);
+            }
         }
 
         // Trigger new inlay hint fetching
@@ -125,9 +136,9 @@ impl Parser {
         Some(())
     }
 
-    pub async fn build(workspace_path: PathBuf, state: State) -> Option<(Vec<SectionEntry>, PathBuf)> {
+    pub async fn build(workspace_path: PathBuf, state: State) -> Option<(HashMap<usize, SectionEntry>, PathBuf)> {
         // Try and load config for current workspace
-        let (mut config, _) = Self::load_project(&state, workspace_path)?;
+        let (mut config, reader) = Self::load_project(&state, workspace_path)?;
         config.report.segments = false;
         config.report.info = false;
 
@@ -138,7 +149,7 @@ impl Parser {
         logger.set_silent();
 
         // Run compiler
-        match ProjectConfig::build(&config, &mut logger, false) {
+        match ProjectConfig::build(&config, &mut logger, Some(reader), false) {
             Ok(linker) => {
                 state.end_progress(progress_token, "Complete").await;
                 Some((Self::rom_entries(&linker), config.rom.output))
@@ -160,14 +171,15 @@ impl Parser {
         let (_, reader) = Self::load_project(state, current_file.clone())?;
         let relative_file = current_file.strip_prefix(reader.base_dir()).unwrap().to_path_buf();
 
-        let results = if let Some(data) = state.tokens().get(&current_file) {
+        let mut tokens = state.tokens();
+        let results = if let Some(data) = tokens.get(&current_file) {
             Some(data.clone())
 
         } else {
             let mut files = Vec::new();
             if let Ok(parsed) = IncludeStage::tokenize_single(&reader, &relative_file, &mut files) {
                 let result = (parsed, files.remove(0));
-                state.tokens().insert(current_file, result.clone());
+                tokens.insert(current_file, result.clone());
                 Some(result)
 
             } else {
@@ -181,8 +193,10 @@ impl Parser {
                     return Some((t, file))
                 }
             }
+            None
+        } else {
+            None
         }
-        None
     }
 
     fn resolve_reference(linker: &Linker, file_index: usize, start_index: usize, macro_call_id: Option<usize>, l: usize) -> Location {
@@ -229,6 +243,7 @@ impl Parser {
 
     fn location_from_file_index(files: &[LexerFile], file_index: usize, start_index: usize, end_index: usize) -> Location {
         let file = &files[file_index];
+        // TODO optimize for speed
         let (line, col) = file.get_line_and_col(start_index);
         let (eline, ecol) = file.get_line_and_col(end_index);
         Location {
@@ -268,7 +283,7 @@ impl Parser {
     }
 
     fn addresses(linker: &Linker) -> HashMap<usize, Location> {
-        let mut addresses = HashMap::with_capacity(512);
+        let mut addresses = HashMap::with_capacity(4096);
         let context = linker.context();
         let sections = linker.section_entries();
         for entries in sections {
@@ -285,13 +300,13 @@ impl Parser {
         addresses
     }
 
-    fn rom_entries(linker: &Linker) -> Vec<SectionEntry> {
+    fn rom_entries(linker: &Linker) -> HashMap<usize, SectionEntry> {
         let sections = linker.section_entries();
-        let mut entries = Vec::with_capacity(512);
+        let mut entries = HashMap::with_capacity(2048);
         for section in sections {
             for entry in section {
                 if entry.is_rom() {
-                    entries.push(entry.clone());
+                    entries.insert(entry.offset, entry.clone());
                 }
             }
         }
@@ -299,7 +314,7 @@ impl Parser {
     }
 
     fn symbols(linker: &Linker) -> (Vec<GBCSymbol>, Vec<MacroExpansion>) {
-        let mut symbols: Vec<GBCSymbol> = Vec::new();
+        let mut symbols: Vec<GBCSymbol> = Vec::with_capacity(1024);
         let context = linker.context();
 
         // Constants
@@ -405,7 +420,7 @@ impl Parser {
 
                 if let EntryData::Label { .. } = &entry.data {
 
-                    let mut children = Vec::new();
+                    let mut children = Vec::with_capacity(16);
                     let mut kind = SymbolKind::Function;
                     let mut data_size = 0;
                     while let Some(SectionEntry { size, data, inner, .. }) = entries.peek() {
@@ -566,7 +581,7 @@ impl Parser {
         }
 
         // Macro Calls for inlay hints
-        let mut macro_expansions = Vec::new();
+        let mut macro_expansions = Vec::with_capacity(1024);
         for call in context.macro_calls {
             if call.is_expansion() {
                 let name = call.name();
@@ -582,8 +597,8 @@ impl Parser {
         }
 
         // Remove any duplicate symbols
-        let mut symbol_locations = HashSet::new();
-        let mut unique_symbols = Vec::new();
+        let mut symbol_locations = HashSet::with_capacity(1024);
+        let mut unique_symbols = Vec::with_capacity(1024);
         for s in symbols {
             let loc = (
                 s.location.uri.path().to_string(),
@@ -625,8 +640,8 @@ impl Parser {
     }
 
     fn diagnostics(linker: &Linker, symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
-        let mut lints = Vec::new();
-        let mut constants = Vec::new();
+        let mut lints = Vec::with_capacity(32);
+        let mut constants = Vec::with_capacity(32);
         for symbol in symbols {
 
             // Record constants for later use

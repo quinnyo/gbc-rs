@@ -52,8 +52,8 @@ impl ProjectConfig {
         compiler.create_linker(logger, &mut reader, main_file)
     }
 
-    pub fn build(project: &ProjectConfig, logger: &mut Logger, release: bool) -> Result<Linker, CompilationError> {
-        let mut reader = ProjectReader::from_relative(project.rom.input.clone());
+    pub fn build(project: &ProjectConfig, logger: &mut Logger, reader: Option<ProjectReader>, release: bool) -> Result<Linker, CompilationError> {
+        let mut reader = reader.unwrap_or_else(|| ProjectReader::from_relative(project.rom.input.clone()));
         let main_file = PathBuf::from(project.rom.input.file_name().unwrap());
 
         let mut compiler = Compiler::new();

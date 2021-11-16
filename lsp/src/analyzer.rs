@@ -29,7 +29,7 @@ use crate::{
 
 
 // Constants ------------------------------------------------------------------
-const THREAD_DEBOUNCE: u64 = 250;
+const THREAD_DEBOUNCE: u64 = 150;
 
 
 // Analyzer Implementation ----------------------------------------------------
@@ -104,21 +104,32 @@ impl Analyzer {
     pub async fn build_rom(&self) {
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
-            Parser::build(workspace_path, self.state.clone()).await;
+            if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
+                log::info!("Build ROM \"{}\" ({} entries)", rom_path.display(), entries.len());
+            }
         }
     }
 }
 
 impl Analyzer {
     pub async fn emulator_start(&self) {
-        if self.state.emulator().is_none() {
-            let workspace_path = self.state.workspace_path().clone();
-            if let Some(workspace_path) = workspace_path {
-                if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
-                    log::info!("Build \"{}\" ({} entries)", rom_path.display(), entries.len());
-                    if let Some(process) = EmulatorProcess::launch_for_rom(rom_path, entries) {
-                        self.state.set_emulator(Some(process));
-                    }
+        let workspace_path = self.state.workspace_path().clone();
+        if let Some(workspace_path) = workspace_path {
+            if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
+                // Reset and reload existing emulator process if still running
+                let was_reset = if let Some(process) = self.state.emulator().as_mut() {
+                    process.reset(entries.clone())
+
+                } else {
+                    false
+                };
+                if !was_reset {
+                    let state = self.state.clone();
+                    Handle::current().spawn(async move {
+                        if let Some(process) = EmulatorProcess::launch(state.clone(), rom_path, entries) {
+                            state.set_emulator(Some(process));
+                        }
+                    });
                 }
             }
         }
@@ -441,7 +452,7 @@ impl Analyzer {
     fn query_symbol_memory_values(&self, symbols: &[&GBCSymbol]) -> Vec<Option<u16>> {
 
         // Generate initial result set
-        let mut result_set = Vec::new();
+        let mut result_set = Vec::with_capacity(512);
         for _ in 0..symbols.len() {
             result_set.push(None)
         }

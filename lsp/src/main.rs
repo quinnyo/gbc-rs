@@ -89,6 +89,7 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.analyzer.emulator_stop().await;
         self.analyzer.shutdown().await;
         Ok(())
     }

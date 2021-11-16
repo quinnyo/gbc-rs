@@ -31,7 +31,7 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        if ProjectConfig::build(&config, &mut logger, true).is_err() {
+        if ProjectConfig::build(&config, &mut logger, None, true).is_err() {
             process::exit(1);
         }
 
@@ -41,7 +41,7 @@ fn main() {
             &mut logger,
             &ProjectReader::from_absolute(env::current_dir().unwrap())
         );
-        if ProjectConfig::build(&config, &mut logger, false).is_err() {
+        if ProjectConfig::build(&config, &mut logger, None, false).is_err() {
             process::exit(1);
         }
 
@@ -123,7 +123,7 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
         return false;
     };
     if let Some(emulator) = config.emulator.get(name) {
-        if ProjectConfig::build(&config, logger, !emulator.debug).is_err() {
+        if ProjectConfig::build(&config, logger, None, !emulator.debug).is_err() {
             process::exit(1);
         }
         logger.status("Emulating", format!("Running \"{}\"...", emulator.command));
