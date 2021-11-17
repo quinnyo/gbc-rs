@@ -18,7 +18,6 @@ use compiler::{
         LexerToken,
         LexerFile
     },
-    expression::ExpressionResult,
     linker::{
         AccessKind, Linker, SectionEntry, EntryData
     }
@@ -45,11 +44,11 @@ impl Parser {
         let mut logger = Logger::new();
         logger.set_silent();
 
-        let start = std::time::Instant::now();
         let mut errors: Vec<(Url, Diagnostic)> = Vec::new();
         let mut lints: Vec<(Url, Diagnostic)> = Vec::new();
 
         // Run linker
+        let start = std::time::Instant::now();
         match compiler.create_linker(&mut logger, &mut reader, main_file) {
             Ok(linker) => {
                 log::info!("Linked in {}ms", start.elapsed().as_millis());
@@ -69,7 +68,7 @@ impl Parser {
                 labels.sort_by(|a, b| a.0.cmp(&b.0));
 
                 lints.append(&mut Self::diagnostics(&linker, &symbols));
-                state.set_addresses(Self::addresses(&linker));
+                state.set_address_locations(Self::address_locations(&linker));
                 state.set_labels(labels);
                 state.set_symbols((symbols, macros, optimizations));
                 state.end_progress(progress_token, "Done").await;
@@ -77,7 +76,7 @@ impl Parser {
 
                 // Generate ROM entry diff for running emulator process
                 if let Some(process) = state.emulator().as_mut() {
-                    process.update_entries(Self::rom_entries(&linker));
+                    lints.append(&mut process.update_entries(Self::rom_entries(&linker)));
                 }
             },
             Err(err) => {
@@ -243,7 +242,6 @@ impl Parser {
 
     fn location_from_file_index(files: &[LexerFile], file_index: usize, start_index: usize, end_index: usize) -> Location {
         let file = &files[file_index];
-        // TODO optimize for speed
         let (line, col) = file.get_line_and_col(start_index);
         let (eline, ecol) = file.get_line_and_col(end_index);
         Location {
@@ -282,22 +280,24 @@ impl Parser {
         }
     }
 
-    fn addresses(linker: &Linker) -> HashMap<usize, Location> {
-        let mut addresses = HashMap::with_capacity(4096);
+    fn address_locations(linker: &Linker) -> HashMap<usize, Location> {
+        let mut locations = HashMap::with_capacity(4096);
         let context = linker.context();
         let sections = linker.section_entries();
         for entries in sections {
             for entry in entries {
-                let location = Self::location_from_file_index(
-                    &context.files,
-                    entry.inner.file_index,
-                    entry.inner.start_index,
-                    entry.inner.end_index
-                );
-                addresses.insert(entry.offset, location);
+                if entry.is_rom() {
+                    let location = Self::location_from_file_index(
+                        &context.files,
+                        entry.inner.file_index,
+                        entry.inner.start_index,
+                        entry.inner.end_index
+                    );
+                    locations.insert(entry.offset, location);
+                }
             }
         }
-        addresses
+        locations
     }
 
     fn rom_entries(linker: &Linker) -> HashMap<usize, SectionEntry> {
@@ -574,7 +574,7 @@ impl Parser {
                 if c.parent_id() == Some(parent_id) {
                     *children += 1;
                     *size += *call_sizes.get(&c.id()).unwrap_or(&0);
-                    // Now recsurse to also find this macro's children
+                    // Now recurse to also find this macro's children
                     macro_child_size(calls, call_sizes, c.id(), size, children);
                 }
             }
@@ -639,7 +639,7 @@ impl Parser {
         }).collect()
     }
 
-    fn diagnostics(linker: &Linker, symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
+    fn diagnostics(_linker: &Linker, symbols: &[GBCSymbol]) -> Vec<(Url, Diagnostic)> {
         let mut lints = Vec::with_capacity(32);
         let mut constants = Vec::with_capacity(32);
         for symbol in symbols {
@@ -688,6 +688,7 @@ impl Parser {
 
         // Recommend to replace magic number integers with matching constants
         // TODO currently not working due to integer mapping logic in compiler being incompelte
+        /*
         let context = linker.context();
         for (_, (inner, value)) in context.integers {
             let location = Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index);
@@ -723,7 +724,7 @@ impl Parser {
                     }));
                 }
             }
-        }
+        }*/
         lints
     }
 }

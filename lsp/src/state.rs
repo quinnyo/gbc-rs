@@ -134,7 +134,7 @@ impl State {
         }
     }
 
-    pub fn set_addresses(&self, addresses: AddressesMap) {
+    pub fn set_address_locations(&self, addresses: AddressesMap) {
         if let Ok(mut map) = self.addresses.lock() {
             *map = addresses;
         }
@@ -184,7 +184,7 @@ impl State {
         self.documents.lock().expect("Documents Lock failed")
     }
 
-    pub fn addresses<'a>(&'a self) -> MutexGuard<'a, AddressesMap> {
+    pub fn address_locations<'a>(&'a self) -> MutexGuard<'a, AddressesMap> {
         self.addresses.lock().expect("Addresses Lock failed")
     }
 
@@ -285,7 +285,7 @@ impl State {
         // Add debugger location
         if let Some(status) = self.status().clone() {
             for b in &status.breakpoints {
-                if let Some(location) = self.addresses().get(&(b.address as usize)) {
+                if let Some(location) = self.address_locations().get(&(b.address as usize)) {
                     let info = Diagnostic {
                         message: format!("Debugger Breakpoint @ ${:0>4X}", b.address),
                         range: location.range,
@@ -296,7 +296,7 @@ impl State {
                 }
             }
             if status.stopped {
-                if let Some(location) = self.addresses().get(&(status.pc as usize)) {
+                if let Some(location) = self.address_locations().get(&(status.pc as usize)) {
                     let info = Diagnostic {
                         message: format!(
                             "Debugger Halt\nAF={:0>4X}\nBC={:0>4X}\nDE={:0>4X}\nHL={:0>4X}\nSP={:0>4X}\nPC={:0>4X}",

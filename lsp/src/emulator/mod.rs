@@ -246,7 +246,7 @@ impl EmulatorConnection {
                             sender.write_all(&[0x40, address as u8, (address >> 8) as u8, value]).ok();
                         },
                         EmulatorCommand::DebuggerToggleBreakpoint(location) => {
-                            for (address, loc) in state.addresses().iter() {
+                            for (address, loc) in state.address_locations().iter() {
                                 if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
                                     sender.write_all(&[0x10, *address as u8, (*address >> 8) as u8]).ok();
                                     break;
@@ -254,19 +254,44 @@ impl EmulatorConnection {
                             }
                         },
                         EmulatorCommand::DebuggerStep => {
-                            sender.write_all(&[0x20]).ok();
+                            if let Some(s) = state.emulator().as_mut() {
+                                s.send(b"step\n");
+
+                            } else {
+                                sender.write_all(&[0x20]).ok();
+                            }
                         },
                         EmulatorCommand::DebuggerStepOver => {
-                            sender.write_all(&[0x21]).ok();
+                            if let Some(s) = state.emulator().as_mut() {
+                                s.send(b"next\n");
+
+                            } else {
+                                sender.write_all(&[0x21]).ok();
+                            }
                         },
                         EmulatorCommand::DebuggerFinish => {
-                            sender.write_all(&[0x22]).ok();
+                            if let Some(s) = state.emulator().as_mut() {
+                                s.send(b"finish\n");
+
+                            } else {
+                                sender.write_all(&[0x22]).ok();
+                            }
                         },
                         EmulatorCommand::DebuggerContinue => {
-                            sender.write_all(&[0x23]).ok();
+                            if let Some(s) = state.emulator().as_mut() {
+                                s.send(b"continue\n");
+
+                            } else {
+                                sender.write_all(&[0x23]).ok();
+                            }
                         },
                         EmulatorCommand::DebuggerUndo => {
-                            sender.write_all(&[0x24]).ok();
+                            if let Some(s) = state.emulator().as_mut() {
+                                s.send(b"undo\n");
+
+                            } else {
+                                sender.write_all(&[0x24]).ok();
+                            }
                         }
                     }
                 }

@@ -119,7 +119,7 @@ impl EmulatorStatus {
             }
 
             // Use location from addresses if available otherwise fallback to closest matching label
-            if let Some(location) = data.addresses().get(&(address as usize)) {
+            if let Some(location) = data.address_locations().get(&(address as usize)) {
                 locations.insert(line, DebuggerOutlineLocation {
                     filename: location.uri.path().to_string(),
                     line: location.range.start.line as usize,
