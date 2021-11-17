@@ -1,4 +1,4 @@
-image: "sseemayer/rust-musl-builder-mingw:latest"
+image: "rust_musl_docker/image:stable-latest"
 
 stages:
   - test
