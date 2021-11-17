@@ -1,4 +1,4 @@
-image: "rust_musl_docker/image:stable-latest"
+image: "ekidd/rust-musl-builder:stable"
 
 stages:
   - test
