@@ -4,12 +4,14 @@ use std::cmp;
 
 // Constants ------------------------------------------------------------------
 pub const MAX_LITERAL_LENGTH: u8 = 16;
-pub const MAX_REPEAT_COUNT: i32 = 33;
-pub const MAX_REPEAT_ZERO_COUNT: i32 = 16;
-pub const MIN_REPEAT_LENGTH: i32 = 2;
-pub const MAX_COPY_LENGTH: i32 = 34;
-pub const MIN_COPY_LENGTH: i32 = 3;
-pub const MAX_COPY_OFFSET: i32 = 254;
+const MAX_SINGLE_LITERAL_VALUE: u8 = 16;
+const MAX_DOUBLE_VALUE: u8 = 64;
+const MAX_REPEAT_COUNT: i32 = 33;
+const MAX_REPEAT_ZERO_COUNT: i32 = 16;
+const MIN_REPEAT_LENGTH: i32 = 2;
+const MAX_COPY_LENGTH: i32 = 34;
+const MIN_COPY_LENGTH: i32 = 3;
+const MAX_COPY_OFFSET: i32 = 254;
 
 // 10ll_llll  DoubleByte
 // 110l_llll  RepeatSingle
@@ -64,18 +66,22 @@ impl Literal {
             data
         })
     }
+
+    fn is_single(&self) -> bool {
+        self.data.len() == 1 && self.data[0] < MAX_SINGLE_LITERAL_VALUE
+    }
 }
 
 impl Command for Literal {
     fn serialize(&self) -> Vec<u8> {
-        if self.data.len() == 1 && self.data[0] < 16 {
+        if self.is_single() {
             // 0001_llll
             vec![0b0001_0000 | self.data[0]]
 
         } else {
             let mut bytes = Vec::new();
             // 0000_llll, 1-16 literals
-            bytes.push((self.desc.length - 1) & 0x0F);
+            bytes.push(self.desc.length - 1);
             bytes.extend(&self.data);
             bytes
         }
@@ -86,7 +92,12 @@ impl Command for Literal {
     }
 
     fn saved(&self) -> i32 {
-        -1
+        if self.is_single() {
+            0
+
+        } else {
+            -1
+        }
     }
 
     fn len(&self) -> usize {
@@ -98,11 +109,18 @@ impl Command for Literal {
     }
 
     fn name(&self) -> &str {
-       "<Literal>"
+        if self.is_single() {
+            "<SingleLiteral>"
+
+        } else {
+            "<Literal>"
+        }
     }
 
     fn info(&self) {
-        println!("<Literal @{}  {:?}>", self.desc.length, self.data);
+        if !self.is_single() {
+            println!("<Literal @{}  {:?}>", self.desc.length, self.data);
+        }
     }
 }
 
@@ -476,7 +494,7 @@ impl Repeat {
             let saved = repeat - 2;
             let length = repeat - MIN_REPEAT_LENGTH;
             if saved <= 0 {
-                if data[index as usize] < 64 {
+                if data[index as usize] < MAX_DOUBLE_VALUE {
                     Some(DoubleByte::new(1, 1, data[index as usize], (index + 2) as usize))
 
                 } else {

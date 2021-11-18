@@ -15,7 +15,7 @@ pub fn compress(data: &[u8], eom: bool) -> (Vec<u8>, f32) {
     (output, ratio)
 }
 
-pub fn analyze(data: &[u8]) {
+pub fn analyze(data: &[u8]) -> (usize, usize) {
     let commands = Encoder::analyze(data, true);
     let output = Encoder::serialize(&commands);
     let ratio = 1.0 / data.len() as f32 * output.len() as f32;
@@ -50,9 +50,9 @@ pub fn analyze(data: &[u8]) {
 
     stats.sort_by(|a, b| b.2.cmp(&a.2));
     for (s, count, saved, min_len, max_len, min_offset, max_offset) in stats {
-        println!("{: >15} {: >3}x = {: >4} byte(s) saved ({: >3}<>{: >3} length) ({: >3}<>{: >3} offset)", s, count, saved, min_len, max_len, min_offset, max_offset);
+        println!("{: >18} {: >3}x = {: >4} byte(s) saved ({: >3}<>{: >3} length) ({: >3}<>{: >3} offset)", s, count, saved, min_len, max_len, min_offset, max_offset);
     }
-
+    (output.len(), data.len())
 }
 
 pub struct Encoder;
@@ -116,7 +116,9 @@ impl Encoder {
             },
             (Some(repeat), None) => Some(repeat),
             (None, Some(copy)) => Some(copy),
-            _ => None
+            _ => {
+                None
+            }
         }
     }
 }
