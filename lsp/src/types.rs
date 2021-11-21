@@ -184,7 +184,7 @@ impl GBCSymbol {
                 SymbolKind::Constructor => format!("MACRO{}", self.value),
                 SymbolKind::Function => format!("{} ({})", self.value, info),
                 SymbolKind::Variable => format!("{} ({})", self.value, info),
-                SymbolKind::Field => format!("{}", self.value),
+                SymbolKind::Field => format!("{} ({})", self.value, info),
                 _ => self.value
             }),
             children: Some(self.children.into_iter().map(GBCSymbol::into_document_symbol).collect())

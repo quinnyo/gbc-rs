@@ -16,6 +16,7 @@ use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, Url, Location, Complet
 // Internal Dependencies ------------------------------------------------------
 use project::{ProjectConfig, ProjectReader};
 use compiler::lexer::LexerToken;
+use compiler::expression::ExpressionResult;
 
 use crate::{
     state::State,
@@ -131,6 +132,95 @@ impl Analyzer {
                         }
                     });
                 }
+            }
+        }
+    }
+
+    pub async fn emulator_write_memory(&self, address: String, value: String) {
+        let workspace_path = self.state.workspace_path().clone();
+        if let Some(workspace_path) = workspace_path {
+
+            // Split symbols into variables and constants for lookup purposes
+            let symbols = self.get_symbols(workspace_path).await.0;
+            let (variables, constants): (Vec<GBCSymbol>, Vec<GBCSymbol>) = symbols.into_iter().filter(|s| {
+                s.kind == SymbolKind::Constant ||
+                s.kind == SymbolKind::Variable ||
+                s.kind == SymbolKind::Field ||
+                s.kind == SymbolKind::Function
+
+            }).partition(|s| {
+                s.kind != SymbolKind::Constant
+            });
+
+
+            // TODO support expressions like playerX + 2
+            // TODO support all names i.e. use address if available and otherwise result
+
+            // Parse or lookup address
+            let address = address.trim();
+            let address_info = if address.starts_with('$') {
+                u32::from_str_radix(&address[1..], 16).ok().map(|v| (v, 1))
+
+            } else if address.starts_with("0x") {
+                u32::from_str_radix(&address[2..], 16).ok().map(|v| (v, 1))
+
+            } else if address.starts_with("0b") {
+                u32::from_str_radix(&address[2..], 2).ok().map(|v| (v, 1))
+
+            } else if address.starts_with(|c| c >= '0' && c <= '9') {
+                u32::from_str_radix(&address, 10).ok().map(|v| (v, 1))
+
+            } else if let Some(variable) = variables.iter().find(|s| s.name == address) {
+                variable.address.map(|v| (v as u32, variable.width))
+
+            } else {
+                None
+            };
+
+            if let Some((address, width)) = address_info {
+                let value = value.trim();
+                let value = if value.starts_with('$') {
+                    i32::from_str_radix(&value[1..], 16).ok()
+
+                } else if value.starts_with("0x") {
+                    i32::from_str_radix(&value[2..], 16).ok()
+
+                } else if value.starts_with("0b") {
+                    i32::from_str_radix(&value[2..], 2).ok()
+
+                } else if value.starts_with("-") {
+                    i32::from_str_radix(&value, 10).ok()
+
+                } else if value.starts_with(|c| c >= '0' && c <= '9') {
+                    i32::from_str_radix(&value, 10).ok()
+
+                } else if let Some(constant) = constants.iter().find(|s| s.name == value) {
+                    if let Some(ExpressionResult::Integer(v)) = constant.result {
+                        Some(v)
+
+                    } else {
+                        None
+                    }
+
+                } else {
+                    None
+                };
+                match (value, width) {
+                    (Some(value), 1) => {
+                        log::info!("Write ${:0>4X} = ${:0>2X}", address, value as u8);
+                        self.emulator_command(EmulatorCommand::WriteAddressValue(address, value as u8)).await;
+                    },
+                    (Some(value), 2) => {
+                        log::info!("Write ${:0>4X} = ${:0>2X}", address, value as u8);
+                        log::info!("Write ${:0>4X} = ${:0>2X}", address.saturating_add(1), ((value as u16) >> 8) as u8);
+                        self.emulator_command(EmulatorCommand::WriteAddressValue(address, value as u8)).await;
+                        self.emulator_command(EmulatorCommand::WriteAddressValue(address.saturating_add(1), ((value as u16) >> 8) as u8)).await;
+                    },
+                    _ => log::warn!("Invalid Write attempt to ${:0>4X}", address)
+                }
+
+            } else {
+                log::warn!("Invalid Write attempt to \"{}\"", address)
             }
         }
     }
@@ -446,6 +536,8 @@ impl Analyzer {
             Parser::link(workspace_path, self.state.clone()).await;
             self.state.publish_diagnostics().await;
         }
+        // TODO get rid of copy overhead
+        // TODO use a callback function?
         self.state.symbols().clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
     }
 

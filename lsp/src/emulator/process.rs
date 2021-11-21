@@ -57,7 +57,7 @@ impl EmulatorProcess {
                             if let Some(bytes) = entry.rom_bytes() {
                                 for (index, b) in bytes.iter().enumerate() {
                                     self.state.commands().push_back(EmulatorCommand::WriteAddressValue(
-                                        (entry.offset as u16).saturating_add(index as u16),
+                                        (entry.offset as u32).saturating_add(index as u32),
                                         *b
                                     ));
                                 }

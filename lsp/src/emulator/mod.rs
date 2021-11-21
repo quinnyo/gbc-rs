@@ -32,10 +32,10 @@ pub use self::process::EmulatorProcess;
 #[derive(Debug)]
 pub enum EmulatorCommand {
     ReadAddressValue(u16),
-    WriteAddressValue(u16, u8),
+    WriteAddressValue(u32, u8),
     DebuggerToggleBreakpoint(Location),
     DebuggerStep,
-    DebuggerStepOver,
+    DebuggerNext,
     DebuggerFinish,
     DebuggerContinue,
     DebuggerUndo
@@ -243,6 +243,7 @@ impl EmulatorConnection {
                             sender.write_all(&[0x80, address as u8, (address >> 8) as u8]).ok();
                         },
                         EmulatorCommand::WriteAddressValue(address, value) => {
+                            // TODO support u32 and higher rom addresses
                             sender.write_all(&[0x40, address as u8, (address >> 8) as u8, value]).ok();
                         },
                         EmulatorCommand::DebuggerToggleBreakpoint(location) => {
@@ -261,7 +262,7 @@ impl EmulatorConnection {
                                 sender.write_all(&[0x20]).ok();
                             }
                         },
-                        EmulatorCommand::DebuggerStepOver => {
+                        EmulatorCommand::DebuggerNext => {
                             if let Some(s) = state.emulator().as_mut() {
                                 s.send(b"next\n");
 

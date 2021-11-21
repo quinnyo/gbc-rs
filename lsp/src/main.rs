@@ -30,6 +30,13 @@ pub struct CommandDocumentParams {
     text_document: TextDocumentIdentifier
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandWriteMemoryParams {
+    address: String,
+    value: String
+}
+
 
 // Backend Implementation -----------------------------------------------------
 struct Backend {
@@ -67,6 +74,7 @@ impl LanguageServer for Backend {
                         "debugger/continue".to_string(),
                         "debugger/undo".to_string(),
                         "emulator/start".to_string(),
+                        "emulator/write_memory".to_string(),
                         "emulator/stop".to_string(),
                         "build/rom".to_string()
                     ],
@@ -194,8 +202,8 @@ impl LanguageServer for Backend {
             "debugger/step" => {
                 self.analyzer.emulator_command(EmulatorCommand::DebuggerStep).await;
             },
-            "debugger/step_over" => {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerStepOver).await;
+            "debugger/next" => {
+                self.analyzer.emulator_command(EmulatorCommand::DebuggerNext).await;
             },
             "debugger/finish" => {
                 self.analyzer.emulator_command(EmulatorCommand::DebuggerFinish).await;
@@ -208,6 +216,9 @@ impl LanguageServer for Backend {
             },
             "emulator/start" => {
                 self.analyzer.emulator_start().await;
+            },
+            "emulator/write_memory" => if let Some(Ok(params)) = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<CommandWriteMemoryParams>(v.clone())) {
+                self.analyzer.emulator_write_memory(params.address, params.value).await;
             },
             "emulator/stop" => {
                 self.analyzer.emulator_stop().await;
