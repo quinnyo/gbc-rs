@@ -32,9 +32,39 @@ pub struct CommandDocumentParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CommandWriteMemoryParams {
+pub struct WriteMemoryParams {
     address: String,
     value: String
+}
+
+#[derive(Debug, Deserialize, Copy, Clone)]
+#[serde(rename_all = "camelCase")]
+pub enum GameBoyModel {
+    #[serde(alias = "dmg", alias = "DMG")]
+    Dmg,
+    #[serde(alias = "cgb", alias = "cgb")]
+    Cgb,
+    #[serde(alias = "agb", alias = "AGB")]
+    Agb,
+    #[serde(alias = "sgb", alias = "SGB")]
+    Sgb
+}
+
+impl GameBoyModel {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Dmg => "dmg",
+            Self::Cgb => "cgb",
+            Self::Agb => "agb",
+            Self::Sgb => "sgb"
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelParams {
+    model: GameBoyModel
 }
 
 
@@ -215,9 +245,14 @@ impl LanguageServer for Backend {
                 self.analyzer.emulator_command(EmulatorCommand::DebuggerUndo).await;
             },
             "emulator/start" => {
-                self.analyzer.emulator_start().await;
+                if let Some(Ok(params)) = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<ModelParams>(v.clone())) {
+                    self.analyzer.emulator_start(Some(params.model)).await;
+
+                } else {
+                    self.analyzer.emulator_start(None).await;
+                }
             },
-            "emulator/write_memory" => if let Some(Ok(params)) = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<CommandWriteMemoryParams>(v.clone())) {
+            "emulator/write_memory" => if let Some(Ok(params)) = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<WriteMemoryParams>(v.clone())) {
                 self.analyzer.emulator_write_memory(params.address, params.value).await;
             },
             "emulator/stop" => {

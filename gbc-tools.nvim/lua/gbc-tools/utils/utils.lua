@@ -76,12 +76,16 @@ end
 function M.noop() 
 end
 
-function M.command(command, handler)
+function M.command(command, handler, data)
     local range = vim.lsp.util.make_range_params()
-	return vim.lsp.buf_request(0, "workspace/executeCommand", {
+    local command = {
         command = command,
         arguments = {range}
-    }, M.mk_handler(handler or M.noop))
+    }
+    if data then 
+        table.insert(command.arguments, data)
+    end
+	return vim.lsp.buf_request(0, "workspace/executeCommand", command, M.mk_handler(handler or M.noop))
 end
 
 -- from mfussenegger/nvim-lsp-compl@29a81f3

@@ -1,4 +1,5 @@
 // STD Dependencies -----------------------------------------------------------
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 
@@ -16,6 +17,14 @@ use crate::types::DebuggerOutlineLocation;
 pub struct EmulatorAddressInfo {
     pub address: u16,
     pub bank: u16
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct CallUsage {
+    pub address: u16,
+    pub bank: u16,
+    pub average: f32,
+    pub usage: Vec<f32>
 }
 
 
@@ -36,6 +45,9 @@ pub struct EmulatorStatus {
     pub menu: bool,
     pub filename: String,
     pub crc: u32,
+
+    pub cpu_usage: Vec<f32>,
+    pub call_cpu_usage: Vec<CallUsage>,
 
     pub title: String,
     pub stopped: bool,
@@ -169,11 +181,10 @@ impl EmulatorStatus {
         let breakpoint_offset = line_offset + 10 + self.backtrace.len();
         for (i, b) in self.backtrace.iter().enumerate() {
             outline.push_str(&format!(
-                "  {: >2}. {} (${:0>2X} ${:0>4X})\n",
+                "  {: >2}. {} ({})\n",
                 i + 1,
                 resolve_symbol_with_offset(b.address, b.bank, line_offset + 8 + i),
-                b.bank,
-                b.address
+                format_addr(b.bank, b.address)
             ));
         }
 
@@ -185,13 +196,50 @@ impl EmulatorStatus {
         } else {
             for (i, b) in self.breakpoints.iter().enumerate() {
                 outline.push_str(&format!(
-                    "  {: >2}. {} (${:0>2X} ${:0>4X})\n",
+                    "  {: >2}. {} ({})\n",
                     i + 1,
                     resolve_symbol_with_offset(b.address, b.bank, breakpoint_offset + i),
-                    if b.bank == 0xFFFF { 0 } else { b.bank },
-                    b.address
+                    format_addr(b.bank, b.address)
                 ));
             }
+        }
+
+        // CPU Usage
+        let performance_offset = breakpoint_offset + 5 + self.breakpoints.len();
+        let average = self.cpu_usage.iter().sum::<f32>() / 30.0;
+        outline.push_str("\nCPU:\n");
+        outline.push_str(&format!("     {} ({:.0}%)\n\n", graph(&self.cpu_usage), average * 100.0));
+
+        let mut usage = self.call_cpu_usage.clone();
+        usage.sort_by(|a, b| {
+            if a.average < b.average {
+                Ordering::Greater
+
+            } else {
+                Ordering::Less
+            }
+        });
+
+        let mut other_usage = 0.0;
+        let mut other_count = 0;
+        for (i, usage) in usage.iter().enumerate() {
+            if usage.average >= 0.01 {
+                outline.push_str(&format!(
+                    " {: >2}. {} ({}) ({:.0}%)\n     {}\n",
+                    i + 1,
+                    resolve_symbol_with_offset(usage.address, usage.bank, performance_offset + i * 2),
+                    format_addr(usage.bank, usage.address),
+                    usage.average * 100.0,
+                    graph(&usage.usage)
+                ));
+
+            } else {
+                other_usage += usage.average;
+                other_count += 1;
+            }
+        }
+        if other_usage > 0.0 {
+            outline.push_str(&format!( "     ({} others < 1%) ({:.2}%)\n", other_count, other_usage * 100.0));
         }
 
         outline.push_str("\nVRAM:\n");
@@ -304,6 +352,37 @@ impl EmulatorStatus {
             outline.push_str("   -\n");
         }
         (outline, locations)
+    }
+}
+
+fn format_addr(bank: u16, address: u16) -> String {
+    if bank != 0xFFFF && bank != 0x00 {
+        format!("${:0>2X}:${:0>4X}", bank, address)
+
+    } else {
+        format!("${:0>4X}", address)
+    }
+}
+
+fn graph(values: &[f32]) -> String {
+    values.iter().map(|f| segment(*f)).collect::<Vec<&str>>().join("")
+}
+
+fn segment(v: f32) -> &'static str {
+    if v > 0.7 {
+        "▇"
+    } else if v > 0.6 {
+        "▆"
+    } else if v > 0.5 {
+        "▅"
+    } else if v > 0.4 {
+        "▄"
+    } else if v > 0.3 {
+        "▃"
+    } else if v > 0.2 {
+        "▂"
+    } else {
+        "▁"
     }
 }
 

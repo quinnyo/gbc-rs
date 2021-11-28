@@ -1,7 +1,6 @@
 local nvim_lsp = require("lspconfig")
 local config = require("gbc-tools.config")
 local utils = require("gbc-tools.utils.utils")
-local server_status = require("gbc-tools.server_status")
 local inlay = require("gbc-tools.inlay_hints")
 local outline = require("gbc-tools.outline")
 
@@ -12,51 +11,120 @@ local function setupCommands()
 
 	lsp_opts.commands = vim.tbl_deep_extend("force", lsp_opts.commands or {}, {
 		GBCSetInlayHints = {
-			require("gbc-tools.inlay_hints").set_inlay_hints,
+			inlay.set_inlay_hints,
 		},
 		GBCDisableInlayHints = {
-			require("gbc-tools.inlay_hints").disable_inlay_hints,
+			inlay.disable_inlay_hints,
 		},
 		GBCToggleInlayHints = {
-			require("gbc-tools.inlay_hints").toggle_inlay_hints,
+			inlay.toggle_inlay_hints,
 		},
         GBCDebuggerToggleBreakpoint = {
-			require("gbc-tools.debugger").toggle_breakpoint,
+            function()
+                utils.command("debugger/toggle_breakpoint", nil)   
+            end,
+            '-nargs=0',
+            description = '`:GBCDebuggerToggleBreakpoint` Add/remove a breakpoint at the current line',
         },
         GBCDebuggerStep = {
-			require("gbc-tools.debugger").step,
+            function()
+                utils.command("debugger/step", nil)   
+            end,
+            '-nargs=0',
+            description = '`:GBCDebuggerStep` Run the next instruction, stepping into function calls',
         },
         GBCDebuggerNext = {
-			require("gbc-tools.debugger").step_over,
+            function()
+                utils.command("debugger/next", nil)   
+            end,
+            '-nargs=0',
+            description = '`:GBCDebuggerNext` Run the next instruction, stepping over function calls',
         },
         GBCDebuggerFinish = {
-			require("gbc-tools.debugger").finish,
+            function()
+                utils.command("debugger/finish", nil)   
+            end,
+            '-nargs=0',
+            description = '`:GBCDebuggerFinish` Run until the current function returns',
         },
         GBCDebuggerContinue = {
-			require("gbc-tools.debugger").continue,
+            function()
+                utils.command("debugger/continue", nil)   
+            end,
+            '-nargs=0',
+            description = '`:GBCDebuggerContinue` Continue running until next stop',
         },
         GBCDebuggerUndo = {
-			require("gbc-tools.debugger").undo,
+            function()
+                utils.command("debugger/undo", nil)   
+            end,
+            '-nargs=0',
+            description = '`:GBCDebuggerUndo` Reverts the last debugger command',
         },
         GBCDebuggerOutlineToggle = {
-			require("gbc-tools.outline").toggle,
+			outline.toggle,
+            '-nargs=0',
+            description = '`:GBCDebuggerOutlineToggle` Toggles the debugger outline panel',
         },
         GBCDebuggerOutlineOpen = {
-			require("gbc-tools.outline").open,
+			outline.open,
+            '-nargs=0',
+            description = '`:GBCDebuggerOutlineOpen` Opens the debugger outline panel',
         },
         GBCDebuggerOutlineClose = {
-			require("gbc-tools.outline").close,
+			outline.close,
+            '-nargs=0',
+            description = '`:GBCDebuggerOutlineClose` Closes the debugger outline panel',
         },
         GBCEmulatorStart = {
-			require("gbc-tools.emulator").start,
+            function(model)
+                utils.command("emulator/start", nil, {
+                    model = model
+                })    
+            end,
+            '-nargs=?',
+            description = '`:GBCEmulatorStart` Starts the emulator for the current workspace',
         },
         GBCEmulatorStop = {
-			require("gbc-tools.emulator").stop,
+            function()
+               utils.command("emulator/stop", nil) 
+            end,
+            '-nargs=0',
+            description = '`:GBCEmulatorStop` Stops the currently running emulator',
         },
         GBCBuildRom = {
-			require("gbc-tools.build").rom,
+            function()
+                utils.command("build/rom", nil)  
+            end,
+            '-nargs=0',
+            description = '`:GBCBuildRom` Builds the ROM for the current workspace',
         },
+        GBCWriteMemory = {
+            function(...)
+                local args = { ... }
+                if vim.tbl_islist(args) and #args == 1 and type(args[1]) == "table" then
+                    args = args[1]
+                end
+                -- TODO if only one arg is supplied write to whatever is under the cursor
+                if #args == 2 then
+                    utils.command("emulator/write_memory", nil, {
+                        address = args[1],
+                        value = args[2]
+                    })
+                end
+            end,
+            '-nargs=*',
+            description = '`:GBCWriteMemory` Writes a value to the specified memory address or variable'
+        }
 	})
+end
+
+local function server_status(_, result)
+	if result.quiescent and config.options.tools.autoSetHints and not M.ran_once then
+		inlay.set_inlay_hints()
+		inlay.setup_autocmd()
+		M.ran_once = true
+	end
 end
 
 local function setup_lsp()
@@ -68,7 +136,7 @@ local function setup_handlers()
 	local tool_opts = config.options.tools
 	local custom_handlers = {}
 
-	custom_handlers["experimental/serverStatus"] = utils.mk_handler(server_status.handler)
+	custom_handlers["experimental/serverStatus"] = utils.mk_handler(server_status)
 	custom_handlers["experimental/inlayHints"] = utils.mk_handler(inlay.handler)
 	custom_handlers["experimental/debuggerOutline"] = utils.mk_handler(outline.handler)
 

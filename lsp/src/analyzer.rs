@@ -19,6 +19,7 @@ use compiler::lexer::LexerToken;
 use compiler::expression::ExpressionResult;
 
 use crate::{
+    GameBoyModel,
     state::State,
     emulator::{EmulatorConnection, EmulatorCommand, EmulatorProcess},
     parser::Parser,
@@ -113,13 +114,13 @@ impl Analyzer {
 }
 
 impl Analyzer {
-    pub async fn emulator_start(&self) {
+    pub async fn emulator_start(&self, model: Option<GameBoyModel>) {
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
             if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
                 // Reset and reload existing emulator process if still running
                 let was_reset = if let Some(process) = self.state.emulator().as_mut() {
-                    process.reset(entries.clone())
+                    process.reset(entries.clone(), model)
 
                 } else {
                     false
@@ -127,7 +128,7 @@ impl Analyzer {
                 if !was_reset {
                     let state = self.state.clone();
                     Handle::current().spawn(async move {
-                        if let Some(process) = EmulatorProcess::launch(state.clone(), rom_path, entries) {
+                        if let Some(process) = EmulatorProcess::launch(state.clone(), rom_path, entries, model) {
                             state.set_emulator(Some(process));
                         }
                     });
@@ -141,7 +142,7 @@ impl Analyzer {
         if let Some(workspace_path) = workspace_path {
 
             // Split symbols into variables and constants for lookup purposes
-            let symbols = self.get_symbols(workspace_path).await.0;
+            let symbols = self.get_symbols(workspace_path).await;
             let (variables, constants): (Vec<GBCSymbol>, Vec<GBCSymbol>) = symbols.into_iter().filter(|s| {
                 s.kind == SymbolKind::Constant ||
                 s.kind == SymbolKind::Variable ||
@@ -151,7 +152,6 @@ impl Analyzer {
             }).partition(|s| {
                 s.kind != SymbolKind::Constant
             });
-
 
             // TODO support expressions like playerX + 2
             // TODO support all names i.e. use address if available and otherwise result
@@ -241,7 +241,7 @@ impl Analyzer {
     pub async fn workspace_symbols(&self) -> Vec<SymbolInformation> {
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
-            self.get_symbols(workspace_path).await.0.into_iter().filter(|symbol| {
+            self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
                 symbol.kind != SymbolKind::Method
 
             }).map(GBCSymbol::into_symbol_information).collect()
@@ -254,7 +254,7 @@ impl Analyzer {
     pub async fn document_symbols(&self, current_file: PathBuf) -> Vec<DocumentSymbol> {
         let workspace_path = current_file.clone();
         let uri = Url::from_file_path(current_file).unwrap();
-        self.get_symbols(workspace_path).await.0.into_iter().filter(|symbol| {
+        self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
             // Return if we either want all symbols or the symbol originates from the current file
             symbol.location.uri == uri && symbol.kind != SymbolKind::Method
 
@@ -263,7 +263,7 @@ impl Analyzer {
 
     pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<CompletionItem> {
         let uri = Url::from_file_path(current_file.clone()).ok();
-        return self.get_symbols(current_file).await.0.into_iter().filter(|symbol| {
+        return self.get_symbols(current_file).await.into_iter().filter(|symbol| {
             // Complete if the symbol is either global or originates from the current file
             symbol.is_global || Some(&symbol.location.uri) == uri.as_ref()
 
@@ -368,7 +368,7 @@ impl Analyzer {
         let uri = Url::from_file_path(&current_file).unwrap();
         if let Some((token, _)) = Parser::get_token(&self.state, current_file.clone(), line, col) {
             let symbol_name = token.inner().value.to_string();
-            let symbols = self.get_symbols(current_file).await.0;
+            let symbols = self.get_symbols(current_file).await;
             symbols.into_iter().find(|symbol| {
                 // For child labels only search in the current file
                 symbol.name == symbol_name &&
@@ -395,7 +395,7 @@ impl Analyzer {
         };
 
         let uri = Url::from_file_path(current_file.clone()).ok();
-        let (symbols, expansions, optimizations) = self.get_symbols(current_file).await;
+        let (symbols, expansions, optimizations) = self.get_symbols_all(current_file).await;
         let symbols: Vec<GBCSymbol> = symbols.into_iter().filter(|symbol| {
             // Hint if the symbol is from the current file
             Some(&symbol.location.uri) == uri.as_ref()
@@ -530,15 +530,20 @@ impl Analyzer {
 }
 
 impl Analyzer {
-    async fn get_symbols(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations) {
-        let has_linker = self.state.symbols().is_some();
-        if !has_linker {
+    async fn get_symbols_all(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations) {
+        if !self.state.has_symbols() {
             Parser::link(workspace_path, self.state.clone()).await;
             self.state.publish_diagnostics().await;
         }
-        // TODO get rid of copy overhead
-        // TODO use a callback function?
-        self.state.symbols().clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
+        self.state.symbols_all().clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
+    }
+
+    async fn get_symbols(&self, workspace_path: PathBuf) -> Vec<GBCSymbol> {
+        if !self.state.has_symbols() {
+            Parser::link(workspace_path, self.state.clone()).await;
+            self.state.publish_diagnostics().await;
+        }
+        self.state.symbols_cloned().unwrap_or_else(Vec::new)
     }
 
     fn query_symbol_memory_values(&self, symbols: &[&GBCSymbol]) -> Vec<Option<u16>> {

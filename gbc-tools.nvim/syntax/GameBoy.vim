@@ -14,7 +14,7 @@ syn keyword outline_register        AF BC DE HL SP PC IME PPU PRIO WIN MAP BG OB
 syn match outline_number_hex        "\$[0-9a-f-A-F][0-9a-fA-F_]*\>"
 syn match outline_number_dec        "[0-9][0-9_]*\>"
 syn match outline_number_bin        "%[0-1][0-1_]*\>"
-syn keyword outline_heading         Status ROM Registers Backtrace Breakpoints VRAM OAM BGPalette OBJPalette
+syn keyword outline_heading         Status ROM Registers Backtrace Breakpoints VRAM OAM BGPalette OBJPalette CPU
 syn match outline_name              "[A-Za-z_][A-Za-z0-9_]*"
 syn match outline_offset            "[+\|:\|=\|-]"
 syn match outline_parens            "[(\|)]"

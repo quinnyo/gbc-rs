@@ -164,6 +164,8 @@ end
 function M.close()
     if M.state.outline_buf then
         vim.api.nvim_win_close(M.state.outline_win, true)
+        M.state.outline_buf = nil
+        M.state.outline_win = nil
     end
 end
 

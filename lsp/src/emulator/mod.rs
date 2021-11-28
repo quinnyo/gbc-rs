@@ -190,7 +190,7 @@ impl EmulatorConnection {
                                     (true, true, true)
 
                                 // Otherwise periodically update the hints and outline
-                                } else if !status.stopped && hints_refresh_timer.elapsed() > Duration::from_millis(5000) {
+                                } else if !status.stopped && hints_refresh_timer.elapsed() > Duration::from_millis(1000) {
                                     hints_refresh_timer = Instant::now();
                                     (true, false, true)
 
@@ -224,7 +224,10 @@ impl EmulatorConnection {
                         state.results().insert(address.address, address.value);
                     },
                     Ok(None) => break,
-                    Err(_) => break 'outer
+                    Err(err) => {
+                        log::warn!(&format!("Emulator Response Error: {:?}", err));
+                        break 'outer
+                    }
                 }
             }
 

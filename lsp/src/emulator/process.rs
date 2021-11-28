@@ -11,9 +11,9 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url};
 
 
 // Internal Dependencies ------------------------------------------------------
-use crate::state::State;
-use compiler::linker::SectionEntry;
 use super::EmulatorCommand;
+use compiler::linker::SectionEntry;
+use crate::{GameBoyModel, state::State};
 
 
 // Emulator Process -----------------------------------------------------------
@@ -25,8 +25,19 @@ pub struct EmulatorProcess {
 }
 
 impl EmulatorProcess {
-    pub fn launch(state: State, rom_path: PathBuf, entries: HashMap<usize, SectionEntry>) -> Option<Self> {
-        match Command::new("sameboy").stderr(Stdio::piped()).stdin(Stdio::piped()).arg(rom_path.clone()).spawn() {
+    pub fn launch(
+        state: State,
+        rom_path: PathBuf,
+        entries: HashMap<usize, SectionEntry>,
+        model: Option<GameBoyModel>
+
+    ) -> Option<Self> {
+        let mut cmd = Command::new("sameboy");
+        let mut cmd = cmd.stderr(Stdio::piped()).stdin(Stdio::piped());
+        if let Some(model) = model {
+            cmd = cmd.arg(format!("--{}", model.as_str()));
+        }
+        match cmd.arg(rom_path.clone()).spawn() {
             Ok(child) => {
                 log::info!("Emulator started for \"{}\"", rom_path.display());
                 Some(Self {
@@ -108,11 +119,16 @@ impl EmulatorProcess {
         }
     }
 
-    pub fn reset(&mut self, entries: HashMap<usize, SectionEntry>) -> bool {
+    pub fn reset(&mut self, entries: HashMap<usize, SectionEntry>, model: Option<GameBoyModel>) -> bool {
         if self.is_running() {
             if let Some(stdin) = self.child.stdin.as_mut() {
                 log::info!("Emulator reloading \"{}\"", self.rom_path.display());
-                stdin.write_all(b"reset\n").ok();
+                if let Some(model) = model {
+                    stdin.write_all(format!("reset {}\n", model.as_str()).as_bytes()).ok();
+
+                } else {
+                    stdin.write_all(b"reset\n").ok();
+                }
                 self.entries = entries;
                 true
 

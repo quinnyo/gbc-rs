@@ -196,8 +196,16 @@ impl State {
         self.labels.lock().expect("Labels Lock failed")
     }
 
-    pub fn symbols<'a>(&'a self) -> MutexGuard<'a, Option<SymbolData>> {
+    pub fn has_symbols(&self) -> bool {
+        self.symbols.lock().expect("Symbols Lock failed").is_some()
+    }
+
+    pub fn symbols_all<'a>(&'a self) -> MutexGuard<'a, Option<SymbolData>> {
         self.symbols.lock().expect("Symbols Lock failed")
+    }
+
+    pub fn symbols_cloned(&self) -> Option<Vec<GBCSymbol>> {
+        self.symbols.lock().expect("Symbols Lock failed").as_ref().map(|s| s.0.clone())
     }
 
     pub fn client(&self) -> Arc<Client> {
