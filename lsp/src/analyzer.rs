@@ -154,6 +154,7 @@ impl Analyzer {
             });
 
             // TODO support expressions like playerX + 2
+            // TODO support registers in expressions pc + 2 or BC + $4 etc.
             // TODO support all names i.e. use address if available and otherwise result
 
             // Parse or lookup address

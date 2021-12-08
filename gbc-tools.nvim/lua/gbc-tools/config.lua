@@ -3,7 +3,7 @@ local vim = vim
 local M = {}
 
 local defaults = {
-    width = 45,
+    width = 52,
     position = 'right',
     tools = { -- gbc-tools options
         -- automatically set inlay hints (type hints)

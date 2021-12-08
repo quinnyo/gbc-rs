@@ -23,8 +23,8 @@ pub struct EmulatorAddressInfo {
 pub struct CallUsage {
     pub address: u16,
     pub bank: u16,
-    pub average: f32,
-    pub usage: Vec<f32>
+    pub own: f32,
+    pub acc: f32,
 }
 
 
@@ -205,14 +205,14 @@ impl EmulatorStatus {
         }
 
         // CPU Usage
-        let performance_offset = breakpoint_offset + 5 + self.breakpoints.len();
-        let average = self.cpu_usage.iter().sum::<f32>() / 30.0;
+        let performance_offset = breakpoint_offset + 4 + self.breakpoints.len();
+        let own = self.cpu_usage.iter().sum::<f32>() / 30.0;
         outline.push_str("\nCPU:\n");
-        outline.push_str(&format!("     {} ({:.0}%)\n\n", graph(&self.cpu_usage), average * 100.0));
+        outline.push_str(&format!("     {} ({:.0}%)\n", graph(&self.cpu_usage), own * 100.0));
 
         let mut usage = self.call_cpu_usage.clone();
         usage.sort_by(|a, b| {
-            if a.average < b.average {
+            if a.acc < b.acc {
                 Ordering::Greater
 
             } else {
@@ -223,18 +223,18 @@ impl EmulatorStatus {
         let mut other_usage = 0.0;
         let mut other_count = 0;
         for (i, usage) in usage.iter().enumerate() {
-            if usage.average >= 0.01 {
+            if usage.acc >= 0.01 {
                 outline.push_str(&format!(
-                    " {: >2}. {} ({}) ({:.0}%)\n     {}\n",
+                    " {: >2}. {} ({}) ({:.0}% / {:.0}%)\n",
                     i + 1,
-                    resolve_symbol_with_offset(usage.address, usage.bank, performance_offset + i * 2),
+                    resolve_symbol_with_offset(usage.address, usage.bank, performance_offset + i),
                     format_addr(usage.bank, usage.address),
-                    usage.average * 100.0,
-                    graph(&usage.usage)
+                    usage.acc * 100.0,
+                    usage.own * 100.0
                 ));
 
             } else {
-                other_usage += usage.average;
+                other_usage += usage.own;
                 other_count += 1;
             }
         }
@@ -369,20 +369,22 @@ fn graph(values: &[f32]) -> String {
 }
 
 fn segment(v: f32) -> &'static str {
-    if v > 0.7 {
+    if v > 0.825 {
         "▇"
-    } else if v > 0.6 {
+    } else if v > 0.750 {
         "▆"
-    } else if v > 0.5 {
+    } else if v > 0.625 {
         "▅"
-    } else if v > 0.4 {
+    } else if v > 0.500 {
         "▄"
-    } else if v > 0.3 {
+    } else if v > 0.375 {
         "▃"
-    } else if v > 0.2 {
+    } else if v > 0.25 {
         "▂"
-    } else {
+    } else if v > 0.125 {
         "▁"
+    } else {
+        " "
     }
 }
 
