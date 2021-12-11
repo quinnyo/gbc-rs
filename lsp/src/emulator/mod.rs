@@ -1,340 +1,240 @@
 // STD Dependencies -----------------------------------------------------------
-use std::sync::Arc;
-use std::error::Error;
-use std::path::PathBuf;
-use std::io::prelude::*;
+use std::thread;
+use std::time::{Instant, Duration};
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
-use std::net::{SocketAddr, TcpStream};
+use std::sync::mpsc::{self, Receiver, Sender};
 
 
 // External Dependencies ------------------------------------------------------
-use serde::Deserialize;
-use serde_json::de::IoRead;
+use lazy_static::lazy_static;
 use tokio::runtime::Handle;
-use tower_lsp::lsp_types::Location;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url};
+use gbd::{Application, EmulatorAddress, EmulatorCommand, EmulatorStatus, EmulatorResponse, Model};
 
 
 // Internal Dependencies ------------------------------------------------------
+use compiler::linker::SectionEntry;
 use crate::state::State;
 
 
-// Modules --------------------------------------------------------------------
-mod status;
-mod process;
-pub use self::status::EmulatorStatus;
-pub use self::process::EmulatorProcess;
-
-
-// Types ----------------------------------------------------------------------
-#[derive(Debug)]
-pub enum EmulatorCommand {
-    ReadAddressValue(u16),
-    WriteAddressValue(u32, u8),
-    DebuggerToggleBreakpoint(Location),
-    DebuggerStep,
-    DebuggerNext,
-    DebuggerFinish,
-    DebuggerContinue,
-    DebuggerUndo
-}
-
-#[derive(Debug, Deserialize)]
-pub struct EmulatorAddressValue {
-    address: u16,
-    value: u8
-}
-
-#[derive(Debug, Deserialize)]
-pub enum EmulatorResponse {
-    Status(EmulatorStatus),
-    AddressValue(EmulatorAddressValue)
+// Statics --------------------------------------------------------------------
+type EmulatorData = (Arc<AtomicBool>, State, Sender<Receiver<EmulatorResponse>>, Vec<(u16, u16, String)>, Vec<u8>, Option<Model>);
+lazy_static! {
+    static ref EMULATOR_QUEUE: Arc<Mutex<(Sender<EmulatorData>, Receiver<EmulatorData>)>> = Arc::new(Mutex::new(mpsc::channel()));
 }
 
 
-// Emulator Connection --------------------------------------------------------
-pub struct EmulatorConnection {
+// Emulator Handling ----------------------------------------------------------
+pub struct Emulator {
     state: State,
-    shutdown: Arc<AtomicBool>,
-    running: Arc<AtomicBool>,
-    connection_closed: Arc<AtomicBool>,
+    entries: HashMap<usize, SectionEntry>,
+    running: Arc<AtomicBool>
 }
 
-impl EmulatorConnection {
-    pub fn new(state: State) -> Self {
+impl Emulator {
+    pub fn main_thread_loop() {
+        loop {
+            let data = EMULATOR_QUEUE.lock().expect("Lock failed").1.try_recv();
+            if let Ok((running, state, s, labels, rom, model)) = data {
+                log::info!("Starting emulator...");
+
+                // Create emulator
+                let (mut emulator, handle) = gbd::Emulator::new(model, rom);
+                emulator.enable_debugger(labels, false);
+
+                // Move out sender and forward receiver to watcher inside event loop
+                let (sender, receiver) = handle.split();
+                state.set_command_sender(Some(sender));
+                s.send(receiver).ok();
+
+                // Run emulator
+                running.store(true, std::sync::atomic::Ordering::SeqCst);
+                emulator.run().ok();
+                running.store(false, std::sync::atomic::Ordering::SeqCst);
+                state.set_command_sender(None);
+                log::info!("Emulator stopped");
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    pub fn launch(
+        state: State,
+        entries: HashMap<usize, SectionEntry>,
+        labels: Vec<(u16, u16, String)>,
+        rom: Vec<u8>,
+        model: Option<Model>
+
+    ) -> Self {
+        let running = Arc::new(AtomicBool::new(false));
+        let inner_state = state.clone();
+        let inner_running = running.clone();
+        let (s, r) = mpsc::channel::<Receiver<EmulatorResponse>>();
+        Handle::current().spawn(async move {
+            // Wait for receiver to be send over from main thread
+            let l = r.recv();
+            if let Ok(receiver) = l {
+                Self::watch(receiver, inner_running, inner_state).await;
+            }
+        });
+        EMULATOR_QUEUE.lock().expect("Lock failed").0.send((running.clone(), state.clone(), s, labels, rom, model)).ok();
         Self {
             state,
-            shutdown: Arc::new(AtomicBool::new(false)),
-            running: Arc::new(AtomicBool::new(false)),
-            connection_closed: Arc::new(AtomicBool::new(false)),
+            entries,
+            running
         }
     }
 
-    pub async fn listen(&self, rom_path: PathBuf) {
-        // Stop any running instance of the emulator connection
-        if self.running.load(Ordering::SeqCst) {
-            self.shutdown().await;
-        }
-
-        // Setup Running State
-        self.shutdown.store(false, Ordering::SeqCst);
-        self.running.store(true, Ordering::SeqCst);
-        self.connection_closed.store(false, Ordering::SeqCst);
-
-        let handle = Handle::current();
-        let state = self.state.clone();
-        let shutdown = self.shutdown.clone();
-        let running = self.running.clone();
-        let connection_closed = self.connection_closed.clone();
-        handle.spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-            Self::connect(state, rom_path, running, shutdown, connection_closed).await;
-        });
-    }
-
-    pub async fn shutdown(&self) {
-        if self.running.load(Ordering::SeqCst) {
-            // Setup shutdown state
-            self.shutdown.store(true, Ordering::SeqCst);
-            self.running.store(false, Ordering::SeqCst);
-            self.connection_closed.store(false, Ordering::SeqCst);
-
-            // Wait for connection to be closed
-            while !self.connection_closed.load(Ordering::SeqCst) {
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            }
-        }
-    }
-
-    async fn connect(
-        state: State,
-        rom_path: PathBuf,
-        running: Arc<AtomicBool>,
-        shutdown: Arc<AtomicBool>,
-        connection_closed: Arc<AtomicBool>
-    ) {
-        let addr: SocketAddr = "127.0.0.1:8765".parse().unwrap();
-        while running.load(Ordering::SeqCst) {
-            if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(10)) {
-                log::info!("Emulator connected for {}", rom_path.display());
-                Self::connection(stream, state.clone(), rom_path.clone(), shutdown.clone()).await;
-                log::info!("Emulator disconnected");
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        }
-        connection_closed.store(true, Ordering::SeqCst);
-    }
-
-    async fn connection(mut stream: TcpStream, state: State, rom_path: PathBuf, shutdown: Arc<AtomicBool>) {
-        // Timers
-        let mut status_query_timer = Instant::now();
-        let mut status_response_timer = Instant::now();
-        let mut hints_refresh_timer = Instant::now();
-
-        // Report Progress to Editor
-        let progress_token = state.start_progress("Emulating", "Connecting...").await;
-
-        // Clear any outstand commands
-        state.commands().clear();
-
-        // TCP Stream setup
-        stream.set_nodelay(true).ok();
-        stream.set_read_timeout(Some(Duration::from_millis(10))).ok();
-        stream.write_all(&[0x00]).ok();
-
-        // Handle Emulator connection
-        let mut last_status: Option<EmulatorStatus> = None;
-        let mut sender = stream.try_clone().unwrap();
-        let mut de = serde_json::Deserializer::from_reader(stream);
-        'outer: loop {
-
-            // Close connection if LSP is shutting down...
-            if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
-                log::info!("Emulator closing connection...");
-                break;
-
-            // ...or emulator stopped sending status responses
-            } else if status_response_timer.elapsed() > Duration::from_millis(2500) {
-                log::info!("Emulator no status within 2500ms...");
-                break;
-            }
-
-            // Receive messages
-            loop {
-                match Self::read_message::<EmulatorResponse>(&mut de) {
-                    Ok(Some(EmulatorResponse::Status(status))) => {
-                        // TODO also compare CRC
-                        let does_rom_match = PathBuf::from(&status.filename) == rom_path;
-
-                        // Update Progress Report
-                        state.update_progress(progress_token.clone(), status.to_status_message(does_rom_match)).await;
-
-                        // Only update and set status if ROM file matches
-                        if does_rom_match {
-                            // Update Status Info in Analyzer
-                            state.set_status(Some(status.clone()));
-                            let (update_hints, update_diagnostics, update_outline) = if let Some(ref ls) = last_status {
-                                if status.stopped != ls.stopped {
-                                    (true, true, true)
-
-                                } else if status.menu != ls.menu {
-                                    (true, false, false)
-
-                                } else if status.paused != ls.paused {
-                                    (true, false, false)
-
-                                // Trigger when PC changes during active stopped
-                                } else if status.stopped && (status.pc != ls.pc) {
-                                    (true, true, true)
-
-                                // Otherwise periodically update the hints and outline
-                                } else if !status.stopped && hints_refresh_timer.elapsed() > Duration::from_millis(1000) {
-                                    hints_refresh_timer = Instant::now();
-                                    (true, false, true)
-
-                                } else if status.breakpoints != ls.breakpoints {
-                                    (false, true, true)
-
-                                } else {
-                                    (false, false, false)
-                                }
-                            } else {
-                                (true, status.stopped, true)
-                            };
-                            if update_diagnostics {
-                                state.publish_diagnostics().await;
-                            }
-                            if update_outline {
-                                let (outline, locations) = status.to_outline(&state, does_rom_match);
-                                state.publish_emulator_outline(
-                                    outline.split('\n').into_iter().map(|s| s.to_string()).collect(),
-                                    locations
-                                ).await;
-                            }
-                            if update_hints {
-                                state.trigger_client_hints_refresh().await;
-                            }
-                            last_status = Some(status);
-                        }
-                        status_response_timer = Instant::now();
-                    },
-                    Ok(Some(EmulatorResponse::AddressValue(address))) => {
-                        state.results().insert(address.address, address.value);
-                    },
-                    Ok(None) => break,
-                    Err(err) => {
-                        log::warn!(&format!("Emulator Response Error: {:?}", err));
-                        break 'outer
-                    }
+    pub fn update_entries(&mut self, entries: HashMap<usize, SectionEntry>) -> Vec<(Url, Diagnostic)> {
+        let mut diagnostics = Vec::new();
+        if self.is_running() {
+            for address in self.entries.keys() {
+                if !entries.contains_key(&address) {
+                    self.diagnostic(&mut diagnostics, *address, "ROM entry removed, restart emulator to synchronize");
+                    return diagnostics;
                 }
             }
-
-            // Query emulator status periodically
-            if status_query_timer.elapsed() > Duration::from_millis(200) {
-                sender.write_all(&[0x00]).ok();
-                status_query_timer = Instant::now();
-            }
-
-            // Forward commands to emulator
-            if last_status.is_some() {
-                let mut commands = state.commands();
-                while let Some(command) = commands.pop_front() {
-                    match command {
-                        EmulatorCommand::ReadAddressValue(address) => {
-                            sender.write_all(&[0x80, address as u8, (address >> 8) as u8]).ok();
-                        },
-                        EmulatorCommand::WriteAddressValue(address, value) => {
-                            // TODO support u32 and higher rom addresses
-                            sender.write_all(&[0x40, address as u8, (address >> 8) as u8, value]).ok();
-                        },
-                        EmulatorCommand::DebuggerToggleBreakpoint(location) => {
-                            for (address, loc) in state.address_locations().iter() {
-                                if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
-                                    sender.write_all(&[0x10, *address as u8, (*address >> 8) as u8]).ok();
-                                    break;
+            let mut writes = Vec::new();
+            for (address, entry) in entries {
+                // Check if entry with same address, type and size already exists in the rom
+                if let Some(existing) = self.entries.get_mut(&address) {
+                    if entry.typ() == existing.typ() && entry.size == existing.size {
+                        if entry.rom_bytes() != existing.rom_bytes() {
+                            if let Some(bytes) = entry.rom_bytes() {
+                                for (index, b) in bytes.iter().enumerate() {
+                                    let address = (entry.offset as usize).saturating_add(index as usize);
+                                    writes.push((EmulatorAddress::from_raw(address), *b))
                                 }
                             }
-                        },
-                        EmulatorCommand::DebuggerStep => {
-                            if let Some(s) = state.emulator().as_mut() {
-                                s.send(b"step\n");
-
-                            } else {
-                                sender.write_all(&[0x20]).ok();
-                            }
-                        },
-                        EmulatorCommand::DebuggerNext => {
-                            if let Some(s) = state.emulator().as_mut() {
-                                s.send(b"next\n");
-
-                            } else {
-                                sender.write_all(&[0x21]).ok();
-                            }
-                        },
-                        EmulatorCommand::DebuggerFinish => {
-                            if let Some(s) = state.emulator().as_mut() {
-                                s.send(b"finish\n");
-
-                            } else {
-                                sender.write_all(&[0x22]).ok();
-                            }
-                        },
-                        EmulatorCommand::DebuggerContinue => {
-                            if let Some(s) = state.emulator().as_mut() {
-                                s.send(b"continue\n");
-
-                            } else {
-                                sender.write_all(&[0x23]).ok();
-                            }
-                        },
-                        EmulatorCommand::DebuggerUndo => {
-                            if let Some(s) = state.emulator().as_mut() {
-                                s.send(b"undo\n");
-
-                            } else {
-                                sender.write_all(&[0x24]).ok();
-                            }
+                            *existing = entry;
                         }
-                    }
-                }
-            }
-        }
-
-        // Reset Editor Status
-        state.set_status(None);
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        state.publish_diagnostics().await;
-        state.publish_emulator_outline(vec![], HashMap::new()).await;
-        state.trigger_client_hints_refresh().await;
-        state.end_progress(progress_token, "Emulation stopped").await;
-    }
-
-    fn read_message<'a, T: Deserialize<'a>>(de: &'a mut serde_json::Deserializer<IoRead<TcpStream>>) -> Result<Option<T>, serde_json::Error> {
-        match T::deserialize(de) {
-            Ok(v) => Ok(Some(v)),
-            Err(err) => if let Some(source) = err.source() {
-                if let Some(e) = source.downcast_ref::<std::io::Error>() {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        Ok(None)
 
                     } else {
-                        Err(err)
+                        self.diagnostic(&mut diagnostics, address, "ROM entry changed, restart emulator to synchronize");
+                        break
                     }
 
                 } else {
-                    Err(err)
+                    self.diagnostic(&mut diagnostics, address, "ROM entry added, restart emulator to synchronize");
+                    break
                 }
-
-            } else if err.classify() == serde_json::error::Category::Eof {
-                Err(err)
-
-            } else {
-                Ok(None)
+            }
+            if !writes.is_empty() {
+                self.state.send_command(EmulatorCommand::WriteRomMemory(writes));
             }
         }
+        diagnostics
+    }
+
+    fn diagnostic<S: Into<String>>(&self, diagnostics: &mut Vec<(Url, Diagnostic)>, address: usize, message: S) {
+        if let Some(loc) = self.state.address_locations().get(&address) {
+            diagnostics.push((loc.uri.clone(), Diagnostic {
+                range: loc.range,
+                severity: Some(DiagnosticSeverity::Warning),
+                message: message.into(),
+                code: None,
+                code_description: None,
+                source: None,
+                related_information: None,
+                tags: None,
+                data: None
+            }));
+        }
+    }
+
+    pub fn is_running(&mut self) -> bool {
+        self.running.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn reset(
+        &mut self,
+        entries: HashMap<usize, SectionEntry>,
+        labels: Vec<(u16, u16, String)>,
+        rom: Vec<u8>,
+        model: Option<Model>
+    ) -> bool {
+        if self.is_running() {
+            self.entries = entries;
+            self.state.send_command(EmulatorCommand::Reset {
+                model,
+                labels,
+                rom
+            });
+            true
+
+        } else {
+            false
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.state.send_command(EmulatorCommand::Exit);
+    }
+
+    async fn watch(receiver: Receiver<EmulatorResponse>, running: Arc<AtomicBool>, state: State) {
+        // Watch emulator progress
+        let progress_token = state.start_progress("Emulator", "Starting...").await;
+        let mut last_status = EmulatorStatus::default();
+        let mut hint_refresh_timer = Instant::now();
+        while running.load(std::sync::atomic::Ordering::SeqCst) {
+            let mut updated_status = None;
+            while let Ok(response) = receiver.try_recv() {
+                match response {
+                    EmulatorResponse::ReadMemory(results) => {
+                        let mut map = state.results();
+                        for (addr, value) in results {
+                            map.insert(addr.address, value);
+                        }
+                    },
+                    EmulatorResponse::Status(status) => {
+                        updated_status = Some(status.clone());
+                        state.set_status(Some(status));
+                    },
+                    EmulatorResponse::GotoAddress(addr) => {
+                        // TODO trigger editor to jump to the location of the address
+                    }
+                }
+            }
+            if let Some(status) = updated_status {
+                let (update_hints, update_diagnostics) = if status.halted != last_status.halted {
+                    (true, true)
+
+                } else if status.halted && status.pc != last_status.pc {
+                    (true, true)
+
+                } else if !status.halted && hint_refresh_timer.elapsed() > Duration::from_millis(1000) {
+                    hint_refresh_timer = Instant::now();
+                    (true, false)
+
+                } else if status.breakpoints != last_status.breakpoints {
+                    (false, true)
+
+                } else {
+                    (false, false)
+                };
+                if update_diagnostics {
+                    state.publish_diagnostics().await;
+                }
+                if update_hints {
+                    state.trigger_client_hints_refresh().await;
+                }
+                if status.halted {
+                    state.update_progress(progress_token.clone(), format!("Emulator halted @ ${:0>4X}", status.pc)).await;
+
+                } else {
+                    state.update_progress(progress_token.clone(), "Emulator running").await;
+                }
+                last_status = status;
+            }
+            state.send_command(EmulatorCommand::QueryStatus);
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        thread::sleep(Duration::from_millis(100));
+        state.trigger_client_hints_refresh().await;
+        state.end_progress(progress_token, "Emulator stopped").await;
     }
 }
 

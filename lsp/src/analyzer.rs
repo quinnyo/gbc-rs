@@ -11,17 +11,15 @@ use tokio::runtime::Handle;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{DocumentSymbol, Range};
 use tower_lsp::lsp_types::{SymbolInformation, SymbolKind, Url, Location, CompletionItem, CompletionItemKind};
+use gbd::{EmulatorAddress, EmulatorCommand, Model};
 
 
 // Internal Dependencies ------------------------------------------------------
-use project::{ProjectConfig, ProjectReader};
 use compiler::lexer::LexerToken;
-use compiler::expression::ExpressionResult;
 
 use crate::{
-    GameBoyModel,
     state::State,
-    emulator::{EmulatorConnection, EmulatorCommand, EmulatorProcess},
+    emulator::Emulator,
     parser::Parser,
     types::{
         InlayHint, InlayKind,
@@ -37,40 +35,21 @@ const THREAD_DEBOUNCE: u64 = 150;
 // Analyzer Implementation ----------------------------------------------------
 pub struct Analyzer {
     state: State,
-    link_gen: Arc<AtomicUsize>,
-    emulator: Arc<EmulatorConnection>
+    link_gen: Arc<AtomicUsize>
 }
 
 impl Analyzer {
     pub fn new(client: Arc<Client>) -> Self {
         let state = State::from_client(client);
-        let emulator = Arc::new(EmulatorConnection::new(state.clone()));
         Self {
             state,
-            link_gen: Arc::new(AtomicUsize::new(0)),
-            emulator
+            link_gen: Arc::new(AtomicUsize::new(0))
         }
     }
 
     pub async fn initialize(&self) {
         self.state.update_server_status("Ready").await;
         tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-
-        // Load config and get path to output ROM file to start emulator connection
-        let workspace_path = self.state.workspace_path().clone();
-        if let Some(workspace_path) = workspace_path {
-            let config = ProjectConfig::try_load(&ProjectReader::from_absolute(workspace_path)).ok();
-            if let Some(config) = config {
-                self.emulator.listen(config.rom.output).await;
-
-            } else {
-                self.emulator.shutdown().await;
-            }
-        }
-    }
-
-    pub async fn shutdown(&self) {
-        self.emulator.shutdown().await;
     }
 
     pub async fn set_workspace_path(&self, path: PathBuf) {
@@ -106,7 +85,7 @@ impl Analyzer {
     pub async fn build_rom(&self) {
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
-            if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
+            if let Some((entries, _, _, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
                 log::info!("Build ROM \"{}\" ({} entries)", rom_path.display(), entries.len());
             }
         }
@@ -114,13 +93,13 @@ impl Analyzer {
 }
 
 impl Analyzer {
-    pub async fn emulator_start(&self, model: Option<GameBoyModel>) {
+    pub async fn emulator_start(&self, model: Option<Model>) {
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
-            if let Some((entries, rom_path)) = Parser::build(workspace_path, self.state.clone()).await {
+            if let Some((entries, labels, rom, _)) = Parser::build(workspace_path, self.state.clone()).await {
                 // Reset and reload existing emulator process if still running
                 let was_reset = if let Some(process) = self.state.emulator().as_mut() {
-                    process.reset(entries.clone(), model)
+                    process.reset(entries.clone(), labels.clone(), rom.clone(), model)
 
                 } else {
                     false
@@ -128,100 +107,9 @@ impl Analyzer {
                 if !was_reset {
                     let state = self.state.clone();
                     Handle::current().spawn(async move {
-                        if let Some(process) = EmulatorProcess::launch(state.clone(), rom_path, entries, model) {
-                            state.set_emulator(Some(process));
-                        }
+                        state.set_emulator(Some(Emulator::launch(state.clone(), entries, labels, rom, model)));
                     });
                 }
-            }
-        }
-    }
-
-    pub async fn emulator_write_memory(&self, address: String, value: String) {
-        let workspace_path = self.state.workspace_path().clone();
-        if let Some(workspace_path) = workspace_path {
-
-            // Split symbols into variables and constants for lookup purposes
-            let symbols = self.get_symbols(workspace_path).await;
-            let (variables, constants): (Vec<GBCSymbol>, Vec<GBCSymbol>) = symbols.into_iter().filter(|s| {
-                s.kind == SymbolKind::Constant ||
-                s.kind == SymbolKind::Variable ||
-                s.kind == SymbolKind::Field ||
-                s.kind == SymbolKind::Function
-
-            }).partition(|s| {
-                s.kind != SymbolKind::Constant
-            });
-
-            // TODO support expressions like playerX + 2
-            // TODO support registers in expressions pc + 2 or BC + $4 etc.
-            // TODO support all names i.e. use address if available and otherwise result
-
-            // Parse or lookup address
-            let address = address.trim();
-            let address_info = if address.starts_with('$') {
-                u32::from_str_radix(&address[1..], 16).ok().map(|v| (v, 1))
-
-            } else if address.starts_with("0x") {
-                u32::from_str_radix(&address[2..], 16).ok().map(|v| (v, 1))
-
-            } else if address.starts_with("0b") {
-                u32::from_str_radix(&address[2..], 2).ok().map(|v| (v, 1))
-
-            } else if address.starts_with(|c| c >= '0' && c <= '9') {
-                u32::from_str_radix(&address, 10).ok().map(|v| (v, 1))
-
-            } else if let Some(variable) = variables.iter().find(|s| s.name == address) {
-                variable.address.map(|v| (v as u32, variable.width))
-
-            } else {
-                None
-            };
-
-            if let Some((address, width)) = address_info {
-                let value = value.trim();
-                let value = if value.starts_with('$') {
-                    i32::from_str_radix(&value[1..], 16).ok()
-
-                } else if value.starts_with("0x") {
-                    i32::from_str_radix(&value[2..], 16).ok()
-
-                } else if value.starts_with("0b") {
-                    i32::from_str_radix(&value[2..], 2).ok()
-
-                } else if value.starts_with("-") {
-                    i32::from_str_radix(&value, 10).ok()
-
-                } else if value.starts_with(|c| c >= '0' && c <= '9') {
-                    i32::from_str_radix(&value, 10).ok()
-
-                } else if let Some(constant) = constants.iter().find(|s| s.name == value) {
-                    if let Some(ExpressionResult::Integer(v)) = constant.result {
-                        Some(v)
-
-                    } else {
-                        None
-                    }
-
-                } else {
-                    None
-                };
-                match (value, width) {
-                    (Some(value), 1) => {
-                        log::info!("Write ${:0>4X} = ${:0>2X}", address, value as u8);
-                        self.emulator_command(EmulatorCommand::WriteAddressValue(address, value as u8)).await;
-                    },
-                    (Some(value), 2) => {
-                        log::info!("Write ${:0>4X} = ${:0>2X}", address, value as u8);
-                        log::info!("Write ${:0>4X} = ${:0>2X}", address.saturating_add(1), ((value as u16) >> 8) as u8);
-                        self.emulator_command(EmulatorCommand::WriteAddressValue(address, value as u8)).await;
-                        self.emulator_command(EmulatorCommand::WriteAddressValue(address.saturating_add(1), ((value as u16) >> 8) as u8)).await;
-                    },
-                    _ => log::warn!("Invalid Write attempt to ${:0>4X}", address)
-                }
-
-            } else {
-                log::warn!("Invalid Write attempt to \"{}\"", address)
             }
         }
     }
@@ -233,9 +121,19 @@ impl Analyzer {
         self.state.set_emulator(None);
     }
 
-    pub async fn emulator_command(&self, command: EmulatorCommand) {
-        self.state.commands().push_back(command);
+    pub async fn toggle_breakpoint(&self, location: Location) {
+        let mut addr = None;
+        for (address, loc) in self.state.address_locations().iter() {
+            if location.uri == loc.uri && location.range.start.line == loc.range.start.line {
+                addr = Some(*address);
+                break;
+            }
+        }
+        if let Some(addr) = addr {
+            self.state.send_command(EmulatorCommand::ToggleBreakpoint(EmulatorAddress::from_raw(addr)));
+        }
     }
+
 }
 
 impl Analyzer {
@@ -570,21 +468,22 @@ impl Analyzer {
 
         // Query emulator
         let mut pending = Vec::with_capacity(symbols.len());
+        let mut reads = Vec::new();
         for symbol in symbols {
             if let Some(address) = symbol.address {
                 if address <= 0xFFFF && (symbol.width == 1 || symbol.width == 2) {
                     let address = address as u16;
                     if symbol.width == 1 {
                         pending.push(PendingResult::Byte(address));
-                        self.state.commands().push_back(EmulatorCommand::ReadAddressValue(address));
+                        reads.push(EmulatorAddress::new(address, 0));
 
                     } else {
                         pending.push(PendingResult::Word(
                             address,
                             address.saturating_add(1)
                         ));
-                        self.state.commands().push_back(EmulatorCommand::ReadAddressValue(address));
-                        self.state.commands().push_back(EmulatorCommand::ReadAddressValue(address.saturating_add(1)));
+                        reads.push(EmulatorAddress::new(address, 0));
+                        reads.push(EmulatorAddress::new(address.saturating_add(1), 0));
                     }
 
                 } else {
@@ -595,9 +494,11 @@ impl Analyzer {
             }
             result_set.push(None);
         }
+        self.state.send_command(EmulatorCommand::ReadMemory(reads));
 
         // Wait for results from emulator
         let started = Instant::now();
+        log::info!("waiting for results {}", result_set.len());
         while started.elapsed() < Duration::from_millis(300) {
             let mut results = self.state.results();
             let mut waiting = 0;
@@ -621,6 +522,7 @@ impl Analyzer {
                 }
             }
             if waiting == 0 {
+                log::info!("got all results");
                 break;
             }
             thread::sleep(Duration::from_millis(10));

@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
-use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::Sender;
+use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
@@ -23,16 +24,16 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp::lsp_types::notification::{Progress, PublishDiagnostics};
+use gbd::{EmulatorCommand, EmulatorStatus};
 
 
 // Internal Dependencies ------------------------------------------------------
 use compiler::lexer::{stage::include::IncludeToken, LexerFile};
 use crate::{
-    emulator::{EmulatorCommand, EmulatorStatus, EmulatorProcess},
+    emulator::Emulator,
     types::{
         ServerStatusParams, ServerStatusNotification,
         InlayHintsNotification, InlayHintsParams,
-        DebuggerOutlineNotification, DebuggerOutlineParams, DebuggerOutlineLocation,
         GBCSymbol, MacroExpansion, Optimizations
     }
 };
@@ -44,9 +45,7 @@ type TokenMap = HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>;
 type SymbolData = (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations);
 type DiagnosticsMap = HashMap<Url, Vec<Diagnostic>>;
 type AddressesMap = HashMap<usize, Location>;
-type LabelList = Vec<(u16, String, String, usize, usize)>;
 type Error = (Url, usize, usize);
-type CommandQueue = VecDeque<EmulatorCommand>;
 type ResultMap = HashMap<u16, u8>;
 
 
@@ -70,14 +69,12 @@ pub struct State {
 
     // Address<->Location Lookup
     addresses: Arc<Mutex<AddressesMap>>,
-    labels: Arc<Mutex<LabelList>>,
 
     // Emulator
-    emulator: Arc<Mutex<Option<EmulatorProcess>>>,
+    emulator: Arc<Mutex<Option<Emulator>>>,
     status: Arc<Mutex<Option<EmulatorStatus>>>,
-    commands: Arc<Mutex<CommandQueue>>,
     results: Arc<Mutex<ResultMap>>,
-
+    commands: Arc<Mutex<Option<Sender<EmulatorCommand>>>>
 }
 
 impl State {
@@ -100,17 +97,24 @@ impl State {
 
             // Address<->Location Lookup
             addresses: Arc::new(Mutex::new(HashMap::new())),
-            labels: Arc::new(Mutex::new(Vec::new())),
 
             // Emulator
             emulator: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(None)),
-            commands: Arc::new(Mutex::new(VecDeque::new())),
             results: Arc::new(Mutex::new(HashMap::new())),
+            commands: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub fn set_emulator(&self, p: Option<EmulatorProcess>) {
+    pub fn send_command(&self, command: EmulatorCommand) {
+        if let Ok(commands) = self.commands.lock() {
+            if let Some(commands) = commands.as_ref() {
+                commands.send(command).ok();
+            }
+        }
+    }
+
+    pub fn set_emulator(&self, p: Option<Emulator>) {
         if let Ok(mut process) = self.emulator.lock() {
             *process = p;
         }
@@ -140,28 +144,20 @@ impl State {
         }
     }
 
-    pub fn set_labels(&self, labels: LabelList) {
-        if let Ok(mut list) = self.labels.lock() {
-            *list = labels;
-        }
-    }
-
     pub fn set_symbols(&self, symbols: SymbolData) {
         if let Ok(mut data) = self.symbols.lock() {
             *data = Some(symbols);
         }
     }
 
-    pub fn emulator<'a>(&'a self) -> MutexGuard<'a, Option<EmulatorProcess>> {
+    pub fn set_command_sender(&self, s: Option<Sender<EmulatorCommand>>) {
+        if let Ok(mut commands) = self.commands.lock() {
+            *commands = s;
+        }
+    }
+
+    pub fn emulator<'a>(&'a self) -> MutexGuard<'a, Option<Emulator>> {
         self.emulator.lock().expect("Emulator Lock failed")
-    }
-
-    pub fn commands<'a>(&'a self) -> MutexGuard<'a, CommandQueue> {
-        self.commands.lock().expect("Commands Lock failed")
-    }
-
-    pub fn results<'a>(&'a self) -> MutexGuard<'a, ResultMap> {
-        self.results.lock().expect("Result Lock failed")
     }
 
     pub fn status<'a>(&'a self) -> MutexGuard<'a, Option<EmulatorStatus>> {
@@ -192,8 +188,8 @@ impl State {
         self.tokens.lock().expect("Tokens Lock failed")
     }
 
-    pub fn labels<'a>(&'a self) -> MutexGuard<'a, LabelList> {
-        self.labels.lock().expect("Labels Lock failed")
+    pub fn results<'a>(&'a self) -> MutexGuard<'a, ResultMap> {
+        self.results.lock().expect("Result Lock failed")
     }
 
     pub fn has_symbols(&self) -> bool {
@@ -269,14 +265,6 @@ impl State {
         }
     }
 
-    pub async fn publish_emulator_outline(&self, lines: Vec<String>, locations: HashMap<usize, DebuggerOutlineLocation>) {
-        self.client.send_custom_notification::<DebuggerOutlineNotification>(DebuggerOutlineParams {
-            lines,
-            locations
-
-        }).await;
-    }
-
     pub async fn trigger_client_hints_refresh(&self) {
         self.client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
     }
@@ -303,18 +291,10 @@ impl State {
                     self.diagnostics().entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
                 }
             }
-            if status.stopped {
+            if status.halted {
                 if let Some(location) = self.address_locations().get(&(status.pc as usize)) {
                     let info = Diagnostic {
-                        message: format!(
-                            "Debugger Halt\nAF={:0>4X}\nBC={:0>4X}\nDE={:0>4X}\nHL={:0>4X}\nSP={:0>4X}\nPC={:0>4X}",
-                            status.registers.af,
-                            status.registers.bc,
-                            status.registers.de,
-                            status.registers.hl,
-                            status.registers.sp,
-                            status.pc,
-                        ),
+                        message: "Debugger halted here".to_string(),
                         range: location.range,
                         severity: Some(DiagnosticSeverity::Hint),
                         .. Diagnostic::default()

@@ -10,6 +10,8 @@ serde = { version = "*", features = ["derive"] }
 compiler = { version = "0.7.2", path = "../compiler" }
 project = { version = "0.5.0", path = "../project" }
 file-io = { version = "0.5.0", path = "../file-io" }
+gbd = { version = "0.1.0", path = "../../gbd" }
+lazy_static = "1.4.0"
 serde_json = "1.0"
 log = "*"
 env_logger = "0.8.3"

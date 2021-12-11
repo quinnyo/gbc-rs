@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = [
     "compiler",
     "decompiler",
@@ -32,3 +33,60 @@ opt-level = 3
 [profile.release]
 lto = 'fat'
 codegen-units = 1
+
+[profile.dev.package.gbd]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.app]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.analyzer]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.arrayvec]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.pixels]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.imgui]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.winit]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.wgpu-hal]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.wgpu]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.parking_lot]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.wgpu-core]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.cpal]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.sameboy-rs-sys]
+overflow-checks = false
+opt-level = 3
+
+[profile.dev.package.sameboy-rs]
+overflow-checks = false
+opt-level = 3
+

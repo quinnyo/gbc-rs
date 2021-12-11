@@ -12,6 +12,7 @@ use file_io::Logger;
 use project::{ProjectConfig, ProjectReader};
 use compiler::{
     compiler::Compiler,
+    generator::Generator,
     lexer::{
         MacroCall,
         stage::include::{IncludeStage, IncludeToken},
@@ -57,19 +58,8 @@ impl Parser {
                 let (symbols, macros) = Self::symbols(&linker);
                 let optimizations = Self::optimizations(&linker);
 
-                let mut labels: Vec<(u16, String, String, usize, usize)> = symbols.iter().filter(|s| s.address.is_some()).map(|s| (
-                    s.address.unwrap_or(0) as u16,
-                    s.name.clone(),
-                    s.location.uri.path().to_string(),
-                    s.location.range.start.line as usize,
-                    s.location.range.start.character as usize
-
-                )).collect();
-                labels.sort_by(|a, b| a.0.cmp(&b.0));
-
                 lints.append(&mut Self::diagnostics(&linker, &symbols));
                 state.set_address_locations(Self::address_locations(&linker));
-                state.set_labels(labels);
                 state.set_symbols((symbols, macros, optimizations));
                 state.end_progress(progress_token, "Done").await;
                 log::info!("Analyzed in {}ms", start.elapsed().as_millis());
@@ -107,7 +97,7 @@ impl Parser {
                     // TODO show at current location
                 }
                 state.end_progress(progress_token, "Done").await;
-                log::error!(&format!("Linking failed after {}ms", start.elapsed().as_millis()));
+                log::error!("{}", format!("Linking failed after {}ms", start.elapsed().as_millis()));
             }
         }
 
@@ -135,7 +125,7 @@ impl Parser {
         Some(())
     }
 
-    pub async fn build(workspace_path: PathBuf, state: State) -> Option<(HashMap<usize, SectionEntry>, PathBuf)> {
+    pub async fn build(workspace_path: PathBuf, state: State) -> Option<(HashMap<usize, SectionEntry>, Vec<(u16, u16, String)>, Vec<u8>, PathBuf)> {
         // Try and load config for current workspace
         let (mut config, reader) = Self::load_project(&state, workspace_path)?;
         config.report.segments = false;
@@ -150,8 +140,13 @@ impl Parser {
         // Run compiler
         match ProjectConfig::build(&config, &mut logger, Some(reader), false) {
             Ok(linker) => {
+                // Generate Labels and ROM image
+                let labels = linker.to_symbol_list().into_iter().map(|(addr, bank, name)| (addr as u16, bank as u16, name)).collect();
+                let mut generator = Generator::from_linker(&linker);
+                generator.finalize_rom();
+
                 state.end_progress(progress_token, "Complete").await;
-                Some((Self::rom_entries(&linker), config.rom.output))
+                Some((Self::rom_entries(&linker), labels, generator.buffer, config.rom.output))
             },
             Err(_) => {
                 state.end_progress(progress_token, "Failed").await;

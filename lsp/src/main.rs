@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
 use serde::Deserialize;
 use serde_json::Value;
+use gbd::Model;
 
 
 // Modules --------------------------------------------------------------------
@@ -18,7 +19,6 @@ mod parser;
 mod types;
 mod state;
 use self::analyzer::Analyzer;
-use self::emulator::EmulatorCommand;
 
 
 // Structs --------------------------------------------------------------------
@@ -37,34 +37,10 @@ pub struct WriteMemoryParams {
     value: String
 }
 
-#[derive(Debug, Deserialize, Copy, Clone)]
-#[serde(rename_all = "camelCase")]
-pub enum GameBoyModel {
-    #[serde(alias = "dmg", alias = "DMG")]
-    Dmg,
-    #[serde(alias = "cgb", alias = "cgb")]
-    Cgb,
-    #[serde(alias = "agb", alias = "AGB")]
-    Agb,
-    #[serde(alias = "sgb", alias = "SGB")]
-    Sgb
-}
-
-impl GameBoyModel {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Dmg => "dmg",
-            Self::Cgb => "cgb",
-            Self::Agb => "agb",
-            Self::Sgb => "sgb"
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelParams {
-    model: GameBoyModel
+    model: Model
 }
 
 
@@ -128,29 +104,28 @@ impl LanguageServer for Backend {
 
     async fn shutdown(&self) -> Result<()> {
         self.analyzer.emulator_stop().await;
-        self.analyzer.shutdown().await;
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        log::info!(&format!("Opened {}", params.text_document.uri.path()));
+        log::info!("{}", format!("Opened {}", params.text_document.uri.path()));
         self.analyzer.open_document(params.text_document.uri.path(), &params.text_document.text);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        log::info!(&format!("Changed {}", params.text_document.uri.path()));
+        log::info!("{}", format!("Changed {}", params.text_document.uri.path()));
         if let Some(change) = params.content_changes.first() {
             self.analyzer.change_document(params.text_document.uri.path(), &change.text);
         }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        log::info!(&format!("Saved {}", params.text_document.uri.path()));
+        log::info!("{}", format!("Saved {}", params.text_document.uri.path()));
         self.analyzer.save_document(params.text_document.uri.path());
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        log::info!(&format!("Closed {}", params.text_document.uri.path()));
+        log::info!("{}", format!("Closed {}", params.text_document.uri.path()));
         self.analyzer.close_document(params.text_document.uri.path());
     }
 
@@ -223,37 +198,21 @@ impl LanguageServer for Backend {
                 return Ok(Some(serde_json::to_value(&hints).unwrap()))
             },
             "debugger/toggle_breakpoint" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerToggleBreakpoint(Location {
+                self.analyzer.toggle_breakpoint(Location {
                     uri: params.text_document.uri,
                     range: params.range
 
-                })).await;
-            },
-            "debugger/step" => {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerStep).await;
-            },
-            "debugger/next" => {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerNext).await;
-            },
-            "debugger/finish" => {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerFinish).await;
-            },
-            "debugger/continue" => {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerContinue).await;
-            },
-            "debugger/undo" => {
-                self.analyzer.emulator_command(EmulatorCommand::DebuggerUndo).await;
+                }).await;
             },
             "emulator/start" => {
-                if let Some(Ok(params)) = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<ModelParams>(v.clone())) {
+                let options = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<ModelParams>(v.clone()));
+                log::info!("Start params: {:?} -> {:?}", params.arguments, options);
+                if let Some(Ok(params)) = options {
                     self.analyzer.emulator_start(Some(params.model)).await;
 
                 } else {
                     self.analyzer.emulator_start(None).await;
                 }
-            },
-            "emulator/write_memory" => if let Some(Ok(params)) = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<WriteMemoryParams>(v.clone())) {
-                self.analyzer.emulator_write_memory(params.address, params.value).await;
             },
             "emulator/stop" => {
                 self.analyzer.emulator_stop().await;
@@ -267,10 +226,7 @@ impl LanguageServer for Backend {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    env_logger::init();
-
+async fn run_server() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
@@ -283,5 +239,25 @@ async fn main() {
         .interleave(messages)
         .serve(service)
         .await;
+
+    // Exit with force here so that emulator on the main thread also exits
+    std::process::exit(0);
+}
+
+fn main() {
+    env_logger::Builder::new().filter_module("lsp", log::LevelFilter::Info).init();
+
+    // Workaround needed to make the built-in emulator UI run on the main thread
+    // otherwise winit will panic due to compatability issues
+    std::thread::spawn(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                run_server().await;
+            });
+    });
+    emulator::Emulator::main_thread_loop();
 }
 
