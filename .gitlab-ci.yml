@@ -19,6 +19,9 @@ linux-musl:
     paths:
       - target/x86_64-unknown-linux-musl/release/gbc
       - target/x86_64-unknown-linux-musl/release/gbt
+  before_script:
+    - sudo apt update
+    - sudo apt install -yq python3 libasound2-dev
   script:
     - cargo build --release --target x86_64-unknown-linux-musl
     - strip -S target/x86_64-unknown-linux-musl/release/gbc
@@ -27,13 +30,14 @@ linux-musl:
     - cd ..
     - strip -S target/x86_64-unknown-linux-musl/release/gbt
 
-windows-mingw:
-  stage: build
-  artifacts:
-    paths:
-      - target/x86_64-pc-windows-gnu/release/gbc.exe
-      - target/x86_64-pc-windows-gnu/release/gbt.exe
-  script:
-    - cargo build --release --target x86_64-pc-windows-gnu
-    - cd gbt
-    - cargo build --release --target x86_64-pc-windows-gnu
+# windows-mingw:
+#   stage: build
+#   artifacts:
+#     paths:
+#       - target/x86_64-pc-windows-gnu/release/gbc.exe
+#       - target/x86_64-pc-windows-gnu/release/gbt.exe
+#   script:
+#     - cargo build --release --target x86_64-pc-windows-gnu
+#     - cd gbt
+#     - cargo build --release --target x86_64-pc-windows-gnu
+# 
