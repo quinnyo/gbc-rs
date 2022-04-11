@@ -498,7 +498,6 @@ impl Analyzer {
 
         // Wait for results from emulator
         let started = Instant::now();
-        log::info!("waiting for results {}", result_set.len());
         while started.elapsed() < Duration::from_millis(300) {
             let mut results = self.state.results();
             let mut waiting = 0;
@@ -522,7 +521,6 @@ impl Analyzer {
                 }
             }
             if waiting == 0 {
-                log::info!("got all results");
                 break;
             }
             thread::sleep(Duration::from_millis(10));

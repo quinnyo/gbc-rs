@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use lazy_static::lazy_static;
 use tokio::runtime::Handle;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url};
-use gbd::{Application, EmulatorAddress, EmulatorCommand, EmulatorStatus, EmulatorResponse, Model};
+use gbd::{App, EmulatorAddress, EmulatorCommand, EmulatorStatus, EmulatorResponse, Model};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -90,14 +90,17 @@ impl Emulator {
     pub fn update_entries(&mut self, entries: HashMap<usize, SectionEntry>) -> Vec<(Url, Diagnostic)> {
         let mut diagnostics = Vec::new();
         if self.is_running() {
+            /*
             for address in self.entries.keys() {
                 if !entries.contains_key(&address) {
-                    self.diagnostic(&mut diagnostics, *address, "ROM entry removed, restart emulator to synchronize");
+                    self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry added / removed or changed, restart emulator to synchronize");
                     return diagnostics;
                 }
-            }
+            }*/
+
+            // TODO double check and rework detection maybe only write in case all changes can be synced?
             let mut writes = Vec::new();
-            for (address, entry) in entries {
+            for (address, entry) in &entries {
                 // Check if entry with same address, type and size already exists in the rom
                 if let Some(existing) = self.entries.get_mut(&address) {
                     if entry.typ() == existing.typ() && entry.size == existing.size {
@@ -105,19 +108,19 @@ impl Emulator {
                             if let Some(bytes) = entry.rom_bytes() {
                                 for (index, b) in bytes.iter().enumerate() {
                                     let address = (entry.offset as usize).saturating_add(index as usize);
-                                    writes.push((EmulatorAddress::from_raw(address), *b))
+                                    writes.push((EmulatorAddress::from_raw(address), *b));
                                 }
                             }
-                            *existing = entry;
+                            self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry changed, temporarily synced to emulator ROM");
                         }
 
                     } else {
-                        self.diagnostic(&mut diagnostics, address, "ROM entry changed, restart emulator to synchronize");
+                        // self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry changed, restart emulator to synchronize");
                         break
                     }
 
                 } else {
-                    self.diagnostic(&mut diagnostics, address, "ROM entry added, restart emulator to synchronize");
+                    // self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry added, restart emulator to synchronize");
                     break
                 }
             }
@@ -128,7 +131,25 @@ impl Emulator {
         diagnostics
     }
 
-    fn diagnostic<S: Into<String>>(&self, diagnostics: &mut Vec<(Url, Diagnostic)>, address: usize, message: S) {
+    fn diagnostic<S: Into<String>>(&self, diagnostics: &mut Vec<(Url, Diagnostic)>, address: usize, entries: &HashMap<usize, SectionEntry>, message: S) {
+        let address = if entries.contains_key(&address) {
+            address
+
+        } else {
+            let mut valid_addresses: Vec<usize> = entries.keys().cloned().collect();
+            valid_addresses.sort();
+            let mut nearest_address = 0;
+            for addr in valid_addresses {
+                if addr <= address {
+                    nearest_address = addr;
+
+                } else {
+                    break;
+                }
+            }
+            nearest_address
+        };
+
         if let Some(loc) = self.state.address_locations().get(&address) {
             diagnostics.push((loc.uri.clone(), Diagnostic {
                 range: loc.range,
@@ -232,6 +253,7 @@ impl Emulator {
             thread::sleep(Duration::from_millis(100));
         }
 
+        state.set_status(None);
         thread::sleep(Duration::from_millis(100));
         state.trigger_client_hints_refresh().await;
         state.end_progress(progress_token, "Emulator stopped").await;
