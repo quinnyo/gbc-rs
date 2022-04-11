@@ -74,6 +74,7 @@ dependencies = [
 [[package]]
 name = "analyzer"
 version = "0.1.0"
+source = "git+https://gitlab.com/BonsaiDen/gbd-rs#5a2a37081c947dca23aeaaf237f75db3f51db6f4"
 dependencies = [
  "sameboy-rs",
  "serde",
@@ -990,6 +991,7 @@ dependencies = [
 [[package]]
 name = "gbd"
 version = "0.1.0"
+source = "git+https://gitlab.com/BonsaiDen/gbd-rs#5a2a37081c947dca23aeaaf237f75db3f51db6f4"
 dependencies = [
  "analyzer",
  "cpal",
@@ -2164,6 +2166,7 @@ dependencies = [
 [[package]]
 name = "sameboy-rs"
 version = "0.1.0"
+source = "git+https://gitlab.com/BonsaiDen/gbd-rs#5a2a37081c947dca23aeaaf237f75db3f51db6f4"
 dependencies = [
  "libc",
  "sameboy-rs-sys",
@@ -2173,6 +2176,7 @@ dependencies = [
 [[package]]
 name = "sameboy-rs-sys"
 version = "0.1.0"
+source = "git+https://gitlab.com/BonsaiDen/gbd-rs#5a2a37081c947dca23aeaaf237f75db3f51db6f4"
 dependencies = [
  "bindgen",
  "cc",
@@ -2396,6 +2400,7 @@ dependencies = [
 [[package]]
 name = "tile"
 version = "0.1.0"
+source = "git+https://gitlab.com/BonsaiDen/gbd-rs#5a2a37081c947dca23aeaaf237f75db3f51db6f4"
 dependencies = [
  "sameboy-rs",
 ]

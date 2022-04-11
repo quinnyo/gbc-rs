@@ -38,7 +38,7 @@ codegen-units = 1
 overflow-checks = false
 opt-level = 3
 
-[profile.dev.package.app]
+[profile.dev.package.edt]
 overflow-checks = false
 opt-level = 3
 
