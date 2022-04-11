@@ -6,6 +6,9 @@ stages:
 
 test:
   stage: test
+  before_script:
+    - sudo apt update
+    - sudo apt install -yq python3 libasound2-dev
   script:
   - rustc --version && cargo --version
   - cd compiler
