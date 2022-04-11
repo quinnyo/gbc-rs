@@ -584,17 +584,17 @@ mod test {
     // ROM Sizing -------------------------------------------------------------
     #[test]
     fn test_rom_buffer_sizing() {
-        assert_eq!(linker("").into_rom_buffer().len(), 0x8000);
-        assert_eq!(linker("SECTION ROM0[$2000]").into_rom_buffer().len(), 0x8000);
-        assert_eq!(linker("SECTION ROMX[$4000]").into_rom_buffer().len(), 0x8000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[1]").into_rom_buffer().len(), 0x8000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[2]").into_rom_buffer().len(), 0x10000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[3]").into_rom_buffer().len(), 0x10000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[4]").into_rom_buffer().len(), 0x20000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[5]").into_rom_buffer().len(), 0x20000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[6]").into_rom_buffer().len(), 0x20000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[7]").into_rom_buffer().len(), 0x20000);
-        assert_eq!(linker("SECTION ROMX[$4000],BANK[8]").into_rom_buffer().len(), 0x40000);
+        assert_eq!(linker("").to_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROM0[$2000]").to_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROMX[$4000]").to_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[1]").to_rom_buffer().len(), 0x8000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[2]").to_rom_buffer().len(), 0x10000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[3]").to_rom_buffer().len(), 0x10000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[4]").to_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[5]").to_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[6]").to_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[7]").to_rom_buffer().len(), 0x20000);
+        assert_eq!(linker("SECTION ROMX[$4000],BANK[8]").to_rom_buffer().len(), 0x40000);
     }
 
     // Constant Evaluation ----------------------------------------------------
@@ -769,15 +769,15 @@ mod test {
     // ROM Buffer -------------------------------------------------------------
     #[test]
     fn test_rom_buffer_write() {
-        let b = linker("SECTION ROM0\nDB $1, $2, $3, $4").into_rom_buffer();
+        let b = linker("SECTION ROM0\nDB $1, $2, $3, $4").to_rom_buffer();
         assert_eq!(b[0..4].to_vec(), vec![1u8, 2, 3, 4]);
-        let b = linker("SECTION ROM0\nDW $2000").into_rom_buffer();
+        let b = linker("SECTION ROM0\nDW $2000").to_rom_buffer();
         assert_eq!(b[0..2].to_vec(), vec![0, 32]);
-        let b = linker("SECTION ROM0\nBW $2000").into_rom_buffer();
+        let b = linker("SECTION ROM0\nBW $2000").to_rom_buffer();
         assert_eq!(b[0..2].to_vec(), vec![32, 0]);
-        let b = linker("SECTION ROM0\nDS 'Hello World'").into_rom_buffer();
+        let b = linker("SECTION ROM0\nDS 'Hello World'").to_rom_buffer();
         assert_eq!(b[0..11].to_vec(), vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]);
-        let b = linker("SECTION ROM0\nstop\nld a,a\nld hl,$1000\n").into_rom_buffer();
+        let b = linker("SECTION ROM0\nstop\nld a,a\nld hl,$1000\n").to_rom_buffer();
         assert_eq!(b[0..10].to_vec(), vec![16, 0, 127, 33, 0, 16, 0, 0, 0, 0]);
     }
 
