@@ -7,7 +7,6 @@ members = [
     "gb-cpu",
     "gb-cpu/gb-types",
     "gbt",
-    "lsp",
     "project",
     "."
 ]
