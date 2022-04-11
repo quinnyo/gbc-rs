@@ -128,7 +128,23 @@ local function server_status(_, result)
 end
 
 local function setup_lsp()
-	nvim_lsp.gbc_analyzer.setup(config.options.server)
+    local configs = require("lspconfig.configs")
+    configs['gbc_analyzer'] = {
+      default_config = {
+        cmd = { 'gbc-analyzer' },
+        filetypes = { 'gbc' },
+        root_dir = nvim_lsp.util.root_pattern('gbc.toml'),
+        settings = {
+          ['gbc-analyzer'] = {},
+        },
+      },
+      docs = {
+        description = [[
+    gbc language server
+        ]]
+      },
+    }
+    nvim_lsp.gbc_analyzer.setup(config.options.server)
 end
 
 local function setup_handlers()
