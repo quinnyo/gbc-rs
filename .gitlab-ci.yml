@@ -1,4 +1,4 @@
-image: "ekidd/rust-musl-builder:stable"
+image: "iwetzel/rust-ci-builder:0.0.1"
 
 stages:
   - test
@@ -6,9 +6,6 @@ stages:
 
 test:
   stage: test
-  before_script:
-    - sudo apt update
-    - sudo apt install -yq python3 libasound2-dev
   script:
   - rustc --version && cargo --version
   - cd compiler
@@ -18,13 +15,6 @@ test:
 
 linux-musl:
   stage: build
-  artifacts:
-    paths:
-      - target/x86_64-unknown-linux-musl/release/gbc
-      - target/x86_64-unknown-linux-musl/release/gbt
-  before_script:
-    - sudo apt update
-    - sudo apt install -yq python3 libasound2-dev
   script:
     - cargo build --release --target x86_64-unknown-linux-musl
     - strip -S target/x86_64-unknown-linux-musl/release/gbc
@@ -32,15 +22,19 @@ linux-musl:
     - cargo build --release --target x86_64-unknown-linux-musl
     - cd ..
     - strip -S target/x86_64-unknown-linux-musl/release/gbt
+  artifacts:
+    paths:
+      - target/x86_64-unknown-linux-musl/release/gbc
+      - target/x86_64-unknown-linux-musl/release/gbt
 
-# windows-mingw:
-#   stage: build
-#   artifacts:
-#     paths:
-#       - target/x86_64-pc-windows-gnu/release/gbc.exe
-#       - target/x86_64-pc-windows-gnu/release/gbt.exe
-#   script:
-#     - cargo build --release --target x86_64-pc-windows-gnu
-#     - cd gbt
-#     - cargo build --release --target x86_64-pc-windows-gnu
-# 
+windows-mingw:
+  stage: build
+  script:
+    - cargo build --release --target x86_64-pc-windows-gnu
+    - cd gbt
+    - cargo build --release --target x86_64-pc-windows-gnu
+  artifacts:
+    paths:
+      - target/x86_64-pc-windows-gnu/release/gbc.exe
+      - target/x86_64-pc-windows-gnu/release/gbt.exe
+
