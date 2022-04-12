@@ -19,7 +19,6 @@ pub struct LexerFile {
 }
 
 impl LexerFile {
-
     pub fn new(index: usize, contents: String, path: PathBuf, include_stack: Vec<InnerToken>) -> Self {
         Self {
             index,
@@ -38,6 +37,7 @@ impl LexerFile {
                 return start + get_col;
             }
         }
+        // Fallback to last line
         self.last.borrow().0
     }
 
@@ -48,7 +48,7 @@ impl LexerFile {
                 return (line, index - start);
             }
         }
-        println!("failed to lookup line/col for {}", index);
+        // Fallback to last column on last line
         *self.last.borrow()
     }
 
