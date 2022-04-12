@@ -1,4 +1,4 @@
-image: "iwetzel/rust-ci-builder:0.0.1"
+image: "iwetzel/rust-ci-builder:0.1.0"
 
 stages:
   - test
