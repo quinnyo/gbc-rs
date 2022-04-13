@@ -99,19 +99,7 @@ impl Register {
     }
 
     pub fn is_loadable(&self) -> bool {
-        match self {
-            Register::Accumulator => true,
-            Register::B => true,
-            Register::C => true,
-            Register::D => true,
-            Register::E => true,
-            Register::H => true,
-            Register::L => true,
-            Register::BC => true,
-            Register::DE => true,
-            Register::HL => true,
-            _ => false
-        }
+        matches!(self, Register::Accumulator | Register::B | Register::C | Register::D | Register::E | Register::H | Register::L | Register::BC | Register::DE | Register::HL)
     }
 
     pub fn to_load_op_code(&self, other: Option<Register>) -> u16 {

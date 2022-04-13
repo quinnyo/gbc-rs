@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
-use std::path::PathBuf;
+use std::fmt;
+use std::path::{Path, PathBuf};
 use std::io::Error as IOError;
 
 
@@ -21,10 +22,11 @@ pub struct CommandError {
     pub stdout: String
 }
 
-impl CommandError {
-    pub fn to_string(&self) -> String {
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(path) = self.path.as_ref() {
-            format!(
+            write!(
+                f,
                 "Failed to execute command \"{}\" on included file \"{}\":\n\n{}\n{}{}",
                 self.command,
                 path.display(),
@@ -33,7 +35,8 @@ impl CommandError {
                 "---".red()
             )
         } else {
-            format!(
+            write!(
+                f,
                 "Failed to execute command \"{}\":\n\n{}\n{}{}",
                 self.command,
                 "---".red(),
@@ -99,33 +102,34 @@ impl Logger {
         self.output.pop();
     }
 
-    pub fn to_string(&self) -> String {
-        self.output.join("\n")
-    }
-
     pub fn flush(&mut self) {
         if !self.output.is_empty() {
-            println!("{}", self.to_string());
+            println!("{}", self);
         }
         self.output.clear();
     }
 
     pub fn error<S: Into<String>>(&self, s: S) {
         if !self.output.is_empty() {
-            println!("{}", self.to_string());
+            println!("{}", self);
         }
         eprintln!("{}", s.into());
     }
+}
 
+impl fmt::Display for Logger {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.output.join("\n"))
+    }
 }
 
 pub trait FileReader {
 
     fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String>;
 
-    fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError>;
+    fn read_file(&self, parent: Option<&PathBuf>, child: &Path) -> Result<(PathBuf, String), FileError>;
 
-    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError>;
+    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &Path) -> Result<(PathBuf, Vec<u8>), FileError>;
 
     fn execute_raw_command(&self, path: Option<PathBuf>, command: &str, input: &[u8]) -> Result<Vec<u8>, String> {
         let mut args = command.split(' ');
@@ -153,7 +157,7 @@ pub trait FileReader {
             CommandError {
                 command: command.to_string(),
                 path,
-                stdout: format!("Command did not return a valid string: {}", e.to_string())
+                stdout: format!("Command did not return a valid string: {}", e)
             }
         })
     }
@@ -168,7 +172,7 @@ pub trait FileReader {
         })
     }
 
-    fn resolve_path(base: &PathBuf, parent: Option<&PathBuf>, child: &PathBuf) -> PathBuf {
+    fn resolve_path(base: &PathBuf, parent: Option<&PathBuf>, child: &Path) -> PathBuf {
         let mut full_path = base.clone();
         if child.is_absolute() {
             full_path.push(child.strip_prefix("/").unwrap());
@@ -187,7 +191,7 @@ pub trait FileReader {
 }
 
 pub trait FileWriter {
-    fn write_file(&mut self, path: &PathBuf, data: String) -> Result<(), FileError>;
-    fn write_binary_file(&mut self, path: &PathBuf, data: Vec<u8>) -> Result<(), FileError>;
+    fn write_file(&mut self, path: &Path, data: String) -> Result<(), FileError>;
+    fn write_binary_file(&mut self, path: &Path, data: Vec<u8>) -> Result<(), FileError>;
 }
 

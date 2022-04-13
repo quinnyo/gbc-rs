@@ -9,7 +9,7 @@ pub type AnalyzerNotes = Vec<(InnerToken, String)>;
 
 
 // Low Level Instruction Analyzer ---------------------------------------------
-pub fn analyze_section_entries(entries: &Vec<SectionEntry>, notes: &mut AnalyzerNotes) {
+pub fn analyze_section_entries(entries: &[SectionEntry], notes: &mut AnalyzerNotes) {
     fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)> {
         if let Some(entry) = entries.get(i) {
             if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
@@ -17,7 +17,7 @@ pub fn analyze_section_entries(entries: &Vec<SectionEntry>, notes: &mut Analyzer
                     None
 
                 } else {
-                    Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes, &entry.inner))
+                    Some((*op_code, (entry.offset + entry.size) as i32, expression, bytes, &entry.inner))
                 }
 
             } else {
@@ -30,9 +30,9 @@ pub fn analyze_section_entries(entries: &Vec<SectionEntry>, notes: &mut Analyzer
     }
 
     for i in 0..entries.len() {
-        if let Some((op_code, offset, expression, bytes, inner)) = get_instruction(&entries, i) {
-            let b = get_instruction(&entries, i + 1);
-            let c = get_instruction(&entries, i + 2);
+        if let Some((op_code, offset, expression, bytes, inner)) = get_instruction(entries, i) {
+            let b = get_instruction(entries, i + 1);
+            let c = get_instruction(entries, i + 2);
             analyze_instructions(
                 notes,
                 op_code,
@@ -47,6 +47,7 @@ pub fn analyze_section_entries(entries: &Vec<SectionEntry>, notes: &mut Analyzer
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn analyze_instructions(
     notes: &mut AnalyzerNotes,
     op_code: u16,

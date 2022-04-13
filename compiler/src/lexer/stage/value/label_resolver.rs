@@ -77,15 +77,15 @@ impl LabelResolver {
 
             let reference = if let ValueToken::Name(inner) = token {
                 // Macro Internal Lookup
-                if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
+                if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(inner, false, Some(inner.file_index))) {
                     Some(ValueToken::ParentLabelRef(inner.clone(), *id))
 
                 // File Local Lookup
-                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, Some(inner.file_index))) {
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(inner, true, Some(inner.file_index))) {
                     Some(ValueToken::ParentLabelRef(inner.clone(), *id))
 
                 // Global Lookup
-                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, None)) {
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(inner, true, None)) {
                     Some(ValueToken::ParentLabelRef(inner.clone(), *id))
 
                 } else {
@@ -171,15 +171,15 @@ impl LabelResolver {
             } else if let ValueToken::ParentLabelCall(inner, ref mut label_id, Some(arguments)) = token {
 
                 // Macro Internal Lookup
-                *label_id = if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, false, Some(inner.file_index))) {
+                *label_id = if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(inner, false, Some(inner.file_index))) {
                     *id
 
                 // File Local Lookup
-                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, Some(inner.file_index))) {
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(inner, true, Some(inner.file_index))) {
                     *id
 
                 // Global Lookup
-                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(&inner, true, None)) {
+                } else if let Some((_, id)) = parent_labels.get(&Self::parent_label_id(inner, true, None)) {
                     *id
 
                 } else {

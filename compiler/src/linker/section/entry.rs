@@ -100,11 +100,7 @@ impl SectionEntry {
     }
 
     pub fn is_rom(&self) -> bool {
-        match &self.data {
-            EntryData::Instruction { .. } => true,
-            EntryData::Data { bytes: Some(_), .. } => true,
-            _ => false
-        }
+        matches!(&self.data, EntryData::Instruction { .. } | EntryData::Data { bytes: Some(_), .. })
     }
 
     pub fn write_to_rom_buffer(&self, buffer: &mut [u8]) {
@@ -114,7 +110,7 @@ impl SectionEntry {
                     buffer[index] = *b;
                 }
             }
-            EntryData::Data { bytes, .. } => if let Some(bytes) = bytes {
+            EntryData::Data { bytes: Some(bytes), .. } => {
                 for (index, b) in bytes.iter().enumerate() {
                     buffer[index] = *b;
                 }

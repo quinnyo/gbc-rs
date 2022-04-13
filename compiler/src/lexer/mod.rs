@@ -267,7 +267,7 @@ impl<T: LexerStage> Lexer<T> {
     }
 
     pub fn data(&mut self) -> Vec<T::Data> {
-        std::mem::replace(&mut self.data, Vec::new())
+        std::mem::take(&mut self.data)
     }
 
 }

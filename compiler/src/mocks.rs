@@ -1,5 +1,5 @@
 // STD Dependencies -----------------------------------------------------------
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::io::{Error as IOError, ErrorKind};
 
@@ -48,7 +48,7 @@ impl MockFileReader {
 impl FileReader for MockFileReader {
 
     fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String> {
-        let (expected, output, stderr) = self.commands.get(&(name.clone(), args)).map(|b| b.clone()).ok_or_else(|| {
+        let (expected, output, stderr) = self.commands.get(&(name.clone(), args)).cloned().ok_or_else(|| {
             format!("{}: mock command not found", name)
         })?;
         if let Some(stderr) = stderr {
@@ -62,7 +62,7 @@ impl FileReader for MockFileReader {
         }
     }
 
-    fn read_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, String), FileError> {
+    fn read_file(&self, parent_path: Option<&PathBuf>, child_path: &Path) -> Result<(PathBuf, String), FileError> {
         let path = Self::resolve_path(&self.base, parent_path, child_path);
         let contents = self.files.get(&path).map(|s| s.to_string()).ok_or_else(|| {
             FileError {
@@ -73,9 +73,9 @@ impl FileReader for MockFileReader {
         Ok((path, contents))
     }
 
-    fn read_binary_file(&self, parent_path: Option<&PathBuf>, child_path: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {
+    fn read_binary_file(&self, parent_path: Option<&PathBuf>, child_path: &Path) -> Result<(PathBuf, Vec<u8>), FileError> {
         let path = Self::resolve_path(&self.base, parent_path, child_path);
-        let contents = self.binary_files.get(&path).map(|b| b.clone()).ok_or_else(|| {
+        let contents = self.binary_files.get(&path).cloned().ok_or_else(|| {
             FileError {
                 io: IOError::new(ErrorKind::NotFound, "No Mock file provided"),
                 path: path.clone()
@@ -87,13 +87,13 @@ impl FileReader for MockFileReader {
 }
 
 impl FileWriter for MockFileReader {
-    fn write_file(&mut self, path: &PathBuf, data: String) -> Result<(), FileError> {
-        self.files.insert(path.clone(), data);
+    fn write_file(&mut self, path: &Path, data: String) -> Result<(), FileError> {
+        self.files.insert(path.to_path_buf(), data);
         Ok(())
     }
 
-    fn write_binary_file(&mut self, path: &PathBuf, data: Vec<u8>) -> Result<(), FileError> {
-        self.binary_files.insert(path.clone(), data);
+    fn write_binary_file(&mut self, path: &Path, data: Vec<u8>) -> Result<(), FileError> {
+        self.binary_files.insert(path.to_path_buf(), data);
         Ok(())
     }
 }

@@ -495,10 +495,7 @@ impl ExpressionParser {
     }
 
     fn is_paren(&self) -> bool {
-        match &self.token {
-            Some(ValueToken::OpenParen(_)) => true,
-            _ => false
-        }
+        matches!(&self.token, Some(ValueToken::OpenParen(_)))
     }
 
     fn is_unary(&self) -> bool {

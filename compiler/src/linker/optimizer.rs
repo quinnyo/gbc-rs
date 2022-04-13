@@ -24,7 +24,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Opt
                     None
 
                 } else {
-                    Some((*op_code, (entry.offset + entry.size) as i32, &expression, bytes, &entry.inner))
+                    Some((*op_code, (entry.offset + entry.size) as i32, expression, bytes, &entry.inner))
                 }
 
             } else {
@@ -42,9 +42,9 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Opt
     let mut optimized_entries = VecDeque::new();
     let mut optimized_length = 0;
     while i < entries.len() {
-        if let Some((op_code, offset, expression, bytes, inner)) = get_instruction(&entries, i) {
-            let b = get_instruction(&entries, i + 1);
-            let c = get_instruction(&entries, i + 2);
+        if let Some((op_code, offset, expression, bytes, inner)) = get_instruction(entries, i) {
+            let b = get_instruction(entries, i + 1);
+            let c = get_instruction(entries, i + 2);
             if let Some((remove_count, new_entries)) = optimize_instructions(
                 notes,
                 op_code,
@@ -132,6 +132,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Opt
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn optimize_instructions(
     notes: &mut OptimizerNotes,
     op_code: u16,

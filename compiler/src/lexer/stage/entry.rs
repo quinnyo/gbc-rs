@@ -402,7 +402,7 @@ impl EntryStage {
                     Err(inner.error(
                         format!("Re-definition of previously declared constant default \"{}\".", inner.value)
 
-                    ).with_reference(&constant_def, "Original definition was"))
+                    ).with_reference(constant_def, "Original definition was"))
 
                 } else {
                     default_constants.insert(index, inner.clone());
@@ -418,7 +418,7 @@ impl EntryStage {
                 Err(inner.error(
                     format!("Re-definition of previously declared constant \"{}\".", inner.value)
 
-                ).with_reference(&constant_def, "Original definition was"))
+                ).with_reference(constant_def, "Original definition was"))
 
             } else {
                 fixed_constants.insert(index, inner.clone());
@@ -442,7 +442,7 @@ impl EntryStage {
 
     ) -> Result<EntryToken, SourceError> {
 
-        let max_arg_count = gb_cpu::instruction_max_arg_count(&inner.value.as_str());
+        let max_arg_count = gb_cpu::instruction_max_arg_count(inner.value.as_str());
         let mut expression: OptionalDataExpression = None;
 
         let mut layout = Vec::with_capacity(8);
@@ -466,7 +466,7 @@ impl EntryStage {
 
                     // Special casing for conditional instructions where "c" is the carry flag
                     // instead of a register if infront of the comma
-                    if comma_count == 0 && gb_cpu::instruction_is_conditional(&inner.value.as_str()) && name == Register::C{
+                    if comma_count == 0 && gb_cpu::instruction_is_conditional(inner.value.as_str()) && name == Register::C{
                         layout.push(LexerArgument::Flag(Flag::Carry));
 
                     } else {
@@ -619,7 +619,7 @@ impl EntryStage {
 
                             // Msg Payload
                             EntryToken::Data {
-                                inner: inner,
+                                inner,
                                 alignment: DataAlignment::Byte,
                                 endianess: DataEndianess::Little,
                                 storage: DataStorage::Array(bytes),

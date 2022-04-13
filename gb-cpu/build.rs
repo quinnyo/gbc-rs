@@ -66,7 +66,7 @@ fn main() {
 
     // Generate match statement for maximum number of arguments for each mnemonic
     let mut max_arg_counts: Vec<(String, usize)> = max_arg_count.into_iter().collect();
-    max_arg_counts.sort_by(|a, b| a.cmp(&b));
+    max_arg_counts.sort();
     lines.push("pub fn instruction_max_arg_count(mnemonic: &str) -> usize {".to_string());
     lines.push("    match mnemonic {".to_string());
     for (mnemonic, max_arg_count) in max_arg_counts.into_iter() {
@@ -155,8 +155,8 @@ impl OpCode {
             .replace("LD A,(FF00+u8)", "LDH A,(FF00+u8)")
             .replace("HL+", "hli")
             .replace("HL-", "hld")
-            .replace("(", "[")
-            .replace(")", "]")
+            .replace('(', "[")
+            .replace(')', "]")
             .replace("ADD A,", "ADD ")
             .replace("CP A,", "CP ")
             .replace("AND A,", "AND ")
@@ -165,12 +165,11 @@ impl OpCode {
             .replace("ADC A,", "ADC ")
             .replace("SBC A,", "SBC ")
             .replace("SUB A,", "SUB ")
-            .to_ascii_lowercase().split(" ").map(|s| s.to_string()).collect::<Vec<String>>();
+            .to_ascii_lowercase().split(' ').map(|s| s.to_string()).collect::<Vec<String>>();
 
         // Parse instruction arguments
         let args = if layout.len() > 1 {
-            let args = layout[1].split(",").map(|s| s.to_string()).collect::<Vec<String>>();
-            args.into_iter().filter_map(|a| Argument::from(&a, &layout[0])).collect()
+            layout[1].split(',').map(|s| s.to_string()).filter_map(|a| Argument::from(&a, &layout[0])).collect()
 
         } else {
             Vec::new()
@@ -203,10 +202,8 @@ impl OpCode {
                 mappings.insert(key, vec![(*c, code)]);
             }
 
-        } else {
-            if let Some(Argument::ConstantValue(ref c)) = user_argument {
-                mappings.get_mut(&key).unwrap().push((*c, code));
-            }
+        } else if let Some(Argument::ConstantValue(ref c)) = user_argument {
+            mappings.get_mut(&key).unwrap().push((*c, code));
         };
 
         Instruction {

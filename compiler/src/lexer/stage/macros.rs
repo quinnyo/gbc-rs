@@ -358,7 +358,7 @@ impl MacroStage {
             return Err(name_token.error(format!("Re-definition of builtin macro \"{}\".", name_token.symbol())));
 
         // Check for shadowing of macro in same file
-        } else if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.symbol(), Some(name_token.inner().file_index)) {
+        } else if let Some(user_def) = Self::get_macro_by_name(user_macro_defs, name_token.symbol(), Some(name_token.inner().file_index)) {
             return Err(name_token.error(
                 format!("Re-definition of non-global user macro \"{}\".", name_token.symbol())
 
@@ -367,7 +367,7 @@ impl MacroStage {
 
         // Check for shadowing of macro global macro
         if is_exported {
-            if let Some(user_def) = Self::get_macro_by_name(&user_macro_defs, name_token.symbol(), None) {
+            if let Some(user_def) = Self::get_macro_by_name(user_macro_defs, name_token.symbol(), None) {
                 return Err(name_token.error(
                     format!("Re-definition of global user macro \"{}\".", name_token.symbol())
 
@@ -579,22 +579,22 @@ impl MacroStage {
         while let Some(token) = first_tokens.next() {
             if token.is(IncludeType::Name) && first_tokens.peek_is(IncludeType::OpenParen, None) {
                 // Builtin
-                if Self::get_macro_by_name(&builtin_macro_defs, token.symbol(), None).is_some() {
+                if Self::get_macro_by_name(builtin_macro_defs, token.symbol(), None).is_some() {
                     prepass_tokens.push(token);
 
                 // File local lookup
-                } else if Self::get_macro_by_name(&user_macro_defs, token.symbol(), Some(token.inner().file_index)).is_some() {
+                } else if Self::get_macro_by_name(user_macro_defs, token.symbol(), Some(token.inner().file_index)).is_some() {
                     prepass_tokens.push(token);
 
                 // Global lookup
-                } else if Self::get_macro_by_name(&user_macro_defs, token.symbol(), None).is_some() {
+                } else if Self::get_macro_by_name(user_macro_defs, token.symbol(), None).is_some() {
                     prepass_tokens.push(token);
 
                 // Callable label definition
                 } else {
 
                     let mut argument_tokens = Vec::with_capacity(8);
-                    while let Some(token) = first_tokens.next() {
+                    for token in first_tokens.by_ref() {
                         let close = token.is(IncludeType::CloseParen);
                         argument_tokens.push(token);
                         if close {
@@ -646,21 +646,21 @@ impl MacroStage {
             } else if token.is(IncludeType::Name) && tokens.peek_is(IncludeType::OpenParen, None) {
 
                 // Builtin
-                let macro_def = if let Some(def) = Self::get_macro_by_name(&builtin_macro_defs, token.symbol(), None) {
+                let macro_def = if let Some(def) = Self::get_macro_by_name(builtin_macro_defs, token.symbol(), None) {
                     def
 
                 // File local lookup
-                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), Some(token.inner().file_index)) {
+                } else if let Some(def) = Self::get_macro_by_name(user_macro_defs, token.symbol(), Some(token.inner().file_index)) {
                     def
 
                 // Global lookup
-                } else if let Some(def) = Self::get_macro_by_name(&user_macro_defs, token.symbol(), None) {
+                } else if let Some(def) = Self::get_macro_by_name(user_macro_defs, token.symbol(), None) {
                     def
 
                 // Not found
                 } else {
                     let error = token.error(format!("Invocation of undefined macro \"{}\"", token.symbol()));
-                    if let Some(def) = Self::get_macro_by_name_all(&user_macro_defs, token.symbol()) {
+                    if let Some(def) = Self::get_macro_by_name_all(user_macro_defs, token.symbol()) {
                         return Err(error.with_reference(&def.name, "A non-global macro with the same name is defined"));
 
                     } else {
@@ -736,7 +736,7 @@ impl MacroStage {
                     });
 
                     let context = MacroContext {
-                        def: &macro_def,
+                        def: macro_def,
                         args: arg_tokens
                     };
 
@@ -785,6 +785,7 @@ impl MacroStage {
         Ok(tokens_without_macro_calls)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_label_call(
         inner: InnerToken,
         arg_tokens: Vec<Vec<IncludeToken>>,
@@ -829,6 +830,7 @@ impl MacroStage {
         Ok(IncludeToken::ParentLabelCall(inner, arguments))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_builtin_call(
         inner: InnerToken,
         arg_tokens: Vec<Vec<IncludeToken>>,
@@ -988,7 +990,7 @@ impl MacroStage {
             if tokens.peek_is(IncludeType::Comma, None) && paren_depth == 1 {
                 arg_tokens.push(next);
                 tokens.expect(IncludeType::Comma, None, "")?;
-                arguments.push(mem::replace(&mut arg_tokens, Vec::new()));
+                arguments.push(mem::take(&mut arg_tokens));
 
             } else {
                 arg_tokens.push(next);

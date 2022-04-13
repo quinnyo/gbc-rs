@@ -157,7 +157,7 @@ impl EvaluatorContext {
     pub fn resolve_all_constants(&mut self, usage: &mut UsageInformation) -> Result<(), SourceError> {
         let mut names: Vec<ConstantIndex> = self.raw_constants.keys().cloned().collect();
         names.sort_by(|a, b| {
-            a.0.as_str().cmp(&b.0.as_str())
+            a.0.as_str().cmp(b.0.as_str())
         });
 
         for name in names {
@@ -306,11 +306,11 @@ impl EvaluatorContext {
             Expression::Binary { inner, op, left, right } => {
                 let left = self.inner_dyn_resolve(left, usage, address_offset, AccessKind::Reference, outer)?;
                 let right = self.inner_dyn_resolve(right, usage, address_offset, AccessKind::Reference, outer)?;
-                Self::apply_binary_operator(&inner, op, left, right)
+                Self::apply_binary_operator(inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
                 let right = self.inner_dyn_resolve(right, usage, address_offset, AccessKind::Reference, outer)?;
-                Self::apply_unary_operator(&inner, op, right)
+                Self::apply_unary_operator(inner, op, right)
             },
             Expression::Value(value) => {
                 Ok(match value {
@@ -380,7 +380,7 @@ impl EvaluatorContext {
                         inner
                     )?);
                 }
-                Self::execute_builtin_call(&inner, &name, arguments)
+                Self::execute_builtin_call(inner, name, arguments)
             },
             Expression::ParentLabelCall { inner, id, .. } => {
                 let outer = inner;
@@ -430,11 +430,11 @@ impl EvaluatorContext {
             Expression::Binary { inner, op, left, right } => {
                 let left = self.inner_const_resolve(constant_stack, left, usage, outer)?;
                 let right = self.inner_const_resolve(constant_stack, right, usage, outer)?;
-                Self::apply_binary_operator(&inner, op, left, right)
+                Self::apply_binary_operator(inner, op, left, right)
             },
             Expression::Unary { inner, op, right } => {
                 let right = self.inner_const_resolve(constant_stack, right, usage, outer)?;
-                Self::apply_unary_operator(&inner, op, right)
+                Self::apply_unary_operator(inner, op, right)
             },
             Expression::Value(value) => {
                 Ok(match value {
@@ -510,7 +510,7 @@ impl EvaluatorContext {
                         inner
                     )?);
                 }
-                Self::execute_builtin_call(&inner, &name, arguments)
+                Self::execute_builtin_call(inner, name, arguments)
             },
             Expression::ParentLabelCall { .. } => {
                 unreachable!("Invalid constant expression containing ParentLabelCall");
@@ -535,6 +535,7 @@ impl EvaluatorContext {
         error
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn declare_constant_inline(
         &mut self,
         constant_stack: &[&Symbol],

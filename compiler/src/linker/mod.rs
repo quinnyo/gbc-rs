@@ -212,7 +212,7 @@ impl Linker {
         entries
     }
 
-    pub fn context<'a>(&'a self) -> LinkerContext<'a> {
+    pub fn context(&self) -> LinkerContext {
         LinkerContext {
             files: &self.files[..],
             constants: &self.context.raw_constants,
@@ -245,7 +245,7 @@ impl Linker {
 
                 // Append existing segment
                 if !current_segment.name.is_empty() {
-                    let mut segment = mem::replace(&mut current_segment, SegmentUsage::default());
+                    let mut segment = mem::take(&mut current_segment);
                     segment.name = if segment.bank > 0 {
                         format!("{}[{}]", segment.name, segment.bank)
 
@@ -410,7 +410,7 @@ impl Linker {
 
 impl Linker {
 
-    fn setup_sections(sections: &mut Vec<Section>) -> Result<(), SourceError> {
+    fn setup_sections(sections: &mut [Section]) -> Result<(), SourceError> {
         // Sort sections by base address
         sections.sort_by(|a, b| {
             if a.start_address == b.start_address {
@@ -451,7 +451,7 @@ impl Linker {
         Ok(())
     }
 
-    fn optimize_instructions(sections: &mut Vec<Section>, notes: &mut OptimizerNotes, strip_debug: bool) -> bool {
+    fn optimize_instructions(sections: &mut [Section], notes: &mut OptimizerNotes, strip_debug: bool) -> bool {
         let mut optimizations_applied = false;
         for s in sections.iter_mut() {
             if s.is_rom {

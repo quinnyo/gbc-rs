@@ -185,9 +185,9 @@ impl fmt::Display for LexerArgument {
 }
 
 
-impl Into<LexerArgument> for Argument {
-    fn into(self) -> LexerArgument {
-        match self {
+impl From<Argument> for LexerArgument {
+    fn from(arg: Argument) -> LexerArgument {
+        match arg {
             Argument::MemoryLookupByteValue => LexerArgument::MemoryLookupValue,
             Argument::MemoryLookupWordValue => LexerArgument::MemoryLookupValue,
             Argument::MemoryLookupRegister(r) => LexerArgument::MemoryLookupRegister(r),

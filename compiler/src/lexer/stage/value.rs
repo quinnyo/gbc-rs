@@ -112,6 +112,7 @@ impl LexerStage for ValueStage {
 
 impl ValueStage {
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_tokens(
         parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
         parent_labels_names: &mut Vec<Symbol>,
@@ -302,7 +303,7 @@ impl ValueStage {
                         Self::parse_namespace_member(
                             &mut tokens,
                             namespaces,
-                            &data,
+                            data,
                             unique_label_id,
                             inner
                         )?
@@ -380,7 +381,7 @@ impl ValueStage {
 
         // Convert name tokens into corresponding parent label references
         if resolve_labels {
-            LabelResolver::convert_parent_label_refs(&parent_labels, &namespaces, &mut value_tokens)?;
+            LabelResolver::convert_parent_label_refs(parent_labels, namespaces, &mut value_tokens)?;
         }
 
         Ok(value_tokens)
@@ -426,6 +427,7 @@ impl ValueStage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_parent_label(
         tokens: &mut TokenIterator<MacroToken>,
         parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
@@ -487,7 +489,7 @@ impl ValueStage {
             tokens.expect(MacroTokenType::OpenParen, None, "when parsing label definition")?;
 
             let mut arguments = Vec::with_capacity(2);
-            while let Some(token) = tokens.next() {
+            for token in tokens.by_ref() {
                 if token.is(MacroTokenType::Register) {
                     let reg = Register::from(token.inner().value.as_str());
                     if reg.is_loadable() {
@@ -521,7 +523,7 @@ impl ValueStage {
     fn parse_child_label(
         tokens: &mut TokenIterator<MacroToken>,
         parent_labels: &mut HashMap<ParentLabelIndex, (InnerToken, usize)>,
-        parent_labels_names: &mut Vec<Symbol>,
+        parent_labels_names: &mut [Symbol],
         unique_label_id: &mut usize,
         is_argument: bool,
         child_labels: &mut HashMap<ChildLabelIndex, InnerToken>,

@@ -8,10 +8,7 @@ pub fn instruction_list() -> Vec<Instruction> {
 }
 
 pub fn instruction_is_conditional(mnemonic: &str) -> bool {
-    match mnemonic {
-        "jr" | "jp" | "call" | "ret" => true,
-        _ => false
-    }
+    matches!(mnemonic, "jr" | "jp" | "call" | "ret")
 }
 
 // Include parsed instructions from build script

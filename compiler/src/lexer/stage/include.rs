@@ -127,7 +127,7 @@ impl IncludeStage {
         state.files.push(LexerFile::new(
             state.files.len(),
             contents,
-            file_path.clone(),
+            file_path,
             Vec::with_capacity(8)
         ));
 
@@ -144,7 +144,7 @@ impl IncludeStage {
     ) -> Result<(), SourceError> {
         let (mut gen, file_index) = {
             let file = state.files.last().unwrap();
-            (TokenGenerator::new(&file, &file.contents), file.index)
+            (TokenGenerator::new(file, &file.contents), file.index)
         };
         while gen.peek().is_some() {
             if let Some(token) = Self::match_token(&mut gen, false)? {
@@ -548,14 +548,14 @@ impl IncludeStage {
     }
 
     fn collect_inner_name(gen: &mut TokenGenerator, inclusive: bool) -> Result<InnerToken, SourceError> {
-        Ok(gen.collect(inclusive, |c, _| {
+        gen.collect(inclusive, |c, _| {
             if let 'a'..='z' | 'A'..='Z' | '_' | '0'..='9' = c {
                 TokenChar::Valid(c)
 
             } else {
                 TokenChar::Invalid
             }
-        })?)
+        })
     }
 
     fn collect_number_literal(gen: &mut TokenGenerator) -> Result<IncludeToken, SourceError> {

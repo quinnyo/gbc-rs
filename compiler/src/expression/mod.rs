@@ -67,17 +67,11 @@ impl Expression {
     }
 
     pub fn is_register(&self) -> bool {
-        match self {
-            Expression::RegisterArgument { .. } => true,
-            _ => false
-        }
+        matches!(self, Expression::RegisterArgument { .. })
     }
 
     pub fn is_call(&self) -> bool {
-        match self {
-            Expression::ParentLabelCall { .. } => true,
-            _ => false
-        }
+        matches!(self, Expression::ParentLabelCall { .. })
     }
 
     pub fn replace_constant(&mut self, name: &Symbol, value: &ExpressionValue) {
@@ -305,18 +299,11 @@ impl Operator {
     }
 
     pub fn is_unary(&self) -> bool {
-        match self {
-            Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate => true,
-            _ => false
-        }
+        matches!(self, Operator::Plus | Operator::Minus | Operator::LogicalNot | Operator::BitNegate)
     }
 
     pub fn is_unary_exclusive(&self) -> bool {
-        match self {
-            Operator::LogicalNot | Operator::BitNegate => true,
-            _ => false
-        }
+        matches!(self, Operator::LogicalNot | Operator::BitNegate)
     }
-
 }
 

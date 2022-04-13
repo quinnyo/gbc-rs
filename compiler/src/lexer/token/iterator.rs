@@ -57,9 +57,6 @@ impl<T: LexerToken> TokenIterator<T> {
                             Err(token.error(format!("Unexpected token value \"{:?}\" {}, expected a value of \"{:?}\" instead.", token.symbol(), message.into(), symbol)))
                         }
 
-                    } else if let Some(symbol) = symbol {
-                        Err(token.error(format!("Unexpected token \"{:?}\" {}, expected \"{}\" instead.", token.typ(), message.into(), symbol)))
-
                     } else {
                         Ok(token)
                     }

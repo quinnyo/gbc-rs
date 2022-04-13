@@ -553,18 +553,16 @@ impl Section {
                 debug_assert_eq!(self.is_rom, bytes.is_some());
 
             // Resolve Instruction Argument Expressions
-            } else if let EntryData::Instruction { ref op_code, ref mut bytes, ref expression, .. } = entry.data {
-                if let Some(expr) = expression {
-                    *bytes = Self::resolve_instruction_argument_to_bytes(
-                        &entry.inner,
-                        context,
-                        usage,
-                        *op_code,
-                        expr,
-                        Some(end_of_instruction)
+            } else if let EntryData::Instruction { ref op_code, ref mut bytes, expression: Some(ref expr), .. } = entry.data {
+                *bytes = Self::resolve_instruction_argument_to_bytes(
+                    &entry.inner,
+                    context,
+                    usage,
+                    *op_code,
+                    expr,
+                    Some(end_of_instruction)
 
-                    )?.expect("Instruction Argument failed to resolve");
-                }
+                )?.expect("Instruction Argument failed to resolve");
             }
         }
         Ok(())
@@ -1717,7 +1715,7 @@ mod test {
         ]);
         assert_eq!(linker_section_offsets(linker("SECTION ROM0[$2000]\nDS16 5\nDS8 3\nDS 4\nDS 10\nglobal_label:")), vec![
             vec![
-                (8192 + 0, 5),
+                (8192, 5),
                 (8192 + 5, 3),
                 (8192 + 8, 4),
                 (8192 + 12, 10),
@@ -1821,13 +1819,13 @@ mod test {
 
     #[test]
     fn test_section_instructions_with_arg_constants() {
-        for (bit, op) in vec![(0, 71), (1, 79), (2, 87), (3, 95), (4, 103), (5, 111), (6, 119), (7, 127)] {
+        for (bit, op) in &[(0, 71), (1, 79), (2, 87), (3, 95), (4, 103), (5, 111), (6, 119), (7, 127)] {
             assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nbit {},a", bit))), vec![
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 327,
                         expression: None,
-                        bytes: vec![203, op],
+                        bytes: vec![203, *op],
                         volatile: false,
                         debug_only: false
                     })
@@ -1835,13 +1833,13 @@ mod test {
             ]);
         }
 
-        for (bit, op) in vec![(0, 135), (1, 143), (2, 151), (3, 159), (4, 167), (5, 175), (6, 183), (7, 191)] {
+        for (bit, op) in &[(0, 135), (1, 143), (2, 151), (3, 159), (4, 167), (5, 175), (6, 183), (7, 191)] {
             assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nres {},a", bit))), vec![
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 391,
                         expression: None,
-                        bytes: vec![203, op],
+                        bytes: vec![203, *op],
                         volatile: false,
                         debug_only: false
                     })
@@ -1849,13 +1847,13 @@ mod test {
             ]);
         }
 
-        for (bit, op) in vec![(0, 199), (1, 207), (2, 215), (3, 223), (4, 231), (5, 239), (6, 247), (7, 255)] {
+        for (bit, op) in &[(0, 199), (1, 207), (2, 215), (3, 223), (4, 231), (5, 239), (6, 247), (7, 255)] {
             assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nset {},a", bit))), vec![
                 vec![
                     (2, EntryData::Instruction {
                         op_code: 455,
                         expression: None,
-                        bytes: vec![203, op],
+                        bytes: vec![203, *op],
                         volatile: false,
                         debug_only: false
                     })
@@ -1863,13 +1861,13 @@ mod test {
             ]);
         }
 
-        for (rst, op) in vec![(0, 199), (8, 207), (16, 215), (24, 223), (32, 231), (40, 239), (48, 247), (56, 255)] {
+        for (rst, op) in &[(0, 199), (8, 207), (16, 215), (24, 223), (32, 231), (40, 239), (48, 247), (56, 255)] {
             assert_eq!(linker_section_entries(linker(format!("SECTION ROM0\nrst {}", rst))), vec![
                 vec![
                     (1, EntryData::Instruction {
                         op_code: 199,
                         expression: None,
-                        bytes: vec![op],
+                        bytes: vec![*op],
                         volatile: false,
                         debug_only: false
                     })

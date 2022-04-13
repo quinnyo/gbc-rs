@@ -1,7 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::env;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::io::{Error as IOError, Read, Write};
 use std::cell::RefCell;
@@ -61,13 +61,13 @@ impl ProjectReader {
         Ok((full_path.clone(), contents))
     }
 
-    fn write_file_inner(&self, path: &PathBuf, data: String) -> Result<(), IOError> {
+    fn write_file_inner(&self, path: &Path, data: String) -> Result<(), IOError> {
         let mut file = File::create(path)?;
         file.write_all(&data.into_bytes())?;
         Ok(())
     }
 
-    fn write_binary_file_inner(&self, path: &PathBuf, data: Vec<u8>) -> Result<(), IOError> {
+    fn write_binary_file_inner(&self, path: &Path, data: Vec<u8>) -> Result<(), IOError> {
         let mut file = File::create(path)?;
         file.write_all(&data)?;
         Ok(())
@@ -106,7 +106,7 @@ impl FileReader for ProjectReader {
 
     }
 
-    fn read_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, String), FileError> {
+    fn read_file(&self, parent: Option<&PathBuf>, child: &Path) -> Result<(PathBuf, String), FileError> {
         let path = Self::resolve_path(&self.base, parent, child);
         let overlays = self.overlay.borrow();
         if let Some(overlay) = overlays.get(&path) {
@@ -122,7 +122,7 @@ impl FileReader for ProjectReader {
         }
     }
 
-    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &PathBuf) -> Result<(PathBuf, Vec<u8>), FileError> {
+    fn read_binary_file(&self, parent: Option<&PathBuf>, child: &Path) -> Result<(PathBuf, Vec<u8>), FileError> {
         let path = Self::resolve_path(&self.base, parent, child);
         self.read_binary_file_inner(&path).map_err(|io| {
             FileError {
@@ -134,23 +134,22 @@ impl FileReader for ProjectReader {
 }
 
 impl FileWriter for ProjectReader {
-    fn write_file(&mut self, path: &PathBuf, data: String) -> Result<(), FileError> {
+    fn write_file(&mut self, path: &Path, data: String) -> Result<(), FileError> {
         self.write_file_inner(path, data).map_err(|io| {
             FileError {
                 io,
-                path: path.clone()
+                path: path.to_path_buf()
             }
         })
     }
 
-    fn write_binary_file(&mut self, path: &PathBuf, data: Vec<u8>) -> Result<(), FileError> {
+    fn write_binary_file(&mut self, path: &Path, data: Vec<u8>) -> Result<(), FileError> {
         self.write_binary_file_inner(path, data).map_err(|io| {
             FileError {
                 io,
-                path: path.clone()
+                path: path.to_path_buf()
             }
         })
     }
 }
-
 

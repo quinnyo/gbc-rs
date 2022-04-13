@@ -346,10 +346,6 @@ impl Symbol {
             Symbol::Raw(s) => s.as_str()
         }
     }
-
-    pub fn to_string(&self) -> String {
-        self.as_str().to_string()
-    }
 }
 
 impl fmt::Display for Symbol {
