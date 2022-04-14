@@ -360,7 +360,7 @@ retx    b
 retx    2
 ```
 
-#### **jc*
+#### **jc**
 
 Jumps based on a compare (==, !=, >=, <=, >, <) with the `Accumulator`:
 
