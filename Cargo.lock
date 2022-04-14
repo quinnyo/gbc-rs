@@ -200,7 +200,7 @@ version = "0.1.0"
 
 [[package]]
 name = "gbc"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "clap",
  "compiler",

@@ -1,8 +1,11 @@
 [package]
 name = "lsp"
-version = "0.7.3"
+version = "0.8.0"
 authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
-edition = "2018"
+edition = "2021"
+
+[workspace]
+resolver = "2"
 
 [dependencies]
 toml = "0.5.3"

@@ -13,9 +13,9 @@ members = [
 
 [package]
 name = "gbc"
-version = "0.7.3"
+version = "0.8.0"
 authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 toml = "0.5.3"
@@ -27,7 +27,7 @@ project = { version = "0.5.0", path = "./project" }
 clap = "2.33.0"
 
 [profile.dev.package.compiler]
-opt-level = 3
+# opt-level = 3
 
 [profile.release]
 lto = 'fat'
