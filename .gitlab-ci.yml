@@ -8,7 +8,7 @@ test:
   stage: test
   script:
   - rustc --version && cargo --version
-  - cd compiler
+  - cd crates/compiler
   - cargo test --all --verbose
   - cd ../gbt
   - cargo test --all --verbose
@@ -18,9 +18,9 @@ linux-musl:
   script:
     - cargo build --release --target x86_64-unknown-linux-musl
     - strip -S target/x86_64-unknown-linux-musl/release/gbc
-    - cd gbt
+    - cd crates/gbt
     - cargo build --release --target x86_64-unknown-linux-musl
-    - cd ..
+    - cd ../..
     - strip -S target/x86_64-unknown-linux-musl/release/gbt
   artifacts:
     paths:
@@ -31,7 +31,7 @@ windows-mingw:
   stage: build
   script:
     - cargo build --release --target x86_64-pc-windows-gnu
-    - cd gbt
+    - cd crates/gbt
     - cargo build --release --target x86_64-pc-windows-gnu
   artifacts:
     paths:
