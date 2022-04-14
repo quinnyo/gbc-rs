@@ -150,11 +150,11 @@ impl GBCSymbol {
 
     pub fn typ(&self) -> &str {
         match self.kind {
-            SymbolKind::Constant => "constant",
-            SymbolKind::Constructor => "macro",
-            SymbolKind::Function => "label",
-            SymbolKind::Variable => "variable",
-            SymbolKind::Field => "label",
+            SymbolKind::CONSTANT => "constant",
+            SymbolKind::CONSTRUCTOR => "macro",
+            SymbolKind::FUNCTION => "label",
+            SymbolKind::VARIABLE => "variable",
+            SymbolKind::FIELD => "label",
             _ => "entry"
         }
     }
@@ -180,11 +180,11 @@ impl GBCSymbol {
             range: self.location.range,
             selection_range: self.location.range,
             detail: Some(match self.kind {
-                SymbolKind::Constant => format!("= {}", self.value),
-                SymbolKind::Constructor => format!("MACRO{}", self.value),
-                SymbolKind::Function => format!("{} ({})", self.value, info),
-                SymbolKind::Variable => format!("{} ({})", self.value, info),
-                SymbolKind::Field => format!("{} ({})", self.value, info),
+                SymbolKind::CONSTANT => format!("= {}", self.value),
+                SymbolKind::CONSTRUCTOR => format!("MACRO{}", self.value),
+                SymbolKind::FUNCTION => format!("{} ({})", self.value, info),
+                SymbolKind::VARIABLE => format!("{} ({})", self.value, info),
+                SymbolKind::FIELD => format!("{} ({})", self.value, info),
                 _ => self.value
             }),
             children: Some(self.children.into_iter().map(GBCSymbol::into_document_symbol).collect())

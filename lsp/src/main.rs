@@ -30,7 +30,7 @@ pub struct CommandDocumentParams {
     text_document: TextDocumentIdentifier
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteMemoryParams {
     address: String,
@@ -64,7 +64,7 @@ impl LanguageServer for Backend {
             server_info: None,
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::Full
+                    TextDocumentSyncKind::FULL
                 )),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -136,7 +136,7 @@ impl LanguageServer for Backend {
             Ok(Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
                     language: "gbc".to_string(),
-                    value: detail.to_string()
+                    value: detail
                 })),
                 range: Some(location.range)
             }))
@@ -205,7 +205,7 @@ impl LanguageServer for Backend {
                 }).await;
             },
             "emulator/start" => {
-                let options = params.arguments.iter().nth(1).map(|v| serde_json::from_value::<ModelParams>(v.clone()));
+                let options = params.arguments.get(1).map(|v| serde_json::from_value::<ModelParams>(v.clone()));
                 log::info!("Start params: {:?} -> {:?}", params.arguments, options);
                 if let Some(Ok(params)) = options {
                     self.analyzer.emulator_start(Some(params.model)).await;
@@ -235,8 +235,7 @@ async fn run_server() {
             analyzer: Analyzer::new(Arc::new(client))
         }
     });
-    Server::new(stdin, stdout)
-        .interleave(messages)
+    Server::new(stdin, stdout, messages)
         .serve(service)
         .await;
 

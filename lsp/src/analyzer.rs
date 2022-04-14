@@ -141,7 +141,7 @@ impl Analyzer {
         let workspace_path = self.state.workspace_path().clone();
         if let Some(workspace_path) = workspace_path {
             self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
-                symbol.kind != SymbolKind::Method
+                symbol.kind != SymbolKind::METHOD
 
             }).map(GBCSymbol::into_symbol_information).collect()
 
@@ -155,7 +155,7 @@ impl Analyzer {
         let uri = Url::from_file_path(current_file).unwrap();
         self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
             // Return if we either want all symbols or the symbol originates from the current file
-            symbol.location.uri == uri && symbol.kind != SymbolKind::Method
+            symbol.location.uri == uri && symbol.kind != SymbolKind::METHOD
 
         }).map(GBCSymbol::into_document_symbol).collect()
     }
@@ -167,33 +167,33 @@ impl Analyzer {
             symbol.is_global || Some(&symbol.location.uri) == uri.as_ref()
 
         }).flat_map(|symbol| match symbol.kind {
-            SymbolKind::Constant => Some(CompletionItem {
+            SymbolKind::CONSTANT => Some(CompletionItem {
                 label: symbol.name,
-                kind: Some(CompletionItemKind::Constant),
+                kind: Some(CompletionItemKind::CONSTANT),
                 detail: Some(format!("= {}", symbol.value)),
                 .. CompletionItem::default()
             }),
-            SymbolKind::Constructor => Some(CompletionItem {
+            SymbolKind::CONSTRUCTOR => Some(CompletionItem {
                 label: symbol.name,
-                kind: Some(CompletionItemKind::Constructor),
+                kind: Some(CompletionItemKind::CONSTRUCTOR),
                 detail: Some(format!("MACRO{}", symbol.value)),
                 .. CompletionItem::default()
             }),
-            SymbolKind::Function => Some(CompletionItem {
+            SymbolKind::FUNCTION => Some(CompletionItem {
                 label: symbol.name,
-                kind: Some(CompletionItemKind::Function),
+                kind: Some(CompletionItemKind::FUNCTION),
                 detail: Some(format!("@ {}", symbol.value)),
                 .. CompletionItem::default()
             }),
-            SymbolKind::Variable => Some(CompletionItem {
+            SymbolKind::VARIABLE => Some(CompletionItem {
                 label: symbol.name,
-                kind: Some(CompletionItemKind::Variable),
+                kind: Some(CompletionItemKind::VARIABLE),
                 detail: Some(format!("@ {}", symbol.value)),
                 .. CompletionItem::default()
             }),
-            SymbolKind::Field => Some(CompletionItem {
+            SymbolKind::FIELD => Some(CompletionItem {
                 label: symbol.name,
-                kind: Some(CompletionItemKind::Field),
+                kind: Some(CompletionItemKind::FIELD),
                 detail: Some(format!("@ {}", symbol.value)),
                 .. CompletionItem::default()
             }),
@@ -209,21 +209,21 @@ impl Analyzer {
             let location = symbol.location;
             let is_global = symbol.is_global;
             let m = match symbol.kind {
-                SymbolKind::Namespace => {
+                SymbolKind::NAMESPACE => {
                     Some(format!("SECTION \"{}\",{}", symbol.name, symbol.value))
                 },
-                SymbolKind::Constant => {
+                SymbolKind::CONSTANT => {
                     Some(format!("CONST {}", symbol.name))
                 },
                 // TODO show expanded tokens, need to record expanded entries (already needed above)
                 // and then be able to to_string() them all again into source code
-                SymbolKind::Constructor => {
+                SymbolKind::CONSTRUCTOR => {
                     Some(format!("MACRO {}{}", symbol.name, symbol.value))
                 },
-                SymbolKind::Function => {
+                SymbolKind::FUNCTION => {
                     Some(format!("{}: ; ({})", symbol.name, info))
                 },
-                SymbolKind::Variable => {
+                SymbolKind::VARIABLE => {
                     Some(format!("{}: {}; ({}){}", symbol.name, if symbol.width == 1 {
                         "DB"
 
@@ -245,7 +245,7 @@ impl Analyzer {
                         "".to_string()
                     }))
                 },
-                SymbolKind::Field => {
+                SymbolKind::FIELD => {
                     Some(format!("{}:", symbol.name))
                 },
                 _ => None
@@ -263,7 +263,6 @@ impl Analyzer {
     }
 
     pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<GBCSymbol> {
-        let current_file = PathBuf::from(current_file);
         let uri = Url::from_file_path(&current_file).unwrap();
         if let Some((token, _)) = Parser::get_token(&self.state, current_file.clone(), line, col) {
             let symbol_name = token.inner().value.to_string();
@@ -271,7 +270,7 @@ impl Analyzer {
             symbols.into_iter().find(|symbol| {
                 // For child labels only search in the current file
                 symbol.name == symbol_name &&
-                    (symbol.kind != SymbolKind::Method || symbol.location.uri == uri)
+                    (symbol.kind != SymbolKind::METHOD || symbol.location.uri == uri)
             })
 
         } else {
@@ -310,15 +309,15 @@ impl Analyzer {
         let emulator_values = self.query_symbol_memory_values(&symbol_refs[..]);
 
         let mut hints: Vec<InlayHint> = symbols.into_iter().enumerate().flat_map(|(i, symbol)| match symbol.kind {
-            SymbolKind::Namespace => Some(InlayHint {
+            SymbolKind::NAMESPACE => Some(InlayHint {
                 kind: InlayKind::TypeHint,
-                label: format!("{}", symbol.value),
+                label: symbol.value.to_string(),
                 range: Range {
                     start: symbol.location.range.start,
                     end: symbol.location.range.start
                 }
             }),
-            SymbolKind::Constant => Some(InlayHint {
+            SymbolKind::CONSTANT => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
@@ -326,7 +325,7 @@ impl Analyzer {
                     end: symbol.location.range.start
                 }
             }),
-            SymbolKind::Constructor => Some(InlayHint {
+            SymbolKind::CONSTRUCTOR => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("MACRO{} ({})", symbol.value, symbol.info()),
                 range: Range {
@@ -334,7 +333,7 @@ impl Analyzer {
                     end: symbol.location.range.start
                 }
             }),
-            SymbolKind::Function => Some(InlayHint {
+            SymbolKind::FUNCTION => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
@@ -342,7 +341,7 @@ impl Analyzer {
                     end: symbol.location.range.start
                 }
             }),
-            SymbolKind::Variable => {
+            SymbolKind::VARIABLE => {
                 let emulator_value = if let Some(value) = emulator_values[i] {
                     if symbol.width == 1 {
                         format!("  ${:0>2X} | {: <5} @ ", value, value)
@@ -363,7 +362,7 @@ impl Analyzer {
                     }
                 })
             },
-            SymbolKind::Field => Some(InlayHint {
+            SymbolKind::FIELD => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: format!("{} ({})", symbol.value, symbol.info()),
                 range: Range {
@@ -442,7 +441,7 @@ impl Analyzer {
             Parser::link(workspace_path, self.state.clone()).await;
             self.state.publish_diagnostics().await;
         }
-        self.state.symbols_cloned().unwrap_or_else(Vec::new)
+        self.state.symbols_cloned().unwrap_or_default()
     }
 
     fn query_symbol_memory_values(&self, symbols: &[&GBCSymbol]) -> Vec<Option<u16>> {

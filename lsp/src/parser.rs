@@ -83,7 +83,7 @@ impl Parser {
                                 character: col as u32
                             }
                         },
-                        severity: Some(DiagnosticSeverity::Error),
+                        severity: Some(DiagnosticSeverity::ERROR),
                         message,
                         code: None,
                         code_description: None,
@@ -121,7 +121,7 @@ impl Parser {
         }
 
         // Trigger new inlay hint fetching
-        state.client().send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+        state.client().send_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
         Some(())
     }
 
@@ -283,7 +283,7 @@ impl Parser {
             for entry in entries {
                 if entry.is_rom() {
                     let location = Self::location_from_file_index(
-                        &context.files,
+                        context.files,
                         entry.inner.file_index,
                         entry.inner.start_index,
                         entry.inner.end_index
@@ -319,13 +319,13 @@ impl Parser {
             if let Some(result) = context.constant_values.get(index) {
                 let references = context.constant_usage.get(index).map(|refs| {
                     refs.iter().map(|(file_index, start_index, macro_call_id)| {
-                        Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+                        Self::resolve_reference(linker, *file_index, *start_index, *macro_call_id, name.len())
 
                     }).collect()
 
                 }).unwrap_or_else(Vec::new);
                 symbols.push(GBCSymbol {
-                    kind: SymbolKind::Constant,
+                    kind: SymbolKind::CONSTANT,
                     is_global: index.1.is_none(),
                     in_macro: token.macro_call_id.is_some(),
                     location: Self::location_from_file_index(context.files, constant.inner.file_index, constant.inner.start_index, constant.inner.end_index),
@@ -347,7 +347,7 @@ impl Parser {
         // Sections
         for section in &linker.sections {
             symbols.push(GBCSymbol {
-                kind: SymbolKind::Namespace,
+                kind: SymbolKind::NAMESPACE,
                 is_global: false,
                 in_macro: section.inner.macro_call_id.is_some(),
                 location: Self::location_from_file_index(context.files, section.inner.file_index, section.inner.start_index, section.inner.end_index),
@@ -371,7 +371,7 @@ impl Parser {
             if !def.is_label {
                 // TODO also list builtin macros
                 symbols.push(GBCSymbol {
-                    kind: SymbolKind::Constructor,
+                    kind: SymbolKind::CONSTRUCTOR,
                     is_global: def.is_exported,
                     in_macro: false,
                     location: Self::location_from_file_index(context.files, def.name.file_index, def.name.start_index, def.name.end_index),
@@ -390,7 +390,7 @@ impl Parser {
 
                     }).map(|call| {
                         let name = call.name();
-                        Self::resolve_reference(&linker, name.file_index, name.start_index, name.macro_call_id, name.value.as_str().len())
+                        Self::resolve_reference(linker, name.file_index, name.start_index, name.macro_call_id, name.value.as_str().len())
 
                     }).collect(),
                     jumps: Vec::new(),
@@ -416,7 +416,7 @@ impl Parser {
                 if let EntryData::Label { .. } = &entry.data {
 
                     let mut children = Vec::with_capacity(16);
-                    let mut kind = SymbolKind::Function;
+                    let mut kind = SymbolKind::FUNCTION;
                     let mut data_size = 0;
                     while let Some(SectionEntry { size, data, inner, .. }) = entries.peek() {
 
@@ -431,7 +431,7 @@ impl Parser {
                         // Child labels
                         if let EntryData::Label { is_local: true, name, .. } = data {
                             let mut label = GBCSymbol {
-                                kind: SymbolKind::Method,
+                                kind: SymbolKind::METHOD,
                                 is_global: false,
                                 in_macro: inner.macro_call_id.is_some(),
                                 location: Self::location_from_file_index(context.files, inner.file_index, inner.start_index, inner.end_index),
@@ -460,7 +460,7 @@ impl Parser {
                                 let e = macro_call_sizes.entry(id).or_insert(0);
                                 *e += b.len();
                             }
-                            kind = SymbolKind::Field;
+                            kind = SymbolKind::FIELD;
                             data_size += b.len();
                             entries.next();
 
@@ -471,7 +471,7 @@ impl Parser {
                                 *e += *size;
                             }
                             data_size = *size;
-                            kind = SymbolKind::Variable;
+                            kind = SymbolKind::VARIABLE;
                             entries.next();
                             break;
 
@@ -500,7 +500,7 @@ impl Parser {
 
                             let references = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().filter(|(_, _, _, access)| *access == AccessKind::Reference).map(|(file_index, start_index, macro_call_id, _)| {
-                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+                                    Self::resolve_reference(linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
 
@@ -508,7 +508,7 @@ impl Parser {
 
                             let calls = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().filter(|(_, _, _, access)| *access == AccessKind::Call).map(|(file_index, start_index, macro_call_id, _)| {
-                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+                                    Self::resolve_reference(linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
 
@@ -516,7 +516,7 @@ impl Parser {
 
                             let jumps = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().filter(|(_, _, _, access)| *access == AccessKind::Jump).map(|(file_index, start_index, macro_call_id, _)| {
-                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+                                    Self::resolve_reference(linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
 
@@ -524,7 +524,7 @@ impl Parser {
 
                             let reads = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().filter(|(_, _, _, access)| *access == AccessKind::MemoryRead).map(|(file_index, start_index, macro_call_id, _)| {
-                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+                                    Self::resolve_reference(linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
 
@@ -532,7 +532,7 @@ impl Parser {
 
                             let writes = context.label_usage.get(label_id).map(|refs| {
                                 refs.iter().filter(|(_, _, _, access)| *access == AccessKind::MemoryWrite).map(|(file_index, start_index, macro_call_id, _)| {
-                                    Self::resolve_reference(&linker, *file_index, *start_index, *macro_call_id, name.len())
+                                    Self::resolve_reference(linker, *file_index, *start_index, *macro_call_id, name.len())
 
                                 }).collect()
 
@@ -622,7 +622,7 @@ impl Parser {
 
     fn optimizations(linker: &Linker) -> Optimizations {
         let context = linker.context();
-        context.optimizations.into_iter().filter(|(inner, _)| {
+        context.optimizations.iter().filter(|(inner, _)| {
             inner.macro_call_id.is_none()
 
         }).map(|(inner, note)| {
@@ -640,14 +640,14 @@ impl Parser {
         for symbol in symbols {
 
             // Record constants for later use
-            if symbol.kind == SymbolKind::Constant {
+            if symbol.kind == SymbolKind::CONSTANT {
                 constants.push(symbol);
             }
 
             // Ignore Sections, child labels, symbols inside macros, symbols prefixed with _ and symbols inside a
             // library folder
-            if symbol.kind == SymbolKind::Namespace
-                || symbol.kind == SymbolKind::Method
+            if symbol.kind == SymbolKind::NAMESPACE
+                || symbol.kind == SymbolKind::METHOD
                 || symbol.in_macro
                 || symbol.name.starts_with('_')
                 || symbol.location.uri.path().contains("lib") {
@@ -658,8 +658,8 @@ impl Parser {
             if symbol.references.is_empty() && symbol.calls.is_empty() && symbol.reads.is_empty() && symbol.writes.is_empty() && symbol.jumps.is_empty() {
                 lints.push((symbol.location.uri.clone(), Diagnostic {
                     message: format!("unused {}", symbol.typ()),
-                    range: symbol.location.range.clone(),
-                    severity: Some(DiagnosticSeverity::Warning),
+                    range: symbol.location.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
                     .. Diagnostic::default()
                 }));
 
@@ -673,8 +673,8 @@ impl Parser {
                 if outer_refs + outer_calls + outer_jumps + outer_reads + outer_writes == 0 {
                     lints.push((symbol.location.uri.clone(), Diagnostic {
                         message: format!("{} never used outside current file", symbol.typ()),
-                        range: symbol.location.range.clone(),
-                        severity: Some(DiagnosticSeverity::Warning),
+                        range: symbol.location.range,
+                        severity: Some(DiagnosticSeverity::WARNING),
                         .. Diagnostic::default()
                     }));
                 }

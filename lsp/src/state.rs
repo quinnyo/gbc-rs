@@ -156,39 +156,39 @@ impl State {
         }
     }
 
-    pub fn emulator<'a>(&'a self) -> MutexGuard<'a, Option<Emulator>> {
+    pub fn emulator(&self) -> MutexGuard<Option<Emulator>> {
         self.emulator.lock().expect("Emulator Lock failed")
     }
 
-    pub fn status<'a>(&'a self) -> MutexGuard<'a, Option<EmulatorStatus>> {
+    pub fn status(&self) -> MutexGuard<Option<EmulatorStatus>> {
         self.status.lock().expect("Status Lock failed")
     }
 
-    pub fn error<'a>(&'a self) -> MutexGuard<'a, Option<Error>> {
+    pub fn error(&self) -> MutexGuard<Option<Error>> {
         self.error.lock().expect("Error Lock failed")
     }
 
-    pub fn workspace_path<'a>(&'a self) -> MutexGuard<'a, Option<PathBuf>> {
+    pub fn workspace_path(&self) -> MutexGuard<Option<PathBuf>> {
         self.workspace_path.lock().expect("WorkspacePath Lock failed")
     }
 
-    pub fn diagnostics<'a>(&'a self) -> MutexGuard<'a, DiagnosticsMap> {
+    pub fn diagnostics(&self) -> MutexGuard<DiagnosticsMap> {
         self.diagnostics.lock().expect("Diagnostics Lock failed")
     }
 
-    pub fn documents<'a>(&'a self) -> MutexGuard<'a, DocumentMap> {
+    pub fn documents(&self) -> MutexGuard<DocumentMap> {
         self.documents.lock().expect("Documents Lock failed")
     }
 
-    pub fn address_locations<'a>(&'a self) -> MutexGuard<'a, AddressesMap> {
+    pub fn address_locations(&self) -> MutexGuard<AddressesMap> {
         self.addresses.lock().expect("Addresses Lock failed")
     }
 
-    pub fn tokens<'a>(&'a self) -> MutexGuard<'a, TokenMap> {
+    pub fn tokens(&self) -> MutexGuard<TokenMap> {
         self.tokens.lock().expect("Tokens Lock failed")
     }
 
-    pub fn results<'a>(&'a self) -> MutexGuard<'a, ResultMap> {
+    pub fn results(&self) -> MutexGuard<ResultMap> {
         self.results.lock().expect("Result Lock failed")
     }
 
@@ -196,7 +196,7 @@ impl State {
         self.symbols.lock().expect("Symbols Lock failed").is_some()
     }
 
-    pub fn symbols_all<'a>(&'a self) -> MutexGuard<'a, Option<SymbolData>> {
+    pub fn symbols_all(&self) -> MutexGuard<Option<SymbolData>> {
         self.symbols.lock().expect("Symbols Lock failed")
     }
 
@@ -211,7 +211,7 @@ impl State {
 
 impl State {
     pub async fn update_server_status<S: Into<String>>(&self, message: S) {
-        self.client.send_custom_notification::<ServerStatusNotification>(ServerStatusParams {
+        self.client.send_notification::<ServerStatusNotification>(ServerStatusParams {
             quiescent: true,
             message: Some(message.into())
 
@@ -221,11 +221,11 @@ impl State {
     pub async fn start_progress<S: Display>(&self, title: S, message: S) -> Option<NumberOrString> {
         let progress_id = self.progress_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let token = NumberOrString::Number(progress_id as i32);
-        if self.client.send_custom_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+        if self.client.send_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
             token: token.clone()
 
         }).await.is_ok() {
-            self.client.send_custom_notification::<Progress>(ProgressParams {
+            self.client.send_notification::<Progress>(ProgressParams {
                 token: token.clone(),
                 value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
                     title: title.to_string(),
@@ -243,7 +243,7 @@ impl State {
 
     pub async fn update_progress<S: Display>(&self, token: Option<NumberOrString>, message: S) {
         if let Some(token) = token {
-            self.client.send_custom_notification::<Progress>(ProgressParams {
+            self.client.send_notification::<Progress>(ProgressParams {
                 token,
                 value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(WorkDoneProgressReport {
                     cancellable: Some(false),
@@ -256,7 +256,7 @@ impl State {
 
     pub async fn end_progress<S: Display>(&self, token: Option<NumberOrString>, message: S) {
         if let Some(token) = token {
-            self.client.send_custom_notification::<Progress>(ProgressParams {
+            self.client.send_notification::<Progress>(ProgressParams {
                 token,
                 value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
                     message: Some(message.to_string())
@@ -266,7 +266,7 @@ impl State {
     }
 
     pub async fn trigger_client_hints_refresh(&self) {
-        self.client.send_custom_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
+        self.client.send_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
     }
 
     pub async fn publish_diagnostics(&self) {
@@ -285,7 +285,7 @@ impl State {
                     let info = Diagnostic {
                         message: format!("Debugger Breakpoint @ ${:0>4X}", b.address),
                         range: location.range,
-                        severity: Some(DiagnosticSeverity::Warning),
+                        severity: Some(DiagnosticSeverity::WARNING),
                         .. Diagnostic::default()
                     };
                     self.diagnostics().entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
@@ -296,7 +296,7 @@ impl State {
                     let info = Diagnostic {
                         message: "Debugger halted here".to_string(),
                         range: location.range,
-                        severity: Some(DiagnosticSeverity::Hint),
+                        severity: Some(DiagnosticSeverity::HINT),
                         .. Diagnostic::default()
                     };
                     self.diagnostics().entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
@@ -307,7 +307,7 @@ impl State {
         // Send diagnostics for all files
         let diagnostics = self.diagnostics().clone();
         for (uri, diagnostics) in &diagnostics {
-            self.client.send_custom_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
+            self.client.send_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
                 uri: uri.clone(),
                 diagnostics: diagnostics.clone(),
                 version: None

@@ -102,7 +102,7 @@ impl Emulator {
             let mut writes = Vec::new();
             for (address, entry) in &entries {
                 // Check if entry with same address, type and size already exists in the rom
-                if let Some(existing) = self.entries.get_mut(&address) {
+                if let Some(existing) = self.entries.get_mut(address) {
                     if entry.typ() == existing.typ() && entry.size == existing.size {
                         if entry.rom_bytes() != existing.rom_bytes() {
                             if let Some(bytes) = entry.rom_bytes() {
@@ -137,7 +137,7 @@ impl Emulator {
 
         } else {
             let mut valid_addresses: Vec<usize> = entries.keys().cloned().collect();
-            valid_addresses.sort();
+            valid_addresses.sort_unstable();
             let mut nearest_address = 0;
             for addr in valid_addresses {
                 if addr <= address {
@@ -153,7 +153,7 @@ impl Emulator {
         if let Some(loc) = self.state.address_locations().get(&address) {
             diagnostics.push((loc.uri.clone(), Diagnostic {
                 range: loc.range,
-                severity: Some(DiagnosticSeverity::Warning),
+                severity: Some(DiagnosticSeverity::WARNING),
                 message: message.into(),
                 code: None,
                 code_description: None,
@@ -165,7 +165,7 @@ impl Emulator {
         }
     }
 
-    pub fn is_running(&mut self) -> bool {
+    pub fn is_running(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::SeqCst)
     }
 
