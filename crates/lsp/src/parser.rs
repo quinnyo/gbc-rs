@@ -140,8 +140,8 @@ impl Parser {
         // Run compiler
         match ProjectConfig::build(&config, &mut logger, Some(reader), false) {
             Ok(linker) => {
-                // Generate Labels and ROM image
-                let labels = linker.to_symbol_list().into_iter().map(|(addr, bank, name)| (addr as u16, bank as u16, name)).collect();
+                // Generate Labels and ROM image (note order is swapped in emulator!)
+                let labels = linker.to_symbol_list().into_iter().map(|(bank, addr, name)| (addr as u16, bank as u16, name)).collect();
                 let mut generator = Generator::from_linker(&linker);
                 generator.finalize_rom();
 
