@@ -9,7 +9,7 @@ endif
 
 syn case ignore
 
-syn keyword gb_instruction  adc add and bit ccf cp cpl daa dec di ei ex halt inc ld ldd ldi ldh ldio nop or pop push res reti rl rla rlc rlca rr rra rrc rrca rst sbc scf set sla sra srl stop sub swap xor res ldxa addw subw mul div neg decx incx vsync pushx popx djnz
+syn keyword gb_instruction  adc add and bit ccf cp cpl daa dec di ei ex halt inc ld ldd ldi ldh ldio nop or pop push res reti rl rla rlc rlca rr rra rrc rrca rst sbc scf set sla sra srl stop sub swap xor res ldxa addw subw mul div neg decx incx vsync pushx popx djnz jc
 syn keyword gb_register     a b c d e h l af bc de hl sp hld hli
 syn keyword gb_branch       jr jp call
 syn keyword gb_return       ret retx
