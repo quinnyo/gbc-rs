@@ -27,9 +27,9 @@ fn main() {
     let mut f = File::open(&ops_path).expect("Failed to load OpCode JSON file.");
     f.read_to_string(&mut json).unwrap();
 
-    let mut layouts = HashMap::new();
-    let mut mappings = HashMap::new();
-    let mut max_arg_count: HashMap<String, usize> = HashMap::new();
+    let mut layouts = HashMap::with_capacity(512);
+    let mut mappings = HashMap::with_capacity(512);
+    let mut max_arg_count: HashMap<String, usize> = HashMap::with_capacity(128);
     let op_code_map: OpCodeMap = serde_json::from_str(&json).expect("Failed to parse OpCode JSON.");
 
     let mut instructions = parse_instructions(&op_code_map.unprefixed, None, &mut layouts, &mut mappings, &mut max_arg_count);

@@ -18,13 +18,13 @@ authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
 edition = "2021"
 
 [dependencies]
-toml = "0.5.3"
-serde = { version = "*", features = ["derive"] }
+toml = "0.5.8"
+serde = { version = "1.0", features = ["derive"] }
 decompiler = { version = "0.1.0", path = "./decompiler" }
-compiler = { version = "0.7.2", path = "./compiler" }
+compiler = { version = "0.8.0", path = "./compiler" }
 file-io = { version = "0.5.0", path = "./file-io" }
 project = { version = "0.5.0", path = "./project" }
-clap = "2.33.0"
+clap = "3.1.8"
 
 [profile.dev.package.compiler]
 # opt-level = 3

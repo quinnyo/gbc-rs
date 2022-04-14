@@ -17,8 +17,8 @@ gbd = { version = "0.1.0", git = "https://gitlab.com/BonsaiDen/gbd-rs" }
 lazy_static = "1.4.0"
 serde_json = "1.0"
 log = "*"
-env_logger = "0.8.3"
-tower-lsp = "0.14.1"
+env_logger = "0.9.0"
+tower-lsp = "0.16.0"
 tokio = { version = "1.6", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "time"] }
 
 [profile.dev.package.gbd]
