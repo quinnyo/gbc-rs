@@ -34,6 +34,7 @@ lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
     Segment(()),
     Instruction(()),
     MetaInstruction(()),
+    MetaInstructionOperator((Operator)),
     BinaryFile((Vec<u8>)),
     Comma(()),
     OpenParen(()),
@@ -159,6 +160,12 @@ impl ValueStage {
                 MacroToken::Reserved(inner) => ValueToken::Reserved(inner),
                 MacroToken::Segment(inner) => ValueToken::Segment(inner),
                 MacroToken::Instruction(inner) => ValueToken::Instruction(inner),
+                MacroToken::MetaInstruction(inner @ InnerToken { value: Symbol::Jc, ..}) => {
+                    tokens.expect(MacroTokenType::Register, Some(Symbol::A), "while parsing jc meta instruction")?;
+                    let op = tokens.expect(MacroTokenType::Operator, None, "while parsing jc meta instruction")?;
+                    let (_, operator) = Self::parse_operator(&mut tokens, op.into_inner())?;
+                    ValueToken::MetaInstructionOperator(inner, operator)
+                },
                 MacroToken::MetaInstruction(inner) => ValueToken::MetaInstruction(inner),
                 MacroToken::BinaryFile(inner, bytes) => ValueToken::BinaryFile(inner, bytes),
                 MacroToken::Comma(inner) => ValueToken::Comma(inner),
@@ -356,20 +363,8 @@ impl ValueStage {
                     return Err(inner.error(format!("Unexpected standalone \"{}\", expected a \"Name\" token to preceed it.", inner.value)))
                 },
                 // Operators
-                MacroToken::Operator(mut inner) => {
-                    let typ = if tokens.peek_is(MacroTokenType::Operator, None) {
-                        match Self::parse_operator_double(&inner, tokens.peek().unwrap().inner()) {
-                            Some(typ) => {
-                                tokens.expect(MacroTokenType::Operator, None, "when parsing operator")?;
-                                typ
-                            },
-                            None => Self::parse_operator_single(&inner)?
-                        }
-
-                    } else {
-                        Self::parse_operator_single(&inner)?
-                    };
-                    inner.end_index = inner.start_index + typ.width();
+                MacroToken::Operator(inner) => {
+                    let (inner, typ) = Self::parse_operator(&mut tokens, inner)?;
                     ValueToken::Operator {
                         inner,
                         typ
@@ -385,6 +380,23 @@ impl ValueStage {
         }
 
         Ok(value_tokens)
+    }
+
+    fn parse_operator(tokens: &mut TokenIterator<MacroToken>, mut inner: InnerToken) -> Result<(InnerToken, Operator), SourceError> {
+        let typ = if tokens.peek_is(MacroTokenType::Operator, None) {
+            match Self::parse_operator_double(&inner, tokens.peek().unwrap().inner()) {
+                Some(typ) => {
+                    tokens.expect(MacroTokenType::Operator, None, "when parsing operator")?;
+                    typ
+                },
+                None => Self::parse_operator_single(&inner)?
+            }
+
+        } else {
+            Self::parse_operator_single(&inner)?
+        };
+        inner.end_index = inner.start_index + typ.width();
+        Ok((inner, typ))
     }
 
     fn parse_namespace_member(

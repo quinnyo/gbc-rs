@@ -73,7 +73,6 @@ fn analyze_instructions(
         }
     }
 
-    println!("foo {:?}", b);
     if let Some(value) = match op_code {
         // ADD
         //0x80..=0x87 | 0xC6 => Some("+="),

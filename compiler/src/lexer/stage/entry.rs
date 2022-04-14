@@ -236,6 +236,11 @@ impl EntryStage {
                     continue;
                 },
 
+                ExpressionToken::MetaInstructionOperator(inner, operator) => {
+                    entry_tokens.append(&mut Self::parse_meta_instruction_operator(&mut tokens, inner, operator)?);
+                    continue;
+                },
+
                 // Binary Data Declarations
                 ExpressionToken::BinaryFile(inner, bytes) => {
                     EntryToken::Data {
@@ -334,6 +339,9 @@ impl EntryStage {
                                     },
                                     ExpressionToken::MetaInstruction(inner) => {
                                         EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction(&mut tokens, inner)?)
+                                    },
+                                    ExpressionToken::MetaInstructionOperator(inner, operator) => {
+                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction_operator(&mut tokens, inner, operator)?)
                                     },
                                     token => return Err(inner.error(format!(
                                         "Unexpected {:?} after VOLATILE keyword, expected a Instruction instead.",
@@ -805,7 +813,93 @@ impl EntryStage {
                     EntryToken::InstructionWithArg(inner.clone(), 0x20, Expression::Value(ExpressionValue::OffsetAddress(inner, -6))),
                 ]
             },
-            _ => unreachable!()
+            s => unimplemented!("meta instruction {}", s)
+        })
+    }
+
+    fn parse_meta_instruction_operator(
+        tokens: &mut TokenIterator<ExpressionToken>,
+        inner: InnerToken,
+        operator: Operator
+
+    ) -> Result<Vec<EntryToken>, SourceError> {
+        Ok(match inner.value {
+            Symbol::Jc => {
+                // jc a == expr
+                let cp = if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                    EntryToken::InstructionWithArg(inner.clone(), 0xFE, expr)
+
+                // a == [hl]
+                } else if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
+                    tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
+                    tokens.expect(ExpressionTokenType::Register, Some(Symbol::HL), "while parsing instruction argument")?;
+                    tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
+                    EntryToken::Instruction(inner.clone(), 0xBE)
+
+                // jc a == reg
+                } else {
+                    let reg = Self::parse_meta_byte_register(tokens)?;
+                    EntryToken::Instruction(inner.clone(), 0xB8 + reg.instruction_offset())
+                };
+
+                // ,label
+                tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction argument")?;
+                let label = Self::parse_meta_label(tokens)?;
+                match operator {
+                    Operator::Equals => {
+                        vec![
+                            cp,
+                            // jp   z,label
+                            EntryToken::InstructionWithArg(inner, 0xCA, label)
+                        ]
+                    },
+                    Operator::Unequals => {
+                        vec![
+                            cp,
+                            // jp   nz,label
+                            EntryToken::InstructionWithArg(inner, 0xC2, label)
+                        ]
+                    },
+                    Operator::LessThan => {
+                        vec![
+                            cp,
+                            // jp   c,label
+                            EntryToken::InstructionWithArg(inner, 0xDA, label)
+                        ]
+                    },
+                    Operator::LessThanEqual => {
+                        vec![
+                            cp,
+                            // jp   c,label
+                            EntryToken::InstructionWithArg(inner.clone(), 0xDA, label.clone()),
+                            // jp   z,label
+                            EntryToken::InstructionWithArg(inner, 0xCA, label)
+                        ]
+                    },
+                    Operator::GreaterThan => {
+                        vec![
+                            cp,
+                            // jp   z,skip
+                            // special handling exists in optimizer to not break this case
+                            EntryToken::InstructionWithArg(inner.clone(), 0x28, Expression::Value(ExpressionValue::OffsetAddress(inner.clone(), 3))),
+                            // jp   nc,label
+                            EntryToken::InstructionWithArg(inner, 0xD2, label)
+                            // .skip
+                        ]
+                    },
+                    Operator::GreaterThanEqual => {
+                        // jp   nc,label
+                        vec![
+                            cp,
+                            EntryToken::InstructionWithArg(inner, 0xD2, label)
+                        ]
+                    },
+                    _ => return Err(inner.error(
+                        format!("Unsupported operator \"{}\" for jc instruction, expected one of the following operators: ==, !=, >=, <=, < or >.", operator.as_str())
+                    ))
+                }
+            },
+            s => unimplemented!("meta instruction operator {}", s)
         })
     }
 
@@ -3398,6 +3492,53 @@ mod test {
         assert_eq!(tfe("brk"), vec![
             EntryToken::DebugInstruction(itk!(0, 3, "brk"), 64)
         ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_jc() {
+        assert_eq!(tfe("global_label:\njc a == 20,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(25, 37, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a == b,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xB8),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(24, 36, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a != c,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xB9),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xC2, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(24, 36, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a >= d,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xBA),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xD2, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(24, 36, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a <= e,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xBB),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xDA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(24, 36, "global_label"), 1))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(24, 36, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a > h,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xBC),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0x28, Expression::Value(ExpressionValue::OffsetAddress(itk!(14, 16, "jc"), 3))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xD2, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(23, 35, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a < l,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xBD),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xDA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(23, 35, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc a == [hl],global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0xBE),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(27, 39, "global_label"), 1)))
+        ]);
+        assert_eq!(entry_lexer_error("global_label:\njc a * b,global_label"), "In file \"main.gb.s\" on line 2, column 1: Unsupported operator \"*\" for jc instruction, expected one of the following operators: ==, !=, >=, <=, < or >.\n\njc a * b,global_label\n^--- Here");
     }
 
     #[test]

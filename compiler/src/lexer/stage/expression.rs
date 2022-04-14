@@ -11,7 +11,7 @@ use gb_cpu::{Flag, Register};
 use super::macros::MacroCall;
 use crate::lexer::{ValueStage, Symbol};
 use crate::error::SourceError;
-use crate::expression::{Expression, ExpressionValue};
+use crate::expression::{Expression, ExpressionValue, Operator};
 use super::value::{ValueToken, ValueTokenType};
 use super::macros::{IfStatementBranch, ForStatement, BlockStatement};
 use super::super::{LexerStage, InnerToken, TokenIterator, LexerToken};
@@ -36,6 +36,7 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
     Segment(()),
     Instruction(()),
     MetaInstruction(()),
+    MetaInstructionOperator((Operator)),
     BinaryFile((Vec<u8>)),
     Comma(()),
     OpenBracket(()),
@@ -68,6 +69,7 @@ impl ExpressionToken {
             ValueToken::Reserved(inner) => Ok(ExpressionToken::Reserved(inner)),
             ValueToken::Instruction(inner) => Ok(ExpressionToken::Instruction(inner)),
             ValueToken::MetaInstruction(inner) => Ok(ExpressionToken::MetaInstruction(inner)),
+            ValueToken::MetaInstructionOperator(inner, op) => Ok(ExpressionToken::MetaInstructionOperator(inner, op)),
             ValueToken::BinaryFile(inner, bytes) => Ok(ExpressionToken::BinaryFile(inner, bytes)),
             ValueToken::Comma(inner) => Ok(ExpressionToken::Comma(inner)),
             ValueToken::OpenBracket(inner) => Ok(ExpressionToken::OpenBracket(inner)),

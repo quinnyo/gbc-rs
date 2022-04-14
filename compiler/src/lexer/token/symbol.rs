@@ -170,6 +170,7 @@ pub enum Symbol {
     Pushx,
     Popx,
     Djnz,
+    Jc,
 
     Raw(String)
 }
@@ -342,6 +343,7 @@ impl Symbol {
             Symbol::Pushx    => "pushx",
             Symbol::Popx     => "popx",
             Symbol::Djnz     => "djnz",
+            Symbol::Jc       => "jc",
 
             Symbol::Raw(s) => s.as_str()
         }
@@ -523,6 +525,7 @@ impl From<String> for Symbol {
             "pushx"     =>  Symbol::Pushx,
             "popx"      =>  Symbol::Popx,
             "djnz"      =>  Symbol::Djnz,
+            "jc"        =>  Symbol::Jc,
 
             // Variables
             _           => Symbol::Raw(s)

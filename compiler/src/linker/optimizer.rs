@@ -258,6 +258,22 @@ fn optimize_instructions(
             }]))
         },
 
+        // correct optimized jr +3 in jc a > b,label into a jr +2
+        (0x28, Some((0x30, _, _, _, _)), _) => {
+            if bytes[1] == 3 {
+                Some((0, vec![EntryData::Instruction {
+                    op_code: 0x28,
+                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(inner.clone(), 2))),
+                    bytes: instruction::bytes(0x28),
+                    volatile: false,
+                    debug_only: false
+                }]))
+
+            } else {
+                None
+            }
+        },
+
         // jp c,label  -> jr c,label
         // jp nc,label -> jr nc,label
         // jp z,label  -> jr z,label
@@ -915,5 +931,40 @@ mod test {
         ]);
     }
 
+    // jc a > b ---------------------------------------------------------------
+    #[test]
+    fn test_correct_handling_jc_jump_over_jp() {
+        let l = linker_optimize("SECTION ROM0\nglobal_label:\njc a > b,global_label");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "global_label".to_string()
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 0xB8,
+                    expression: None,
+                    bytes: vec![0xB8],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x28,
+                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(27, 29, "jc"), 2))),
+                    bytes: vec![0x28, 2],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0x30,
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(36, 48, "global_label"), 1))),
+                    bytes: vec![0x30, 251],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
 }
 

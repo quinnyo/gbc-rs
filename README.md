@@ -360,6 +360,30 @@ retx    b
 retx    2
 ```
 
+#### **jc*
+
+Jumps based on a compare (==, !=, >=, <=, >, <) with the `Accumulator`:
+
+```asm
+; cp    20
+; jr    z,.label
+jc      a == 20,.label
+
+; cp    [hl]
+; jr    nz,.label
+jc      a != hl,.label
+
+; cp    b
+; jr    c,.label
+jc      a < b,.label
+
+; cp    c
+; jr    z,.skip
+; jr    nc,.label
+; .skip:
+jc      a > c,.label
+```
+
 #### **vsync**
 
 A shorthand for the VRAM access loop:
