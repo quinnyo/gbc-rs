@@ -145,7 +145,8 @@ impl LexerStage for EntryStage {
             let key: (Symbol, Vec<LexerArgument>) = (Symbol::from(instr.name.to_string()), layout);
             layouts.entry(key).or_insert(index as u16);
         }
-        Self::parse_entry_tokens(tokens, &layouts)
+        let mut unique_label_id = 512_000_000;
+        Self::parse_entry_tokens(tokens, &layouts, &mut unique_label_id)
     }
 
 }
@@ -154,7 +155,8 @@ impl EntryStage {
 
     fn parse_entry_tokens(
         tokens: Vec<ExpressionToken>,
-        layouts: &InstructionLayouts
+        layouts: &InstructionLayouts,
+        unique_label_id: &mut usize
 
     ) -> Result<Vec<EntryToken>, SourceError> {
 
@@ -198,7 +200,7 @@ impl EntryStage {
                             } else {
                                 None
                             },
-                            body: Self::parse_entry_tokens(branch.body, layouts)?
+                            body: Self::parse_entry_tokens(branch.body, layouts, unique_label_id)?
                         });
                     }
                     EntryToken::IfStatement(inner, entry_branches)
@@ -212,15 +214,15 @@ impl EntryStage {
                         binding: for_statement.binding.into_inner().value,
                         from,
                         to,
-                        body: Self::parse_entry_tokens(for_statement.body, layouts)?
+                        body: Self::parse_entry_tokens(for_statement.body, layouts, unique_label_id)?
                     })
                 },
 
                 // Block Statements
                 ExpressionToken::BlockStatement(inner, block) => {
                     match block {
-                        BlockStatement::Using(cmd, body) => EntryToken::UsingStatement(inner, cmd, Self::parse_entry_tokens(body, layouts)?),
-                        BlockStatement::Volatile(body) => EntryToken::VolatileStatement(inner, Self::parse_entry_tokens(body, layouts)?)
+                        BlockStatement::Using(cmd, body) => EntryToken::UsingStatement(inner, cmd, Self::parse_entry_tokens(body, layouts, unique_label_id)?),
+                        BlockStatement::Volatile(body) => EntryToken::VolatileStatement(inner, Self::parse_entry_tokens(body, layouts, unique_label_id)?)
                     }
                 },
 
@@ -237,7 +239,7 @@ impl EntryStage {
                 },
 
                 ExpressionToken::MetaInstructionOperator(inner, operator) => {
-                    entry_tokens.append(&mut Self::parse_meta_instruction_operator(&mut tokens, inner, operator)?);
+                    entry_tokens.append(&mut Self::parse_meta_instruction_operator(&mut tokens, inner, operator, unique_label_id)?);
                     continue;
                 },
 
@@ -341,7 +343,7 @@ impl EntryStage {
                                         EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction(&mut tokens, inner)?)
                                     },
                                     ExpressionToken::MetaInstructionOperator(inner, operator) => {
-                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction_operator(&mut tokens, inner, operator)?)
+                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction_operator(&mut tokens, inner, operator, unique_label_id)?)
                                     },
                                     token => return Err(inner.error(format!(
                                         "Unexpected {:?} after VOLATILE keyword, expected a Instruction instead.",
@@ -820,7 +822,8 @@ impl EntryStage {
     fn parse_meta_instruction_operator(
         tokens: &mut TokenIterator<ExpressionToken>,
         inner: InnerToken,
-        operator: Operator
+        operator: Operator,
+        unique_label_id: &mut usize
 
     ) -> Result<Vec<EntryToken>, SourceError> {
         Ok(match inner.value {
@@ -877,14 +880,16 @@ impl EntryStage {
                         ]
                     },
                     Operator::GreaterThan => {
+                        *unique_label_id += 1;
                         vec![
                             cp,
                             // jp   z,skip
                             // special handling exists in optimizer to not break this case
-                            EntryToken::InstructionWithArg(inner.clone(), 0x28, Expression::Value(ExpressionValue::OffsetAddress(inner.clone(), 3))),
+                            EntryToken::InstructionWithArg(inner.clone(), 0x28, Expression::Value(ExpressionValue::ParentLabelAddress(inner.clone(), *unique_label_id))),
                             // jp   nc,label
-                            EntryToken::InstructionWithArg(inner, 0xD2, label)
+                            EntryToken::InstructionWithArg(inner.clone(), 0xD2, label),
                             // .skip
+                            EntryToken::ParentLabelDef(inner, *unique_label_id, None, false)
                         ]
                     },
                     Operator::GreaterThanEqual => {
@@ -3525,8 +3530,9 @@ mod test {
         assert_eq!(tfe("global_label:\njc a > h,global_label"), vec![
             EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
             EntryToken::Instruction(itk!(14, 16, "jc"), 0xBC),
-            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0x28, Expression::Value(ExpressionValue::OffsetAddress(itk!(14, 16, "jc"), 3))),
-            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xD2, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(23, 35, "global_label"), 1)))
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0x28, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(14, 16, "jc"), 512_000_001))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xD2, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(23, 35, "global_label"), 1))),
+            EntryToken::ParentLabelDef(itk!(14, 16, "jc"), 512_000_001, None, false),
         ]);
         assert_eq!(tfe("global_label:\njc a < l,global_label"), vec![
             EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),

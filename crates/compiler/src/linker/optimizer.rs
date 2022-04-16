@@ -258,22 +258,6 @@ fn optimize_instructions(
             }]))
         },
 
-        // correct optimized jr +3 in jc a > b,label into a jr +2
-        (0x28, Some((0x30, _, _, _, _)), _) => {
-            if bytes[1] == 3 {
-                Some((0, vec![EntryData::Instruction {
-                    op_code: 0x28,
-                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(inner.clone(), 2))),
-                    bytes: instruction::bytes(0x28),
-                    volatile: false,
-                    debug_only: false
-                }]))
-
-            } else {
-                None
-            }
-        },
-
         // jp c,label  -> jr c,label
         // jp nc,label -> jr nc,label
         // jp z,label  -> jr z,label
@@ -951,7 +935,7 @@ mod test {
                 }),
                 (2, EntryData::Instruction {
                     op_code: 0x28,
-                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(27, 29, "jc"), 2))),
+                    expression: Some(Expression::Value(ExpressionValue::ParentLabelAddress(itk!(27, 29, "jc"), 512_000_001))),
                     bytes: vec![0x28, 2],
                     volatile: false,
                     debug_only: false
@@ -962,6 +946,11 @@ mod test {
                     bytes: vec![0x30, 251],
                     volatile: false,
                     debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 512_000_001,
+                    is_local: false,
+                    name: "jc".to_string()
                 })
             ]
         ]);
