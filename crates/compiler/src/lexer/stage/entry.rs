@@ -2382,23 +2382,23 @@ mod test {
 
     #[test]
     fn test_error_unexpected() {
-        assert_eq!(entry_lexer_error("2 + 2"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
-        assert_eq!(entry_lexer_error("BANK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected reserved keyword \"BANK\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nBANK\n^--- Here");
-        assert_eq!(entry_lexer_error(","), "In file \"main.gb.s\" on line 1, column 1: Unexpected Comma, expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
-        assert_eq!(entry_lexer_error("["), "In file \"main.gb.s\" on line 1, column 1: Unexpected OpenBracket, expected either a constant declaration, directive or instruction instead.\n\n[\n^--- Here");
-        assert_eq!(entry_lexer_error("]"), "In file \"main.gb.s\" on line 1, column 1: Unexpected CloseBracket, expected either a constant declaration, directive or instruction instead.\n\n]\n^--- Here");
-        assert_eq!(entry_lexer_error("hl"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Register, expected either a constant declaration, directive or instruction instead.\n\nhl\n^--- Here");
-        assert_eq!(entry_lexer_error("nz"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Flag, expected either a constant declaration, directive or instruction instead.\n\nnz\n^--- Here");
-        assert_eq!(entry_lexer_error("DS"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS\n^--- Here");
-        assert_eq!(entry_lexer_error("DS8"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS8\n^--- Here");
-        assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
-        assert_eq!(entry_lexer_error("DS16"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
-        assert_eq!(entry_lexer_error("ROMX"), "In file \"main.gb.s\" on line 1, column 1: Unexpected Segment, expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
+        assert_eq!(entry_lexer_error("2 + 2"), "In file \"/main.gbc\" on line 1, column 1: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\n2 + 2\n^--- Here");
+        assert_eq!(entry_lexer_error("BANK"), "In file \"/main.gbc\" on line 1, column 1: Unexpected reserved keyword \"BANK\", expected either SECTION, DB, BW, DS, DS8 or DS16 instead.\n\nBANK\n^--- Here");
+        assert_eq!(entry_lexer_error(","), "In file \"/main.gbc\" on line 1, column 1: Unexpected Comma, expected either a constant declaration, directive or instruction instead.\n\n,\n^--- Here");
+        assert_eq!(entry_lexer_error("["), "In file \"/main.gbc\" on line 1, column 1: Unexpected OpenBracket, expected either a constant declaration, directive or instruction instead.\n\n[\n^--- Here");
+        assert_eq!(entry_lexer_error("]"), "In file \"/main.gbc\" on line 1, column 1: Unexpected CloseBracket, expected either a constant declaration, directive or instruction instead.\n\n]\n^--- Here");
+        assert_eq!(entry_lexer_error("hl"), "In file \"/main.gbc\" on line 1, column 1: Unexpected Register, expected either a constant declaration, directive or instruction instead.\n\nhl\n^--- Here");
+        assert_eq!(entry_lexer_error("nz"), "In file \"/main.gbc\" on line 1, column 1: Unexpected Flag, expected either a constant declaration, directive or instruction instead.\n\nnz\n^--- Here");
+        assert_eq!(entry_lexer_error("DS"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS\n^--- Here");
+        assert_eq!(entry_lexer_error("DS8"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS8\n^--- Here");
+        assert_eq!(entry_lexer_error("DS16"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
+        assert_eq!(entry_lexer_error("DS16"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing data storage directive, expected a \"ConstExpression\" token instead.\n\nDS16\n^--- Here");
+        assert_eq!(entry_lexer_error("ROMX"), "In file \"/main.gbc\" on line 1, column 1: Unexpected Segment, expected either a constant declaration, directive or instruction instead.\n\nROMX\n^--- Here");
     }
 
     #[test]
     fn test_parser_no_comma() {
-        assert_eq!(entry_lexer_error("global_label:\njr z.child_label\n.child_label:"), "In file \"main.gb.s\" on line 2, column 1: Missing comma between instruction arguments.\n\njr z.child_label\n^--- Here");
+        assert_eq!(entry_lexer_error("global_label:\njr z.child_label\n.child_label:"), "In file \"/main.gbc\" on line 2, column 1: Missing comma between instruction arguments.\n\njr z.child_label\n^--- Here");
     }
 
     // Constant Declarations --------------------------------------------------
@@ -2460,29 +2460,29 @@ mod test {
 
     #[test]
     fn test_error_const_default_redeclaration() {
-        assert_eq!(entry_lexer_error("DEFAULT CONST foo 1\nDEFAULT CONST foo 2"), "In file \"main.gb.s\" on line 2, column 15: Re-definition of previously declared constant default \"foo\".\n\nDEFAULT CONST foo 2\n              ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 15:\n\nDEFAULT CONST foo 1\n              ^--- Here");
+        assert_eq!(entry_lexer_error("DEFAULT CONST foo 1\nDEFAULT CONST foo 2"), "In file \"/main.gbc\" on line 2, column 15: Re-definition of previously declared constant default \"foo\".\n\nDEFAULT CONST foo 2\n              ^--- Here\n\nOriginal definition was in file \"/main.gbc\" on line 1, column 15:\n\nDEFAULT CONST foo 1\n              ^--- Here");
     }
 
     #[test]
     fn test_error_const_default_double_override() {
-        assert_eq!(entry_lexer_error("DEFAULT CONST foo 1\nCONST foo 2\nCONST foo 3"), "In file \"main.gb.s\" on line 3, column 7: Re-definition of previously declared constant \"foo\".\n\nCONST foo 3\n      ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 2, column 7:\n\nCONST foo 2\n      ^--- Here");
+        assert_eq!(entry_lexer_error("DEFAULT CONST foo 1\nCONST foo 2\nCONST foo 3"), "In file \"/main.gbc\" on line 3, column 7: Re-definition of previously declared constant \"foo\".\n\nCONST foo 3\n      ^--- Here\n\nOriginal definition was in file \"/main.gbc\" on line 2, column 7:\n\nCONST foo 2\n      ^--- Here");
     }
 
     #[test]
     fn test_error_const_redeclaration() {
-        assert_eq!(entry_lexer_error("CONST foo 2 CONST foo 2"), "In file \"main.gb.s\" on line 1, column 19: Re-definition of previously declared constant \"foo\".\n\nCONST foo 2 CONST foo 2\n                  ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nCONST foo 2 CONST foo 2\n      ^--- Here");
+        assert_eq!(entry_lexer_error("CONST foo 2 CONST foo 2"), "In file \"/main.gbc\" on line 1, column 19: Re-definition of previously declared constant \"foo\".\n\nCONST foo 2 CONST foo 2\n                  ^--- Here\n\nOriginal definition was in file \"/main.gbc\" on line 1, column 7:\n\nCONST foo 2 CONST foo 2\n      ^--- Here");
     }
 
     #[test]
     fn test_error_const_declaration_no_expr() {
-        assert_eq!(entry_lexer_error("CONST foo"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo\n      ^--- Here");
-        assert_eq!(entry_lexer_error("CONST foo DB"), "In file \"main.gb.s\" on line 1, column 11: Unexpected token \"Reserved\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo DB\n          ^--- Here");
-        assert_eq!(entry_lexer_error("global_label:\nCONST foo global_label"), "In file \"main.gb.s\" on line 2, column 11: Unexpected token \"Expression\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo global_label\n          ^--- Here");
+        assert_eq!(entry_lexer_error("CONST foo"), "In file \"/main.gbc\" on line 1, column 7: Unexpected end of input when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo\n      ^--- Here");
+        assert_eq!(entry_lexer_error("CONST foo DB"), "In file \"/main.gbc\" on line 1, column 11: Unexpected token \"Reserved\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo DB\n          ^--- Here");
+        assert_eq!(entry_lexer_error("global_label:\nCONST foo global_label"), "In file \"/main.gbc\" on line 2, column 11: Unexpected token \"Expression\" when parsing constant declaration, expected a \"ConstExpression\" token instead.\n\nCONST foo global_label\n          ^--- Here");
     }
 
     #[test]
     fn test_error_const_declaration_child_global_override() {
-        assert_eq!(entry_lex_child_error("GLOBAL CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2"), "In file \"child.gb.s\" on line 1, column 14: Re-definition of previously declared constant \"FOO\".\n\nGLOBAL CONST FOO 2\n             ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 14:\n\nGLOBAL CONST FOO 1\n             ^--- Here");
+        assert_eq!(entry_lex_child_error("GLOBAL CONST FOO 1\nINCLUDE 'second.gbc'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2"), "In file \"/second.gbc\" on line 1, column 14: Re-definition of previously declared constant \"FOO\".\n\nGLOBAL CONST FOO 2\n             ^--- Here\n\nincluded from file \"/main.gbc\" on line 2, column 9\n\nOriginal definition was in file \"/main.gbc\" on line 1, column 14:\n\nGLOBAL CONST FOO 1\n             ^--- Here");
     }
 
     // Data Declarations ------------------------------------------------------
@@ -2857,12 +2857,12 @@ mod test {
 
     #[test]
     fn test_error_section() {
-        assert_eq!(entry_lexer_error("SECTION"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION\n^--- Here");
-        assert_eq!(entry_lexer_error("SECTION ROM0,"), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input when parsing section bank, expected \"BANK\" instead.\n\nSECTION ROM0,\n            ^--- Here");
-        assert_eq!(entry_lexer_error("SECTION ROM0["), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input when parsing section offset, expected a \"ConstExpression\" token instead.\n\nSECTION ROM0[\n            ^--- Here");
-        assert_eq!(entry_lexer_error("SECTION ROM0,BANK"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input when parsing section bank, expected \"[\" instead.\n\nSECTION ROM0,BANK\n             ^--- Here");
-        assert_eq!(entry_lexer_error("SECTION foo"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input after section name, expected a \"Comma\" token instead.\n\nSECTION foo\n        ^--- Here");
-        assert_eq!(entry_lexer_error("SECTION foo,bar"), "In file \"main.gb.s\" on line 1, column 13: Unexpected token \"ConstExpression\" when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION foo,bar\n            ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION\n^--- Here");
+        assert_eq!(entry_lexer_error("SECTION ROM0,"), "In file \"/main.gbc\" on line 1, column 13: Unexpected end of input when parsing section bank, expected \"BANK\" instead.\n\nSECTION ROM0,\n            ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION ROM0["), "In file \"/main.gbc\" on line 1, column 13: Unexpected end of input when parsing section offset, expected a \"ConstExpression\" token instead.\n\nSECTION ROM0[\n            ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION ROM0,BANK"), "In file \"/main.gbc\" on line 1, column 14: Unexpected end of input when parsing section bank, expected \"[\" instead.\n\nSECTION ROM0,BANK\n             ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION foo"), "In file \"/main.gbc\" on line 1, column 9: Unexpected end of input after section name, expected a \"Comma\" token instead.\n\nSECTION foo\n        ^--- Here");
+        assert_eq!(entry_lexer_error("SECTION foo,bar"), "In file \"/main.gbc\" on line 1, column 13: Unexpected token \"ConstExpression\" when parsing section declaration, expected a \"Segment\" token instead.\n\nSECTION foo,bar\n            ^--- Here");
     }
 
     // Instructions -----------------------------------------------------------
@@ -3438,13 +3438,13 @@ mod test {
 
     #[test]
     fn test_error_instructions() {
-        assert_eq!(entry_lexer_error("ld [hl]"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"[hl]\" for instruction \"ld\".\n\nld [hl]\n^--- Here");
-        assert_eq!(entry_lexer_error("ld 4,["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction memory argument, expected a \"Expression\" token instead.\n\nld 4,[\n     ^--- Here");
-        assert_eq!(entry_lexer_error("ld 4,[3"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction memory argument, expected a \"CloseBracket\" token instead.\n\nld 4,[3\n      ^--- Here");
-        assert_eq!(entry_lexer_error("stop 4"), "In file \"main.gb.s\" on line 1, column 6: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
-        assert_eq!(entry_lexer_error("ld a,"), "In file \"main.gb.s\" on line 1, column 5: Unexpected trailing comma after \"ld\" instruction.\n\nld a,\n    ^--- Here");
-        assert_eq!(entry_lexer_error("ld a,af"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"a af\" for instruction \"ld\".\n\nld a,af\n^--- Here");
-        assert_eq!(entry_lexer_error("push a"), "In file \"main.gb.s\" on line 1, column 1: Invalid operand(s) \"a\" for instruction \"push\".\n\npush a\n^--- Here");
+        assert_eq!(entry_lexer_error("ld [hl]"), "In file \"/main.gbc\" on line 1, column 1: Invalid operand(s) \"[hl]\" for instruction \"ld\".\n\nld [hl]\n^--- Here");
+        assert_eq!(entry_lexer_error("ld 4,["), "In file \"/main.gbc\" on line 1, column 6: Unexpected end of input while parsing instruction memory argument, expected a \"Expression\" token instead.\n\nld 4,[\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ld 4,[3"), "In file \"/main.gbc\" on line 1, column 7: Unexpected end of input while parsing instruction memory argument, expected a \"CloseBracket\" token instead.\n\nld 4,[3\n      ^--- Here");
+        assert_eq!(entry_lexer_error("stop 4"), "In file \"/main.gbc\" on line 1, column 6: Unexpected ConstExpression, expected either a constant declaration, directive or instruction instead.\n\nstop 4\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ld a,"), "In file \"/main.gbc\" on line 1, column 5: Unexpected trailing comma after \"ld\" instruction.\n\nld a,\n    ^--- Here");
+        assert_eq!(entry_lexer_error("ld a,af"), "In file \"/main.gbc\" on line 1, column 1: Invalid operand(s) \"a af\" for instruction \"ld\".\n\nld a,af\n^--- Here");
+        assert_eq!(entry_lexer_error("push a"), "In file \"/main.gbc\" on line 1, column 1: Invalid operand(s) \"a\" for instruction \"push\".\n\npush a\n^--- Here");
     }
 
     // Label Calls ------------------------------------------------------------
@@ -3485,7 +3485,7 @@ mod test {
 
     #[test]
     fn test_error_label_call_instructions() {
-        assert_eq!(entry_lexer_error("global_label(a):\nld a,global_label(1)"), "In file \"main.gb.s\" on line 2, column 1: Label arguments can only be supplied when using call instructions.\n\nld a,global_label(1)\n^--- Here");
+        assert_eq!(entry_lexer_error("global_label(a):\nld a,global_label(1)"), "In file \"/main.gbc\" on line 2, column 1: Label arguments can only be supplied when using call instructions.\n\nld a,global_label(1)\n^--- Here");
     }
 
     // Meta Instructions ------------------------------------------------------
@@ -3513,9 +3513,9 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_msg() {
-        assert_eq!(entry_lexer_error("msg"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction argument.\n\nmsg\n^--- Here");
-        assert_eq!(entry_lexer_error("msg 4"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"4\", expected a string literal argument.\n\nmsg 4\n    ^--- Here");
-        assert_eq!(entry_lexer_error("msg '12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345'"), "In file \"main.gb.s\" on line 1, column 5: Debug message strings literals may be most least 123 bytes long (found 125 bytes).\n\nmsg \'12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\'\n    ^--- Here");
+        assert_eq!(entry_lexer_error("msg"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction argument.\n\nmsg\n^--- Here");
+        assert_eq!(entry_lexer_error("msg 4"), "In file \"/main.gbc\" on line 1, column 5: Unexpected \"4\", expected a string literal argument.\n\nmsg 4\n    ^--- Here");
+        assert_eq!(entry_lexer_error("msg '12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345'"), "In file \"/main.gbc\" on line 1, column 5: Debug message strings literals may be most least 123 bytes long (found 125 bytes).\n\nmsg \'12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\'\n    ^--- Here");
     }
 
     #[test]
@@ -3612,7 +3612,7 @@ mod test {
             EntryToken::Instruction(itk!(14, 16, "jc"), 0xBE),
             EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(27, 39, "global_label"), 1)))
         ]);
-        assert_eq!(entry_lexer_error("global_label:\njc a * b,global_label"), "In file \"main.gb.s\" on line 2, column 1: Unsupported operator \"*\" for jc instruction, expected one of the following operators: ==, !=, >=, <=, < or >.\n\njc a * b,global_label\n^--- Here");
+        assert_eq!(entry_lexer_error("global_label:\njc a * b,global_label"), "In file \"/main.gbc\" on line 2, column 1: Unsupported operator \"*\" for jc instruction, expected one of the following operators: ==, !=, >=, <=, < or >.\n\njc a * b,global_label\n^--- Here");
     }
 
     #[test]
@@ -3676,14 +3676,14 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_mul() {
-        assert_eq!(entry_lexer_error("mul"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nmul\n^--- Here");
-        assert_eq!(entry_lexer_error("mul hl"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"hl\", expected one of the following registers: a, b, c, d, e, h, l.\n\nmul hl\n    ^--- Here");
-        assert_eq!(entry_lexer_error("mul a"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nmul a\n    ^--- Here");
-        assert_eq!(entry_lexer_error("mul a, 'Foo'"), "In file \"main.gb.s\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\nmul a, \'Foo\'\n       ^--- Here");
-        assert_eq!(entry_lexer_error("mul a, -2"), "In file \"main.gb.s\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\nmul a, -2\n       ^--- Here");
-        assert_eq!(entry_lexer_error("mul a, 3"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"3\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 3\n       ^--- Here");
-        assert_eq!(entry_lexer_error("mul a, 0"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"0\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 0\n       ^--- Here");
-        assert_eq!(entry_lexer_error("mul a, 256"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"256\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 256\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nmul\n^--- Here");
+        assert_eq!(entry_lexer_error("mul hl"), "In file \"/main.gbc\" on line 1, column 5: Unexpected \"hl\", expected one of the following registers: a, b, c, d, e, h, l.\n\nmul hl\n    ^--- Here");
+        assert_eq!(entry_lexer_error("mul a"), "In file \"/main.gbc\" on line 1, column 5: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nmul a\n    ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 'Foo'"), "In file \"/main.gbc\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\nmul a, \'Foo\'\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, -2"), "In file \"/main.gbc\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\nmul a, -2\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 3"), "In file \"/main.gbc\" on line 1, column 8: Unexpected \"3\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 3\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 0"), "In file \"/main.gbc\" on line 1, column 8: Unexpected \"0\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 0\n       ^--- Here");
+        assert_eq!(entry_lexer_error("mul a, 256"), "In file \"/main.gbc\" on line 1, column 8: Unexpected \"256\", expected a integer argument that is a power 2 and <= 128.\n\nmul a, 256\n       ^--- Here");
     }
 
     #[test]
@@ -3731,14 +3731,14 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_div() {
-        assert_eq!(entry_lexer_error("div"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\ndiv\n^--- Here");
-        assert_eq!(entry_lexer_error("div hl"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"hl\", expected one of the following registers: a, b, c, d, e, h, l.\n\ndiv hl\n    ^--- Here");
-        assert_eq!(entry_lexer_error("div a"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\ndiv a\n    ^--- Here");
-        assert_eq!(entry_lexer_error("div a, 'Foo'"), "In file \"main.gb.s\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\ndiv a, \'Foo\'\n       ^--- Here");
-        assert_eq!(entry_lexer_error("div a, -2"), "In file \"main.gb.s\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\ndiv a, -2\n       ^--- Here");
-        assert_eq!(entry_lexer_error("div a, 3"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"3\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 3\n       ^--- Here");
-        assert_eq!(entry_lexer_error("div a, 0"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"0\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 0\n       ^--- Here");
-        assert_eq!(entry_lexer_error("div a, 256"), "In file \"main.gb.s\" on line 1, column 8: Unexpected \"256\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 256\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\ndiv\n^--- Here");
+        assert_eq!(entry_lexer_error("div hl"), "In file \"/main.gbc\" on line 1, column 5: Unexpected \"hl\", expected one of the following registers: a, b, c, d, e, h, l.\n\ndiv hl\n    ^--- Here");
+        assert_eq!(entry_lexer_error("div a"), "In file \"/main.gbc\" on line 1, column 5: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\ndiv a\n    ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 'Foo'"), "In file \"/main.gbc\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\ndiv a, \'Foo\'\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, -2"), "In file \"/main.gbc\" on line 1, column 8: Expected a integer argument that is a power 2 and <= 128.\n\ndiv a, -2\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 3"), "In file \"/main.gbc\" on line 1, column 8: Unexpected \"3\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 3\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 0"), "In file \"/main.gbc\" on line 1, column 8: Unexpected \"0\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 0\n       ^--- Here");
+        assert_eq!(entry_lexer_error("div a, 256"), "In file \"/main.gbc\" on line 1, column 8: Unexpected \"256\", expected a integer argument that is a power 2 and <= 128.\n\ndiv a, 256\n       ^--- Here");
     }
 
     #[test]
@@ -3752,10 +3752,10 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_incx() {
-        assert_eq!(entry_lexer_error("incx"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction label argument, expected \"[\" instead.\n\nincx\n^--- Here");
-        assert_eq!(entry_lexer_error("incx ["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\nincx [\n     ^--- Here");
-        assert_eq!(entry_lexer_error("incx []"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"]\", expected a expression as the label argument instead.\n\nincx []\n      ^--- Here");
-        assert_eq!(entry_lexer_error("incx [$1234"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nincx [$1234\n      ^--- Here");
+        assert_eq!(entry_lexer_error("incx"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction label argument, expected \"[\" instead.\n\nincx\n^--- Here");
+        assert_eq!(entry_lexer_error("incx ["), "In file \"/main.gbc\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\nincx [\n     ^--- Here");
+        assert_eq!(entry_lexer_error("incx []"), "In file \"/main.gbc\" on line 1, column 7: Unexpected \"]\", expected a expression as the label argument instead.\n\nincx []\n      ^--- Here");
+        assert_eq!(entry_lexer_error("incx [$1234"), "In file \"/main.gbc\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nincx [$1234\n      ^--- Here");
     }
 
     #[test]
@@ -3769,10 +3769,10 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_decx() {
-        assert_eq!(entry_lexer_error("decx"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction label argument, expected \"[\" instead.\n\ndecx\n^--- Here");
-        assert_eq!(entry_lexer_error("decx ["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\ndecx [\n     ^--- Here");
-        assert_eq!(entry_lexer_error("decx []"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"]\", expected a expression as the label argument instead.\n\ndecx []\n      ^--- Here");
-        assert_eq!(entry_lexer_error("decx [$1234"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\ndecx [$1234\n      ^--- Here");
+        assert_eq!(entry_lexer_error("decx"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction label argument, expected \"[\" instead.\n\ndecx\n^--- Here");
+        assert_eq!(entry_lexer_error("decx ["), "In file \"/main.gbc\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\ndecx [\n     ^--- Here");
+        assert_eq!(entry_lexer_error("decx []"), "In file \"/main.gbc\" on line 1, column 7: Unexpected \"]\", expected a expression as the label argument instead.\n\ndecx []\n      ^--- Here");
+        assert_eq!(entry_lexer_error("decx [$1234"), "In file \"/main.gbc\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\ndecx [$1234\n      ^--- Here");
     }
 
     #[test]
@@ -3847,10 +3847,10 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_addw() {
-        assert_eq!(entry_lexer_error("addw a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\naddw a\n     ^--- Here");
-        assert_eq!(entry_lexer_error("addw af"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\naddw af\n     ^--- Here");
-        assert_eq!(entry_lexer_error("addw hl,"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\naddw hl,\n       ^--- Here");
-        assert_eq!(entry_lexer_error("addw hl,bc"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\naddw hl,bc\n        ^--- Here");
+        assert_eq!(entry_lexer_error("addw a"), "In file \"/main.gbc\" on line 1, column 6: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\naddw a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("addw af"), "In file \"/main.gbc\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\naddw af\n     ^--- Here");
+        assert_eq!(entry_lexer_error("addw hl,"), "In file \"/main.gbc\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\naddw hl,\n       ^--- Here");
+        assert_eq!(entry_lexer_error("addw hl,bc"), "In file \"/main.gbc\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\naddw hl,bc\n        ^--- Here");
     }
 
     #[test]
@@ -3912,10 +3912,10 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_subw() {
-        assert_eq!(entry_lexer_error("subw a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nsubw a\n     ^--- Here");
-        assert_eq!(entry_lexer_error("subw af"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nsubw af\n     ^--- Here");
-        assert_eq!(entry_lexer_error("subw hl,"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nsubw hl,\n       ^--- Here");
-        assert_eq!(entry_lexer_error("subw hl,bc"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nsubw hl,bc\n        ^--- Here");
+        assert_eq!(entry_lexer_error("subw a"), "In file \"/main.gbc\" on line 1, column 6: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nsubw a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("subw af"), "In file \"/main.gbc\" on line 1, column 6: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nsubw af\n     ^--- Here");
+        assert_eq!(entry_lexer_error("subw hl,"), "In file \"/main.gbc\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nsubw hl,\n       ^--- Here");
+        assert_eq!(entry_lexer_error("subw hl,bc"), "In file \"/main.gbc\" on line 1, column 9: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nsubw hl,bc\n        ^--- Here");
     }
 
     #[test]
@@ -3971,12 +3971,12 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_retx() {
-        assert_eq!(entry_lexer_error("retx"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nretx\n^--- Here");
-        assert_eq!(entry_lexer_error("retx bc"), "In file \"main.gb.s\" on line 1, column 6: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nretx bc\n     ^--- Here");
-        assert_eq!(entry_lexer_error("retx ["), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\nretx [\n     ^--- Here");
-        assert_eq!(entry_lexer_error("retx [af"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nretx [af\n      ^--- Here");
-        assert_eq!(entry_lexer_error("retx [a"), "In file \"main.gb.s\" on line 1, column 7: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nretx [a\n      ^--- Here");
-        assert_eq!(entry_lexer_error("retx [4"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nretx [4\n      ^--- Here");
+        assert_eq!(entry_lexer_error("retx"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nretx\n^--- Here");
+        assert_eq!(entry_lexer_error("retx bc"), "In file \"/main.gbc\" on line 1, column 6: Unexpected \"bc\", expected one of the following registers: a, b, c, d, e, h, l.\n\nretx bc\n     ^--- Here");
+        assert_eq!(entry_lexer_error("retx ["), "In file \"/main.gbc\" on line 1, column 6: Unexpected end of input while parsing instruction label argument.\n\nretx [\n     ^--- Here");
+        assert_eq!(entry_lexer_error("retx [af"), "In file \"/main.gbc\" on line 1, column 7: Unexpected \"af\", expected one of the following registers: bc, de, hl.\n\nretx [af\n      ^--- Here");
+        assert_eq!(entry_lexer_error("retx [a"), "In file \"/main.gbc\" on line 1, column 7: Unexpected \"a\", expected one of the following registers: bc, de, hl.\n\nretx [a\n      ^--- Here");
+        assert_eq!(entry_lexer_error("retx [4"), "In file \"/main.gbc\" on line 1, column 7: Unexpected end of input while parsing instruction label argument, expected \"]\" instead.\n\nretx [4\n      ^--- Here");
     }
 
     #[test]
@@ -4559,24 +4559,24 @@ mod test {
 
     #[test]
     fn test_error_meta_instruction_ldxa() {
-        assert_eq!(entry_lexer_error("ldxa"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa\n^--- Here");
-        assert_eq!(entry_lexer_error("ldxa a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa a\n     ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa bc"), "In file \"main.gb.s\" on line 1, column 6: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa bc\n     ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa [4]"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa [4]\n       ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa [4],"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa [4],\n        ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa [4],["), "In file \"main.gb.s\" on line 1, column 10: Unexpected end of input while parsing instruction label argument.\n\nldxa [4],[\n         ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa [4],af"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"af\", expected one of the following registers: a, b, c, d, e, h, l, bc, de, hl.\n\nldxa [4],af\n         ^--- Here");
-        assert_eq!(entry_lexer_error("ldxa 4,a"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"ConstExpression\" while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa 4,a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa\n^--- Here");
+        assert_eq!(entry_lexer_error("ldxa a"), "In file \"/main.gbc\" on line 1, column 6: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa a\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa bc"), "In file \"/main.gbc\" on line 1, column 6: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa bc\n     ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4]"), "In file \"/main.gbc\" on line 1, column 8: Unexpected end of input while parsing instruction arguments, expected a \"Comma\" token instead.\n\nldxa [4]\n       ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4],"), "In file \"/main.gbc\" on line 1, column 9: Unexpected end of input while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa [4],\n        ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4],["), "In file \"/main.gbc\" on line 1, column 10: Unexpected end of input while parsing instruction label argument.\n\nldxa [4],[\n         ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa [4],af"), "In file \"/main.gbc\" on line 1, column 10: Unexpected \"af\", expected one of the following registers: a, b, c, d, e, h, l, bc, de, hl.\n\nldxa [4],af\n         ^--- Here");
+        assert_eq!(entry_lexer_error("ldxa 4,a"), "In file \"/main.gbc\" on line 1, column 6: Unexpected token \"ConstExpression\" while parsing instruction arguments, expected a \"Register\" token instead.\n\nldxa 4,a\n     ^--- Here");
     }
 
     // If Statements ----------------------------------------------------------
     #[test]
     fn test_error_if_statement_conditions() {
-        assert_eq!(entry_lexer_error("IF nop THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"Instruction\", expected a ConstExpression as IF condition instead.\n\nIF nop THEN ENDIF\n   ^--- Here");
-        assert_eq!(entry_lexer_error("IF 2 2 THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 1: IF condition must consist of a single ConstExpression.\n\nIF 2 2 THEN ENDIF\n^--- Here");
-        assert_eq!(entry_lexer_error("IF 2 nop THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 1: IF condition must consist of a single ConstExpression.\n\nIF 2 nop THEN ENDIF\n^--- Here");
-        assert_eq!(entry_lexer_error("global_label:\nIF global_label THEN ENDIF"), "In file \"main.gb.s\" on line 2, column 4: Unexpected \"Expression\", expected a ConstExpression as IF condition instead.\n\nIF global_label THEN ENDIF\n   ^--- Here");
-        assert_eq!(entry_lexer_error("IF 1 THEN ELSE IF nop THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 19: Unexpected \"Instruction\", expected a ConstExpression as IF condition instead.\n\nIF 1 THEN ELSE IF nop THEN ENDIF\n                  ^--- Here");
+        assert_eq!(entry_lexer_error("IF nop THEN ENDIF"), "In file \"/main.gbc\" on line 1, column 4: Unexpected \"Instruction\", expected a ConstExpression as IF condition instead.\n\nIF nop THEN ENDIF\n   ^--- Here");
+        assert_eq!(entry_lexer_error("IF 2 2 THEN ENDIF"), "In file \"/main.gbc\" on line 1, column 1: IF condition must consist of a single ConstExpression.\n\nIF 2 2 THEN ENDIF\n^--- Here");
+        assert_eq!(entry_lexer_error("IF 2 nop THEN ENDIF"), "In file \"/main.gbc\" on line 1, column 1: IF condition must consist of a single ConstExpression.\n\nIF 2 nop THEN ENDIF\n^--- Here");
+        assert_eq!(entry_lexer_error("global_label:\nIF global_label THEN ENDIF"), "In file \"/main.gbc\" on line 2, column 4: Unexpected \"Expression\", expected a ConstExpression as IF condition instead.\n\nIF global_label THEN ENDIF\n   ^--- Here");
+        assert_eq!(entry_lexer_error("IF 1 THEN ELSE IF nop THEN ENDIF"), "In file \"/main.gbc\" on line 1, column 19: Unexpected \"Instruction\", expected a ConstExpression as IF condition instead.\n\nIF 1 THEN ELSE IF nop THEN ENDIF\n                  ^--- Here");
     }
 
     #[test]

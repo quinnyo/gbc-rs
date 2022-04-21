@@ -11,11 +11,11 @@ use super::util::instruction;
 
 
 // Types ----------------------------------------------------------------------
-pub type OptimizerNotes = Vec<(InnerToken, String)>;
+pub type OptimizerInfo = (InnerToken, String);
 
 
 // Low Level Instruction Optimizer --------------------------------------------
-pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut OptimizerNotes, strip_debug: bool) -> bool {
+pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Vec<OptimizerInfo>, strip_debug: bool) -> bool {
 
     fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<(u16, i32, &OptionalDataExpression, &[u8], &InnerToken)> {
         if let Some(entry) = entries.get(i) {
@@ -134,7 +134,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Opt
 
 #[allow(clippy::too_many_arguments)]
 fn optimize_instructions(
-    notes: &mut OptimizerNotes,
+    notes: &mut Vec<OptimizerInfo>,
     op_code: u16,
     end_of_instruction: i32,
     expression: &OptionalDataExpression,

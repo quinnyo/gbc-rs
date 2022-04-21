@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 
 // Modules --------------------------------------------------------------------
-mod analyzer;
+mod analysis;
 mod optimizer;
 mod section;
 mod util;
@@ -13,6 +13,7 @@ mod util;
 
 // External Dependencies ------------------------------------------------------
 use file_io::FileReader;
+use lsp_types::Location;
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -22,9 +23,10 @@ use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryTo
 use crate::expression::{ExpressionResult, ExpressionValue};
 use crate::expression::evaluator::{ConstantIndex, ConstantUsageMap, EvaluatorContext, EvaluatorConstant, LabelUsageMap, UsageInformation};
 use self::section::Section;
+use self::analysis::location_from_file_index;
 pub use crate::expression::evaluator::AccessKind;
-pub use self::analyzer::AnalyzerNotes;
-pub use self::optimizer::OptimizerNotes;
+pub use self::analysis::{Analysis, AnalysisHint, AnalysisLint, AnalysisSymbol, AnalysisMacroExpansion};
+pub use self::optimizer::OptimizerInfo;
 pub use self::section::entry::{SectionEntry, EntryData};
 
 
@@ -39,8 +41,10 @@ pub struct SegmentUsage {
     pub ranges: Vec<(bool, Option<String>, usize, usize)>
 }
 
+#[derive(Copy, Clone)]
 pub struct LinkerContext<'a> {
     pub files: &'a [LexerFile],
+    pub sections: &'a [Section],
     pub constants: &'a HashMap<ConstantIndex, EvaluatorConstant>,
     pub constant_values: &'a HashMap<ConstantIndex, ExpressionResult>,
     pub constant_usage: &'a ConstantUsageMap,
@@ -48,23 +52,29 @@ pub struct LinkerContext<'a> {
     pub label_addresses: &'a HashMap<usize, usize>,
     pub label_usage: &'a LabelUsageMap,
     pub integers: &'a IntegerMap,
-    pub optimizations: &'a OptimizerNotes,
-    pub analyzer_notes: &'a AnalyzerNotes,
     pub macro_defs: &'a [MacroDefinition],
     pub macro_calls: &'a [MacroCall]
 }
 
+impl<'a> LinkerContext<'a> {
+    pub fn section_entries(&self) -> Vec<&[SectionEntry]> {
+        let mut entries = Vec::with_capacity(self.sections.len());
+        for s in self.sections {
+            entries.push(&s.entries[..]);
+        }
+        entries
+    }
+}
+
 
 // Linker Implementation ------------------------------------------------------
-#[derive(Clone)]
 pub struct Linker {
-    pub sections: Vec<Section>,
+    sections: Vec<Section>,
     context: EvaluatorContext,
     usage: UsageInformation,
-    optimizations: OptimizerNotes,
-    analyzer_notes: AnalyzerNotes,
     macro_calls: Vec<MacroCall>,
     macro_defs: Vec<MacroDefinition>,
+    pub analysis: Analysis,
     files: Vec<LexerFile>
 }
 
@@ -83,6 +93,7 @@ impl Linker {
         let macro_calls = lexer.macro_calls;
         let mut linker = Self::new(
             file_reader,
+            &files,
             lexer.tokens,
             macro_calls.clone(),
             macro_defs,
@@ -97,8 +108,10 @@ impl Linker {
         Ok(linker)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new<R: FileReader>(
         file_reader: &R,
+        files: &[LexerFile],
         tokens: Vec<EntryToken>,
         macro_calls: Vec<MacroCall>,
         macro_defs: Vec<MacroDefinition>,
@@ -176,69 +189,89 @@ impl Linker {
 
         Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
 
-        let mut optimizations = Vec::new();
+        let mut hints = Vec::with_capacity(128);
         if optimize {
             // Run passes until no more optimizations were applied
-            while Self::optimize_instructions(&mut sections, &mut optimizations, strip_debug) {
+            while Self::optimize_instructions(&mut sections, &mut hints, strip_debug) {
                 Self::resolve_sections(&mut sections, &mut context, &mut usage)?;
             }
         }
 
-        // Verify / Analyze
-        let mut analyzer_notes = Vec::new();
+        // Verify
         for s in sections.iter() {
-            analyzer::analyze_section_entries(&s.entries, &mut analyzer_notes);
             s.validate_jump_targets(&sections)?;
             s.validate_bounds()?;
         }
+
+        // Analyze
+        let ctx = LinkerContext {
+            files,
+            sections: &sections[..],
+            constants: &context.raw_constants,
+            constant_values: &context.constants,
+            constant_usage: &usage.constants,
+            labels: &context.raw_labels,
+            label_addresses: &context.label_addresses,
+            label_usage: &usage.labels,
+            integers: &usage.integers,
+            macro_defs: &macro_defs[..],
+            macro_calls: &macro_calls[..]
+        };
+        let analysis = Analysis::from_context(ctx, hints);
 
         Ok(Self {
             sections,
             context,
             usage,
-            optimizations,
-            analyzer_notes,
             macro_calls,
             macro_defs,
+            analysis,
             files: Vec::new()
         })
     }
 
-    pub fn section_entries(&self) -> Vec<&[SectionEntry]> {
-        let mut entries = Vec::with_capacity(self.sections.len());
-        for s in &self.sections {
-            entries.push(&s.entries[..]);
+    pub fn address_location_map(&self) -> HashMap<usize, Location> {
+        let mut locations = HashMap::with_capacity(4096);
+        let ctx = self.context();
+        for entries in ctx.section_entries() {
+            for entry in entries {
+                if entry.is_rom() {
+                    let location = location_from_file_index(
+                        ctx.files,
+                        entry.inner.file_index,
+                        entry.inner.start_index,
+                        entry.inner.end_index
+                    );
+                    locations.insert(entry.offset, location);
+                }
+            }
+        }
+        locations
+    }
+
+    pub fn rom_entry_map(&self) -> HashMap<usize, SectionEntry> {
+        let ctx = self.context();
+        let mut entries = HashMap::with_capacity(2048);
+        for section in ctx.section_entries() {
+            for entry in section {
+                if entry.is_rom() {
+                    entries.insert(entry.offset, entry.clone());
+                }
+            }
         }
         entries
     }
 
-    pub fn context(&self) -> LinkerContext {
-        LinkerContext {
-            files: &self.files[..],
-            constants: &self.context.raw_constants,
-            constant_values: &self.context.constants,
-            constant_usage: &self.usage.constants,
-            labels: &self.context.raw_labels,
-            label_addresses: &self.context.label_addresses,
-            label_usage: &self.usage.labels,
-            integers: &self.usage.integers,
-            optimizations: &self.optimizations,
-            analyzer_notes: &self.analyzer_notes,
-            macro_defs: &self.macro_defs[..],
-            macro_calls: &self.macro_calls[..]
-        }
-    }
-
-    pub fn to_symbol_list(&self) -> Vec<(usize, usize, String)> {
-        let mut symbols = Vec::new();
+    pub fn symbol_list(&self) -> Vec<(usize, usize, String)> {
+        let mut symbols = Vec::with_capacity(512);
         for section in &self.sections {
             symbols.append(&mut section.symbol_list());
         }
         symbols
     }
 
-    pub fn to_usage_list(&self) -> Vec<SegmentUsage> {
-        let mut segments = Vec::new();
+    pub fn usage_list(&self) -> Vec<SegmentUsage> {
+        let mut segments = Vec::with_capacity(128);
         let mut current_segment = SegmentUsage::default();
         for section in &self.sections {
             if (current_segment.name.as_str(), current_segment.bank) != (section.segment.as_str(), section.bank) {
@@ -280,6 +313,22 @@ impl Linker {
             s.write_to_rom_buffer(&mut buffer[..]);
         }
         buffer
+    }
+
+    fn context(&self) -> LinkerContext {
+        LinkerContext {
+            files: &self.files[..],
+            sections: &self.sections[..],
+            constants: &self.context.raw_constants,
+            constant_values: &self.context.constants,
+            constant_usage: &self.usage.constants,
+            labels: &self.context.raw_labels,
+            label_addresses: &self.context.label_addresses,
+            label_usage: &self.usage.labels,
+            integers: &self.usage.integers,
+            macro_defs: &self.macro_defs[..],
+            macro_calls: &self.macro_calls[..]
+        }
     }
 
     fn parse_entries(
@@ -452,7 +501,7 @@ impl Linker {
         Ok(())
     }
 
-    fn optimize_instructions(sections: &mut [Section], notes: &mut OptimizerNotes, strip_debug: bool) -> bool {
+    fn optimize_instructions(sections: &mut [Section], notes: &mut Vec<OptimizerInfo>, strip_debug: bool) -> bool {
         let mut optimizations_applied = false;
         for s in sections.iter_mut() {
             if s.is_rom {
@@ -505,7 +554,7 @@ mod test {
     use file_io::FileReader;
 
     pub fn linker<S: Into<String>>(s: S) -> Linker {
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, false).expect("Linker failed")
     }
 
@@ -520,38 +569,38 @@ mod test {
 
     pub fn linker_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_child<S: Into<String>>(s: S, c: S) -> Linker {
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), Vec::new(), HashMap::new(), false, false).expect("Linker failed")
     }
 
     pub fn linker_error_child<S: Into<String>>(s: S, c: S) -> String {
         colored::control::set_override(false);
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex_child(s.into(), c.into()), Vec::new(), HashMap::new(), false, false).err().expect("Expected a Linker Error").to_string()
     }
 
     pub fn linker_strip_debug<S: Into<String>>(s: S) -> Linker {
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), true, false).expect("Debug stripping failed")
     }
 
     pub fn linker_optimize<S: Into<String>>(s: S) -> Linker {
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), true, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_optimize_keep_debug<S: Into<String>>(s: S) -> Linker {
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex(s.into()), Vec::new(), HashMap::new(), false, true).expect("Instruction optimization failed")
     }
 
     pub fn linker_binary<S: Into<String>>(s: S, d: Vec<u8>) -> Linker {
-        let reader = MockFileReader::default();
+        let reader = MockFileReader::new();
         Linker::from_lexer(&reader, entry_lex_binary(s.into(), d), Vec::new(), HashMap::new(), false, false).expect("Binary Linker failed")
     }
 
@@ -601,48 +650,48 @@ mod test {
     // Constant Evaluation ----------------------------------------------------
     #[test]
     fn test_error_constant_eval_recursive() {
-        assert_eq!(linker_error("CONST A B\nCONST B C\nCONST C A"), "In file \"main.gb.s\" on line 3, column 9: Recursive declaration of constant \"A\".\n\nCONST C A\n        ^--- Here\n\nInitial declaration was in file \"main.gb.s\" on line 1, column 7:\n\nCONST A B\n      ^--- Here");
+        assert_eq!(linker_error("CONST A B\nCONST B C\nCONST C A"), "In file \"/main.gbc\" on line 3, column 9: Recursive declaration of constant \"A\".\n\nCONST C A\n        ^--- Here\n\nInitial declaration was in file \"/main.gbc\" on line 1, column 7:\n\nCONST A B\n      ^--- Here");
     }
 
     #[test]
     fn test_error_constant_eval_undeclared() {
-        assert_eq!(linker_error("CONST A B\nCONST B C\nCONST C D"), "In file \"main.gb.s\" on line 3, column 9: Reference to undeclared constant \"D\".\n\nCONST C D\n        ^--- Here");
+        assert_eq!(linker_error("CONST A B\nCONST B C\nCONST C D"), "In file \"/main.gbc\" on line 3, column 9: Reference to undeclared constant \"D\".\n\nCONST C D\n        ^--- Here");
     }
 
     #[test]
     fn test_error_constant_eval_file_local() {
-        assert_eq!(linker_error_child("CONST A B\nINCLUDE 'child.gb.s'", "CONST B 1"), "In file \"main.gb.s\" on line 1, column 9: Reference to undeclared constant \"B\".\n\nCONST A B\n        ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
-        assert_eq!(linker_error_child("CONST A 1 + B\nINCLUDE 'child.gb.s'", "CONST B 1"), "In file \"main.gb.s\" on line 1, column 13: Reference to undeclared constant \"B\".\n\nCONST A 1 + B\n            ^--- Here\n\nA non-global constant with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
-        assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'child.gb.s'", "CONST B A"), "In file \"child.gb.s\" on line 1, column 9: Reference to undeclared constant \"A\".\n\nCONST B A\n        ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
-        assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'child.gb.s'", "CONST B 1 + A"), "In file \"child.gb.s\" on line 1, column 13: Reference to undeclared constant \"A\".\n\nCONST B 1 + A\n            ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"main.gb.s\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A B\nINCLUDE 'second.gbc'", "CONST B 1"), "In file \"/main.gbc\" on line 1, column 9: Reference to undeclared constant \"B\".\n\nCONST A B\n        ^--- Here\n\nA non-global constant with the same name is defined in file \"/second.gbc\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A 1 + B\nINCLUDE 'second.gbc'", "CONST B 1"), "In file \"/main.gbc\" on line 1, column 13: Reference to undeclared constant \"B\".\n\nCONST A 1 + B\n            ^--- Here\n\nA non-global constant with the same name is defined in file \"/second.gbc\" on line 1, column 7:\n\nCONST B 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'second.gbc'", "CONST B A"), "In file \"/second.gbc\" on line 1, column 9: Reference to undeclared constant \"A\".\n\nCONST B A\n        ^--- Here\n\nincluded from file \"/main.gbc\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"/main.gbc\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
+        assert_eq!(linker_error_child("CONST A 1\nINCLUDE 'second.gbc'", "CONST B 1 + A"), "In file \"/second.gbc\" on line 1, column 13: Reference to undeclared constant \"A\".\n\nCONST B 1 + A\n            ^--- Here\n\nincluded from file \"/main.gbc\" on line 2, column 9\n\nA non-global constant with the same name is defined in file \"/main.gbc\" on line 1, column 7:\n\nCONST A 1\n      ^--- Here");
     }
 
     #[test]
     fn test_const_default_redeclaration() {
-        let s = linker_child("GLOBAL DEFAULT CONST foo 1\nINCLUDE 'child.gb.s'", "GLOBAL CONST foo 2");
+        let s = linker_child("GLOBAL DEFAULT CONST foo 1\nINCLUDE 'second.gbc'", "GLOBAL CONST foo 2");
         println!("{:#?}", s.context().constants);
-        let s = linker_child("GLOBAL CONST foo 2\nINCLUDE 'child.gb.s'", "GLOBAL DEFAULT CONST foo 1");
+        let s = linker_child("GLOBAL CONST foo 2\nINCLUDE 'second.gbc'", "GLOBAL DEFAULT CONST foo 1");
         println!("{:#?}", s.context().constants);
     }
 
     #[test]
     fn test_error_label_lookup_file_local() {
-        assert_eq!(linker_error_child("SECTION ROM0\nINCLUDE 'child.gb.s'\nDW child_label", "child_label:"), "In file \"main.gb.s\" on line 3, column 4: Reference to undeclared constant \"child_label\".\n\nDW child_label\n   ^--- Here\n\nA non-global label with the same name is defined in file \"child.gb.s\" on line 1, column 1:\n\nchild_label:\n^--- Here");
+        assert_eq!(linker_error_child("SECTION ROM0\nINCLUDE 'second.gbc'\nDW child_label", "child_label:"), "In file \"/main.gbc\" on line 3, column 4: Reference to undeclared constant \"child_label\".\n\nDW child_label\n   ^--- Here\n\nA non-global label with the same name is defined in file \"/second.gbc\" on line 1, column 1:\n\nchild_label:\n^--- Here");
     }
 
     // Section Mapping --------------------------------------------------------
     #[test]
     fn test_error_entry_before_any_section() {
-        assert_eq!(linker_error("ld a,a"), "In file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here");
+        assert_eq!(linker_error("ld a,a"), "In file \"/main.gbc\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here");
     }
 
     #[test]
     fn test_error_section_declaration() {
-        assert_eq!(linker_error("SECTION 4,ROM0"), "In file \"main.gb.s\" on line 1, column 1: Invalid section name, expected a string value instead.\n\nSECTION 4,ROM0\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0['foo']"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset, expected a positive integer value instead.\n\nSECTION ROM0[\'foo\']\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[-1]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset, expected a positive integer value instead.\n\nSECTION ROM0[-1]\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[$0000],BANK['Foo']"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index, expected a positive integer value instead.\n\nSECTION ROM0[$0000],BANK[\'Foo\']\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[$0000],BANK[-1]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index, expected a positive integer value instead.\n\nSECTION ROM0[$0000],BANK[-1]\n^--- Here");
+        assert_eq!(linker_error("SECTION 4,ROM0"), "In file \"/main.gbc\" on line 1, column 1: Invalid section name, expected a string value instead.\n\nSECTION 4,ROM0\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0['foo']"), "In file \"/main.gbc\" on line 1, column 1: Invalid section offset, expected a positive integer value instead.\n\nSECTION ROM0[\'foo\']\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[-1]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section offset, expected a positive integer value instead.\n\nSECTION ROM0[-1]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000],BANK['Foo']"), "In file \"/main.gbc\" on line 1, column 1: Invalid section bank index, expected a positive integer value instead.\n\nSECTION ROM0[$0000],BANK[\'Foo\']\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000],BANK[-1]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section bank index, expected a positive integer value instead.\n\nSECTION ROM0[$0000],BANK[-1]\n^--- Here");
     }
 
     #[test]
@@ -727,44 +776,44 @@ mod test {
 
     #[test]
     fn test_error_section_bank() {
-        assert_eq!(linker_error("SECTION ROM0,BANK[1]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index of 1, section does not support banking.\n\nSECTION ROM0,BANK[1]\n^--- Here");
-        assert_eq!(linker_error("SECTION RAMX,BANK[8]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section bank index of 8, must lie between 0 and 7.\n\nSECTION RAMX,BANK[8]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0,BANK[1]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section bank index of 1, section does not support banking.\n\nSECTION ROM0,BANK[1]\n^--- Here");
+        assert_eq!(linker_error("SECTION RAMX,BANK[8]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section bank index of 8, must lie between 0 and 7.\n\nSECTION RAMX,BANK[8]\n^--- Here");
     }
 
     #[test]
     fn test_error_section_offset_in_range() {
         linker("SECTION ROM0[$3FFF]");
-        assert_eq!(linker_error("SECTION ROM0[$4000]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset of $4000, must lie between >=$0000 and <=$3fff\n\nSECTION ROM0[$4000]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$4000]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section offset of $4000, must lie between >=$0000 and <=$3fff\n\nSECTION ROM0[$4000]\n^--- Here");
         linker("SECTION ROMX[$4000]");
-        assert_eq!(linker_error("SECTION ROMX[$3FFF]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset of $3fff, must lie between >=$4000 and <=$7fff\n\nSECTION ROMX[$3FFF]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROMX[$3FFF]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section offset of $3fff, must lie between >=$4000 and <=$7fff\n\nSECTION ROMX[$3FFF]\n^--- Here");
         linker("SECTION ROMX[$7FFF]");
-        assert_eq!(linker_error("SECTION ROMX[$8000]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section offset of $8000, must lie between >=$4000 and <=$7fff\n\nSECTION ROMX[$8000]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROMX[$8000]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section offset of $8000, must lie between >=$4000 and <=$7fff\n\nSECTION ROMX[$8000]\n^--- Here");
     }
 
     #[test]
     fn test_error_section_size_in_range() {
         linker("SECTION ROM0[$0000][$4000]");
-        assert_eq!(linker_error("SECTION ROM0[$0000][$4001]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section size of $4001, may not exceeed upper section bound at $4000. Exceeds bound by 1 bytes(s).\n\nSECTION ROM0[$0000][$4001]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000][$4001]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section size of $4001, may not exceeed upper section bound at $4000. Exceeds bound by 1 bytes(s).\n\nSECTION ROM0[$0000][$4001]\n^--- Here");
         linker("SECTION ROMX[$4000][$4000]");
-        assert_eq!(linker_error("SECTION ROMX[$6000][$2001]"), "In file \"main.gb.s\" on line 1, column 1: Invalid section size of $2001, may not exceeed upper section bound at $8000. Exceeds bound by 1 bytes(s).\n\nSECTION ROMX[$6000][$2001]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROMX[$6000][$2001]"), "In file \"/main.gbc\" on line 1, column 1: Invalid section size of $2001, may not exceeed upper section bound at $8000. Exceeds bound by 1 bytes(s).\n\nSECTION ROMX[$6000][$2001]\n^--- Here");
     }
 
     #[test]
     fn test_error_entry_outside_rom_segment() {
-        assert_eq!(linker_error("SECTION WRAM0\nld a,a"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nld a,a\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nld a,[$0000]"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nld a,[$0000]\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nbrk"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nbrk\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nmsg 'foo'"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nmsg \'foo\'\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nDB 0"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDB 0\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nDW 0"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDW 0\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nDS 0 'Hello World'"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDS 0 \'Hello World\'\n^--- Here");
-        assert_eq!(linker_error("SECTION WRAM0\nDS 'Hello World'"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDS \'Hello World\'\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nld a,a"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nld a,a\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nld a,[$0000]"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nld a,[$0000]\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nbrk"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nbrk\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nmsg 'foo'"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Instruction outside of ROM segment.\n\nmsg \'foo\'\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nDB 0"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDB 0\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nDW 0"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDW 0\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nDS 0 'Hello World'"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDS 0 \'Hello World\'\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nDS 'Hello World'"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Data Declaration outside of ROM segment.\n\nDS \'Hello World\'\n^--- Here");
     }
 
     #[test]
     fn test_error_entry_outside_ram_segment() {
-        assert_eq!(linker_error("SECTION ROM0\nDB"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Byte Variable outside of RAM segment.\n\nDB\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDW"), "In file \"main.gb.s\" on line 2, column 1: Unexpected Word Variable outside of RAM segment.\n\nDW\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDB"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Byte Variable outside of RAM segment.\n\nDB\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDW"), "In file \"/main.gbc\" on line 2, column 1: Unexpected Word Variable outside of RAM segment.\n\nDW\n^--- Here");
     }
 
     // ROM Buffer -------------------------------------------------------------
@@ -785,7 +834,7 @@ mod test {
     // Symbols ----------------------------------------------------------------
     #[test]
     fn test_symbols() {
-        let s = linker("SECTION ROM0\nglobal:\n.local:\nSECTION ROMX\nglobal_2:\n.local:\nSECTION WRAM0\nvar: DB\nSECTION RAMX,BANK[2]\nvar_two: DB\nSECTION HRAM\nbuffer: DS 5").to_symbol_list();
+        let s = linker("SECTION ROM0\nglobal:\n.local:\nSECTION ROMX\nglobal_2:\n.local:\nSECTION WRAM0\nvar: DB\nSECTION RAMX,BANK[2]\nvar_two: DB\nSECTION HRAM\nbuffer: DS 5").symbol_list();
         assert_eq!(s, vec![
             (0, 0, "global".to_string()),
             (0, 0, "global.local".to_string()),
@@ -795,7 +844,7 @@ mod test {
             (0, 49152, "var".to_string()),
             (0, 65408, "buffer".to_string())
         ]);
-        let s = linker("SECTION ROM0\nglobal:\nSECTION ROM0[$100]\n.local:").to_symbol_list();
+        let s = linker("SECTION ROM0\nglobal:\nSECTION ROM0[$100]\n.local:").symbol_list();
         assert_eq!(s, vec![
             (0, 0, "global".to_string()),
             (0, 256, "local".to_string()),
@@ -805,7 +854,7 @@ mod test {
     // Usage ------------------------------------------------------------------
     #[test]
     fn test_usage() {
-        let u = linker("SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'GameRam',WRAM0[$C3B0]\nSECTION 'Vars',WRAM0[$C000]\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128").to_usage_list();
+        let u = linker("SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'GameRam',WRAM0[$C3B0]\nSECTION 'Vars',WRAM0[$C000]\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128").usage_list();
         assert_eq!(u, vec![
             SegmentUsage {
                 name: "ROM0".to_string(),
@@ -940,7 +989,7 @@ mod test {
 
     #[test]
     fn test_error_if_statement_condition() {
-        assert_eq!(linker_error("SECTION ROM0\nIF A THEN DB 1 ENDIF"), "In file \"main.gb.s\" on line 2, column 4: Reference to undeclared constant \"A\".\n\nIF A THEN DB 1 ENDIF\n   ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nIF A THEN DB 1 ENDIF"), "In file \"/main.gbc\" on line 2, column 4: Reference to undeclared constant \"A\".\n\nIF A THEN DB 1 ENDIF\n   ^--- Here");
     }
 
     #[test]
@@ -1011,7 +1060,7 @@ mod test {
     fn test_if_statement_unreachable_label() {
         assert_eq!(
             linker_error("SECTION ROM0\ncall global_label\nIF 0 THEN\nglobal_label:\nENDIF"),
-            "In file \"main.gb.s\" on line 2, column 6: Reference to unreachable label\n\ncall global_label\n     ^--- Here\n\nLabel is declared inside currently inactive IF branch in file \"main.gb.s\" on line 4, column 1:\n\nglobal_label:\n^--- Here"
+            "In file \"/main.gbc\" on line 2, column 6: Reference to unreachable label\n\ncall global_label\n     ^--- Here\n\nLabel is declared inside currently inactive IF branch in file \"/main.gbc\" on line 4, column 1:\n\nglobal_label:\n^--- Here"
         );
     }
 
@@ -1139,13 +1188,13 @@ mod test {
 
     #[test]
     fn test_error_for_statement_inner_constant_declaration() {
-        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT CONST foo x + 1ENDFOR"), "In file \"main.gb.s\" on line 2, column 30: Constant declaration is not allowed inside of a FOR statement body.\n\nFOR x IN 0 TO 2 REPEAT CONST foo x + 1ENDFOR\n                             ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2 REPEAT CONST foo x + 1ENDFOR"), "In file \"/main.gbc\" on line 2, column 30: Constant declaration is not allowed inside of a FOR statement body.\n\nFOR x IN 0 TO 2 REPEAT CONST foo x + 1ENDFOR\n                             ^--- Here");
     }
 
     #[test]
     fn test_error_for_statement_max_iterations() {
         linker("SECTION ROM0\nFOR x IN 0 TO 2048 REPEAT ENDFOR");
-        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2049 REPEAT ENDFOR"), "In file \"main.gb.s\" on line 2, column 1: FOR statement with 2049 iterations exceeds the maximum of 2048 allowed iterations.\n\nFOR x IN 0 TO 2049 REPEAT ENDFOR\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nFOR x IN 0 TO 2049 REPEAT ENDFOR"), "In file \"/main.gbc\" on line 2, column 1: FOR statement with 2049 iterations exceeds the maximum of 2048 allowed iterations.\n\nFOR x IN 0 TO 2049 REPEAT ENDFOR\n^--- Here");
     }
 
     // Macros -----------------------------------------------------------------
@@ -1157,9 +1206,9 @@ mod test {
     // Blocks -----------------------------------------------------------------
     #[test]
     fn test_error_block_using() {
-        assert_eq!(linker_error("BLOCK USING 'cmd' nop ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected Instruction, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' nop ENDBLOCK\n                  ^--- Here");
-        assert_eq!(linker_error("global:\nBLOCK USING 'cmd' DW global ENDBLOCK"), "In file \"main.gb.s\" on line 2, column 19: Only constant Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' DW global ENDBLOCK\n                  ^--- Here");
-        assert_eq!(linker_error("BLOCK USING 'cmd' global: ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 19: Unexpected ParentLabelDef, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' global: ENDBLOCK\n                  ^--- Here");
+        assert_eq!(linker_error("BLOCK USING 'cmd' nop ENDBLOCK"), "In file \"/main.gbc\" on line 1, column 19: Unexpected Instruction, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' nop ENDBLOCK\n                  ^--- Here");
+        assert_eq!(linker_error("global:\nBLOCK USING 'cmd' DW global ENDBLOCK"), "In file \"/main.gbc\" on line 2, column 19: Only constant Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' DW global ENDBLOCK\n                  ^--- Here");
+        assert_eq!(linker_error("BLOCK USING 'cmd' global: ENDBLOCK"), "In file \"/main.gbc\" on line 1, column 19: Unexpected ParentLabelDef, only Data Declarations are allowed inside of USING BLOCK\n\nBLOCK USING \'cmd\' global: ENDBLOCK\n                  ^--- Here");
     }
 
     #[test]

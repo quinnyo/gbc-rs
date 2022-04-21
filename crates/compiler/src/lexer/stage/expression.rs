@@ -630,8 +630,8 @@ mod test {
 
     #[test]
     fn test_error_constants_export() {
-        assert_eq!(expr_lexer_error("GLOBAL foo"), "In file \"main.gb.s\" on line 1, column 8: Incomplete GLOBAL declaration, expected a CONST keyword before name.\n\nGLOBAL foo\n       ^--- Here");
-        assert_eq!(expr_lexer_error("GLOBAL DEFAULT foo"), "In file \"main.gb.s\" on line 1, column 16: Unexpected token \"Name\" while parsing CONST declaration, expected \"CONST\" instead.\n\nGLOBAL DEFAULT foo\n               ^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL foo"), "In file \"/main.gbc\" on line 1, column 8: Incomplete GLOBAL declaration, expected a CONST keyword before name.\n\nGLOBAL foo\n       ^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL DEFAULT foo"), "In file \"/main.gbc\" on line 1, column 16: Unexpected token \"Name\" while parsing CONST declaration, expected \"CONST\" instead.\n\nGLOBAL DEFAULT foo\n               ^--- Here");
     }
 
     #[test]
@@ -646,7 +646,7 @@ mod test {
 
     #[test]
     fn test_error_constants_defaults() {
-        assert_eq!(expr_lexer_error("DEFAULT foo"), "In file \"main.gb.s\" on line 1, column 9: Unexpected token \"Name\" while parsing CONST declaration, expected \"CONST\" instead.\n\nDEFAULT foo\n        ^--- Here");
+        assert_eq!(expr_lexer_error("DEFAULT foo"), "In file \"/main.gbc\" on line 1, column 9: Unexpected token \"Name\" while parsing CONST declaration, expected \"CONST\" instead.\n\nDEFAULT foo\n        ^--- Here");
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod test {
 
     #[test]
     fn test_error_global_standalone() {
-        assert_eq!(expr_lexer_error("GLOBAL"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input after GLOBAL keyword, expected either a label or a CONST declaration.\n\nGLOBAL\n^--- Here");
+        assert_eq!(expr_lexer_error("GLOBAL"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input after GLOBAL keyword, expected either a label or a CONST declaration.\n\nGLOBAL\n^--- Here");
     }
 
     // Label Calls ------------------------------------------------------------
@@ -873,12 +873,12 @@ mod test {
 
     #[test]
     fn test_builtin_call_error_with_invalid_arg_expr() {
-        assert_eq!(expr_lexer_error("CEIL((4)(4))"), "In file \"main.gb.s\" on line 1, column 9: Unexpected expression after argument.\n\nCEIL((4)(4))\n        ^--- Here");
+        assert_eq!(expr_lexer_error("CEIL((4)(4))"), "In file \"/main.gbc\" on line 1, column 9: Unexpected expression after argument.\n\nCEIL((4)(4))\n        ^--- Here");
     }
 
     #[test]
     fn test_builtin_call_error_with_invalid_arg_tokens() {
-        assert_eq!(expr_lexer_error("CEIL((4) DB)"), "In file \"main.gb.s\" on line 1, column 10: Unexpected \"DB\" token, expected the start of a expression instead.\n\nCEIL((4) DB)\n         ^--- Here");
+        assert_eq!(expr_lexer_error("CEIL((4) DB)"), "In file \"/main.gbc\" on line 1, column 10: Unexpected \"DB\" token, expected the start of a expression instead.\n\nCEIL((4) DB)\n         ^--- Here");
     }
 
 
@@ -1087,29 +1087,29 @@ mod test {
 
     #[test]
     fn test_unary_error_no_righthand() {
-        assert_eq!(expr_lexer_error("+"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n+\n^--- Here");
+        assert_eq!(expr_lexer_error("+"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n+\n^--- Here");
     }
 
     #[test]
     fn test_unary_error_operator_righthand() {
-        assert_eq!(expr_lexer_error("++"), "In file \"main.gb.s\" on line 1, column 2: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n++\n ^--- Here");
+        assert_eq!(expr_lexer_error("++"), "In file \"/main.gbc\" on line 1, column 2: Unexpected end of expression after unary operator, expected a right-hand side value.\n\n++\n ^--- Here");
     }
 
 
     // Parenthesis ------------------------------------------------------------
     #[test]
     fn test_paren_error_no_inner() {
-        assert_eq!(expr_lexer_error("()"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of expression after opening parenthesis, expected an inner expression.\n\n()\n^--- Here");
+        assert_eq!(expr_lexer_error("()"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of expression after opening parenthesis, expected an inner expression.\n\n()\n^--- Here");
     }
 
     #[test]
     fn test_paren_error_close_start() {
-        assert_eq!(expr_lexer_error(")"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \")\" token, expected the start of a expression instead.\n\n)\n^--- Here");
+        assert_eq!(expr_lexer_error(")"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \")\" token, expected the start of a expression instead.\n\n)\n^--- Here");
     }
 
     #[test]
     fn test_paren_error_unclosed() {
-        assert_eq!(expr_lexer_error("("), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of expression after opening parenthesis, expected an inner expression.\n\n(\n^--- Here");
+        assert_eq!(expr_lexer_error("("), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of expression after opening parenthesis, expected an inner expression.\n\n(\n^--- Here");
     }
 
     #[test]
@@ -1184,7 +1184,7 @@ mod test {
 
     #[test]
     fn test_paren_missing_open() {
-        assert_eq!(expr_lexer_error("ROUND(2))"), "In file \"main.gb.s\" on line 1, column 9: Unexpected \")\" token, expected the start of a expression instead.\n\nROUND(2))\n        ^--- Here");
+        assert_eq!(expr_lexer_error("ROUND(2))"), "In file \"/main.gbc\" on line 1, column 9: Unexpected \")\" token, expected the start of a expression instead.\n\nROUND(2))\n        ^--- Here");
     }
 
     // Binary -----------------------------------------------------------------

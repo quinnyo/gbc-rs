@@ -597,9 +597,9 @@ mod test {
 
     fn include_lexer_error<S: Into<String>>(s: S) -> String {
         colored::control::set_override(false);
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
-        Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap().to_string()
+        let mut reader = MockFileReader::new();
+        reader.add_file("/main.gbc", s.into().as_str());
+        Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("/main.gbc")).err().unwrap().to_string()
     }
 
     macro_rules! tk {
@@ -644,14 +644,13 @@ mod test {
     #[test]
     fn test_resolve_includes() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s'\nINCLUDE 'extra/bar.gb.s'\nINCLUDE '/abs.gb.s'");
-        reader.add_file("src/foo.gb.s", "42");
-        reader.add_file("src/extra/bar.gb.s", "BAR");
-        reader.add_file("src/abs.gb.s", "ABS");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "INCLUDE 'foo.gbc'\nINCLUDE 'extra/bar.gbc'\nINCLUDE '/abs.gbc'");
+        reader.add_file("src/foo.gbc", "42");
+        reader.add_file("src/extra/bar.gbc", "BAR");
+        reader.add_file("src/abs.gbc", "ABS");
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(1, NumberLiteral, 0, 2, "42"),
             tkf!(2, Name, 0, 3, "BAR"),
@@ -663,19 +662,18 @@ mod test {
     #[test]
     fn test_resolve_include_using_text() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
-            vec!["--arg".into(), "--arg-two".into(), "src/foo.gb.s".into()],
+            vec!["--arg".into(), "--arg-two".into(), "src/foo.gbc".into()],
             vec![52, 50],
             vec![53, 51],
             None
         );
-        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING 'cmd --arg --arg-two'");
-        reader.add_file("src/foo.gb.s", "42");
+        reader.add_file("src/main.gbc", "INCLUDE 'foo.gbc' USING 'cmd --arg --arg-two'");
+        reader.add_file("src/foo.gbc", "42");
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(1, NumberLiteral, 0, 2, "53")
         ]);
@@ -685,21 +683,20 @@ mod test {
     #[test]
     fn test_resolve_include_using_binary() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
-            vec!["--arg".into(), "--arg-two".into(), "src/foo.gb.s".into()],
+            vec!["--arg".into(), "--arg-two".into(), "src/foo.gbc".into()],
             vec![52, 50],
             vec![42],
             None
         );
-        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING BINARY 'cmd --arg --arg-two'");
-        reader.add_file("src/foo.gb.s", "42");
+        reader.add_file("src/main.gbc", "INCLUDE 'foo.gbc' USING BINARY 'cmd --arg --arg-two'");
+        reader.add_file("src/foo.gbc", "42");
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
-            IncludeToken::BinaryFile(itk!(8, 18, "foo.gb.s"), vec![42])
+            IncludeToken::BinaryFile(itk!(8, 17, "foo.gbc"), vec![42])
         ]);
 
     }
@@ -707,13 +704,12 @@ mod test {
     #[test]
     fn test_error_resolve_include_using_command_not_found() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING 'cmd'");
-        reader.add_file("src/foo.gb.s", "42");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "INCLUDE 'foo.gbc' USING 'cmd'");
+        reader.add_file("src/foo.gbc", "42");
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gb.s\":\n\n---\ncmd: mock command not found---\n\nINCLUDE \'foo.gb.s\' USING \'cmd\'\n        ^--- Here");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().expect("Expected lexer error").to_string();
+        assert_eq!(err, "In file \"src/main.gbc\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gbc\":\n\n---\ncmd: mock command not found---\n\nINCLUDE \'foo.gbc\' USING \'cmd\'\n        ^--- Here");
 
     }
 
@@ -721,72 +717,68 @@ mod test {
     #[test]
     fn test_error_resolve_include_using_missing_command_name() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING ''");
-        reader.add_file("src/foo.gb.s", "42");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "INCLUDE 'foo.gbc' USING ''");
+        reader.add_file("src/foo.gbc", "42");
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"\" on included file \"src/foo.gb.s\":\n\n---\nMissing command name---\n\nINCLUDE \'foo.gb.s\' USING \'\'\n        ^--- Here");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().expect("Expected lexer error").to_string();
+        assert_eq!(err, "In file \"src/main.gbc\" on line 1, column 9: Failed to execute command \"\" on included file \"src/foo.gbc\":\n\n---\nMissing command name---\n\nINCLUDE \'foo.gbc\' USING \'\'\n        ^--- Here");
 
     }
 
     #[test]
     fn test_error_resolve_include_using_invalid_utf_8_output() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
-            vec!["src/foo.gb.s".into()],
+            vec!["src/foo.gbc".into()],
             vec![52, 50],
             vec![255, 0],
             None
         );
-        reader.add_file("src/main.gb.s", "INCLUDE 'foo.gb.s' USING 'cmd'");
-        reader.add_file("src/foo.gb.s", "42");
+        reader.add_file("src/main.gbc", "INCLUDE 'foo.gbc' USING 'cmd'");
+        reader.add_file("src/foo.gbc", "42");
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gb.s\":\n\n---\nCommand did not return a valid string: invalid utf-8 sequence of 1 bytes from index 0---\n\nINCLUDE \'foo.gb.s\' USING \'cmd\'\n        ^--- Here");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().expect("Expected lexer error").to_string();
+        assert_eq!(err, "In file \"src/main.gbc\" on line 1, column 9: Failed to execute command \"cmd\" on included file \"src/foo.gbc\":\n\n---\nCommand did not return a valid string: invalid utf-8 sequence of 1 bytes from index 0---\n\nINCLUDE \'foo.gbc\' USING \'cmd\'\n        ^--- Here");
 
     }
 
     #[test]
     fn test_error_resolve_include_using_stderr() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
-            vec!["src/foo.gb.s".into()],
+            vec!["src/foo.gbc".into()],
             vec![52, 50],
             vec![],
             Some("Mock failure".to_string())
         );
-        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING 'cmd'");
+        reader.add_file("src/main.gbc", "INCLUDE BINARY 'data.bin' USING 'cmd'");
         reader.add_binary_file("src/data.bin", vec![]);
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().expect("Expected lexer error").to_string();
-        assert_eq!(err, "In file \"src/main.gb.s\" on line 1, column 16: Failed to execute command \"cmd\" on included file \"src/data.bin\":\n\n---\ncmd: mock command not found---\n\nINCLUDE BINARY \'data.bin\' USING \'cmd\'\n               ^--- Here");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().expect("Expected lexer error").to_string();
+        assert_eq!(err, "In file \"src/main.gbc\" on line 1, column 16: Failed to execute command \"cmd\" on included file \"src/data.bin\":\n\n---\ncmd: mock command not found---\n\nINCLUDE BINARY \'data.bin\' USING \'cmd\'\n               ^--- Here");
 
     }
 
     #[test]
     fn test_resolve_nested_includes() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
-        reader.add_file("src/one.gb.s", "2\nINCLUDE 'extra/two.gb.s'\n4");
-        reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
-        reader.add_file("src/three.gb.s", "3");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "1\nINCLUDE 'one.gbc'");
+        reader.add_file("src/one.gbc", "2\nINCLUDE 'extra/two.gbc'\n4");
+        reader.add_file("src/extra/two.gbc", "INCLUDE '/three.gbc'");
+        reader.add_file("src/three.gbc", "3");
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             tkf!(0, NumberLiteral, 0, 1, "1"),
             tkf!(1, NumberLiteral, 0, 1, "2"),
             tkf!(3, NumberLiteral, 0, 1, "3"),
-            tkf!(1, NumberLiteral, 27, 28, "4"),
+            tkf!(1, NumberLiteral, 26, 27, "4"),
         ]);
 
     }
@@ -794,65 +786,61 @@ mod test {
     #[test]
     fn test_resolve_nested_include_io_error() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "1\nINCLUDE 'one.gbc'");
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 2, column 9: Failed to include file \"src/one.gb.s\": No Mock file provided\n\nINCLUDE \'one.gb.s\'\n        ^--- Here");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().unwrap();
+        assert_eq!(err.to_string(), "In file \"src/main.gbc\" on line 2, column 9: Failed to include file \"src/one.gbc\": No Mock file provided\n\nINCLUDE \'one.gbc\'\n        ^--- Here");
 
     }
 
     #[test]
     fn test_resolve_nested_include_lexer_error() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
-        reader.add_file("src/one.gb.s", "2\nINCLUDE 'extra/two.gb.s'\n4");
-        reader.add_file("src/extra/two.gb.s", "INCLUDE '/three.gb.s'");
-        reader.add_file("src/three.gb.s", "@");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "1\nINCLUDE 'one.gbc'");
+        reader.add_file("src/one.gbc", "2\nINCLUDE 'extra/two.gbc'\n4");
+        reader.add_file("src/extra/two.gbc", "INCLUDE '/three.gbc'");
+        reader.add_file("src/three.gbc", "@");
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/three.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gb.s\" on line 1, column 9\nincluded from file \"src/one.gb.s\" on line 2, column 9\nincluded from file \"src/main.gb.s\" on line 2, column 9")
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().unwrap();
+        assert_eq!(err.to_string(), "In file \"src/three.gbc\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/extra/two.gbc\" on line 1, column 9\nincluded from file \"src/one.gbc\" on line 2, column 9\nincluded from file \"src/main.gbc\" on line 2, column 9")
 
     }
 
     #[test]
     fn test_resolve_include_lexer_error() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "1\nINCLUDE 'one.gb.s'");
-        reader.add_file("src/one.gb.s", "@");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "1\nINCLUDE 'one.gbc'");
+        reader.add_file("src/one.gbc", "@");
 
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/one.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gb.s\" on line 2, column 9");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().unwrap();
+        assert_eq!(err.to_string(), "In file \"src/one.gbc\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here\n\nincluded from file \"src/main.gbc\" on line 2, column 9");
 
     }
 
     #[test]
     fn test_resolve_include_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE 4"), "In file \"main.gb.s\" on line 1, column 9: Expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE 4\n        ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE"), "In file \"main.gb.s\" on line 1, column 7: Unexpected end of input when parsing INCLUDE directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE\n      ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 4"), "In file \"/main.gbc\" on line 1, column 9: Expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE 4\n        ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE"), "In file \"/main.gbc\" on line 1, column 7: Unexpected end of input when parsing INCLUDE directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE\n      ^--- Here");
     }
 
     #[test]
     fn test_resolve_include_using_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 21: Expected a StringLiteral or BINARY keyword after USING keyword.\n\nINCLUDE \'foo\' USING 4\n                    ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE 'foo' USING"), "In file \"main.gb.s\" on line 1, column 19: Unexpected end of input when parsing USING directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE \'foo\' USING\n                  ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 'foo' USING 4"), "In file \"/main.gbc\" on line 1, column 21: Expected a StringLiteral or BINARY keyword after USING keyword.\n\nINCLUDE \'foo\' USING 4\n                    ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE 'foo' USING"), "In file \"/main.gbc\" on line 1, column 19: Unexpected end of input when parsing USING directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE \'foo\' USING\n                  ^--- Here");
     }
 
     #[test]
     fn test_resolve_include_binary() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin'\nINCLUDE BINARY 'second.bin'");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "INCLUDE BINARY 'data.bin'\nINCLUDE BINARY 'second.bin'");
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
         reader.add_binary_file("src/second.bin", vec![42]);
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             IncludeToken::BinaryFile(itk!(15, 25, "data.bin"), vec![0, 1, 2, 3, 4, 5, 6, 7]),
             IncludeToken::BinaryFile(itk!(41, 53, "second.bin"), vec![42])
@@ -863,8 +851,7 @@ mod test {
     #[test]
     fn test_resolve_include_binary_using_text() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
             vec!["--arg".into(), "--arg-two".into(), "src/data.bin".into()],
@@ -872,10 +859,10 @@ mod test {
             b"DB $1, $2".to_vec(),
             None
         );
-        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING 'cmd --arg --arg-two'\n");
+        reader.add_file("src/main.gbc", "INCLUDE BINARY 'data.bin' USING 'cmd --arg --arg-two'\n");
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             IncludeToken::Reserved(itkf!(0, 2, "DB", 1)),
             IncludeToken::NumberLiteral(itkf!(3, 5, "$1", 1)),
@@ -888,8 +875,7 @@ mod test {
     #[test]
     fn test_resolve_include_binary_using_binary() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
             vec!["--arg".into(), "--arg-two".into(), "src/data.bin".into()],
@@ -897,10 +883,10 @@ mod test {
             vec![42],
             None
         );
-        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin' USING BINARY 'cmd --arg --arg-two'\n");
+        reader.add_file("src/main.gbc", "INCLUDE BINARY 'data.bin' USING BINARY 'cmd --arg --arg-two'\n");
         reader.add_binary_file("src/data.bin", vec![0, 1, 2, 3, 4, 5, 6, 7]);
 
-        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("Lexer failed");
+        let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("Lexer failed");
         assert_eq!(lexer.tokens, vec![
             IncludeToken::BinaryFile(itk!(15, 25, "data.bin"), vec![42])
         ]);
@@ -910,24 +896,23 @@ mod test {
     #[test]
     fn test_resolve_nested_include_binary_io_error() {
 
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
-        reader.add_file("src/main.gb.s", "INCLUDE BINARY 'data.bin'");
-        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).err().unwrap();
-        assert_eq!(err.to_string(), "In file \"src/main.gb.s\" on line 1, column 16: Failed to include file \"src/data.bin\": No Mock file provided\n\nINCLUDE BINARY \'data.bin\'\n               ^--- Here");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
+        reader.add_file("src/main.gbc", "INCLUDE BINARY 'data.bin'");
+        let err = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).err().unwrap();
+        assert_eq!(err.to_string(), "In file \"src/main.gbc\" on line 1, column 16: Failed to include file \"src/data.bin\": No Mock file provided\n\nINCLUDE BINARY \'data.bin\'\n               ^--- Here");
 
     }
 
     #[test]
     fn test_resolve_include_binary_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE BINARY 4"), "In file \"main.gb.s\" on line 1, column 16: Expected a StringLiteral instead.\n\nINCLUDE BINARY 4\n               ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE BINARY"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input when parsing INCLUDE BINARY directive.\n\nINCLUDE BINARY\n             ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 4"), "In file \"/main.gbc\" on line 1, column 16: Expected a StringLiteral instead.\n\nINCLUDE BINARY 4\n               ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY"), "In file \"/main.gbc\" on line 1, column 14: Unexpected end of input when parsing INCLUDE BINARY directive.\n\nINCLUDE BINARY\n             ^--- Here");
     }
 
     #[test]
     fn test_resolve_include_binary_using_incomplete() {
-        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING 4"), "In file \"main.gb.s\" on line 1, column 28: Expected a StringLiteral or BINARY keyword after USING keyword.\n\nINCLUDE BINARY \'foo\' USING 4\n                           ^--- Here");
-        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING"), "In file \"main.gb.s\" on line 1, column 26: Unexpected end of input when parsing USING directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE BINARY \'foo\' USING\n                         ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING 4"), "In file \"/main.gbc\" on line 1, column 28: Expected a StringLiteral or BINARY keyword after USING keyword.\n\nINCLUDE BINARY \'foo\' USING 4\n                           ^--- Here");
+        assert_eq!(include_lexer_error("INCLUDE BINARY 'foo' USING"), "In file \"/main.gbc\" on line 1, column 26: Unexpected end of input when parsing USING directive, expected a StringLiteral or BINARY keyword instead.\n\nINCLUDE BINARY \'foo\' USING\n                         ^--- Here");
     }
 
     #[test]
@@ -1023,7 +1008,7 @@ mod test {
 
     #[test]
     fn test_number_literal_hex_incomplete() {
-        assert_eq!(include_lexer_error("$"), "In file \"main.gb.s\" on line 1, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error("$"), "In file \"/main.gbc\" on line 1, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
     }
 
     #[test]
@@ -1047,10 +1032,10 @@ mod test {
 
     #[test]
     fn test_string_literal_unclosed() {
-        assert_eq!(include_lexer_error("'Hello World"), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
-        assert_eq!(include_lexer_error("\"Hello World"), "In file \"main.gb.s\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
-        assert_eq!(include_lexer_error("'''"), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
-        assert_eq!(include_lexer_error("\"\"\""), "In file \"main.gb.s\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
+        assert_eq!(include_lexer_error("'Hello World"), "In file \"/main.gbc\" on line 1, column 13: Unclosed string literal.\n\n'Hello World\n            ^--- Here");
+        assert_eq!(include_lexer_error("\"Hello World"), "In file \"/main.gbc\" on line 1, column 13: Unclosed string literal.\n\n\"Hello World\n            ^--- Here");
+        assert_eq!(include_lexer_error("'''"), "In file \"/main.gbc\" on line 1, column 4: Unclosed string literal.\n\n\'\'\'\n   ^--- Here");
+        assert_eq!(include_lexer_error("\"\"\""), "In file \"/main.gbc\" on line 1, column 4: Unclosed string literal.\n\n\"\"\"\n   ^--- Here");
     }
 
     #[test]
@@ -1114,7 +1099,7 @@ mod test {
 
     #[test]
     fn test_param_offset_incomplete() {
-        assert_eq!(include_lexer_error("@"), "In file \"main.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here");
+        assert_eq!(include_lexer_error("@"), "In file \"/main.gbc\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here");
     }
 
     #[test]
@@ -1156,16 +1141,16 @@ mod test {
 
     #[test]
     fn test_group_unclosed() {
-        assert_eq!(include_lexer_error("`a"), "In file \"main.gb.s\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
-        assert_eq!(include_lexer_error("`a``a"), "In file \"main.gb.s\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
-        assert_eq!(include_lexer_error("```"), "In file \"main.gb.s\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
+        assert_eq!(include_lexer_error("`a"), "In file \"/main.gbc\" on line 1, column 3: Unclosed token group.\n\n`a\n  ^--- Here");
+        assert_eq!(include_lexer_error("`a``a"), "In file \"/main.gbc\" on line 1, column 6: Unclosed token group.\n\n`a``a\n     ^--- Here");
+        assert_eq!(include_lexer_error("```"), "In file \"/main.gbc\" on line 1, column 4: Unclosed token group.\n\n```\n   ^--- Here");
     }
 
     #[test]
     fn test_error_location() {
-        assert_eq!(include_lexer_error(" $"), "In file \"main.gb.s\" on line 1, column 2: Expected a valid hexadecimal digit \"$\".\n\n $\n ^--- Here");
-        assert_eq!(include_lexer_error("\n$"), "In file \"main.gb.s\" on line 2, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
-        assert_eq!(include_lexer_error("\n\n$"), "In file \"main.gb.s\" on line 3, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error(" $"), "In file \"/main.gbc\" on line 1, column 2: Expected a valid hexadecimal digit \"$\".\n\n $\n ^--- Here");
+        assert_eq!(include_lexer_error("\n$"), "In file \"/main.gbc\" on line 2, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
+        assert_eq!(include_lexer_error("\n\n$"), "In file \"/main.gbc\" on line 3, column 1: Expected a valid hexadecimal digit \"$\".\n\n$\n^--- Here");
     }
 
 }

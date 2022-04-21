@@ -10,12 +10,12 @@ use std::sync::mpsc::{self, Receiver, Sender};
 // External Dependencies ------------------------------------------------------
 use lazy_static::lazy_static;
 use tokio::runtime::Handle;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 use gbd::{App, EmulatorAddress, EmulatorCommand, EmulatorStatus, EmulatorResponse, Model};
 
 
 // Internal Dependencies ------------------------------------------------------
-use compiler::linker::SectionEntry;
+use compiler::linker::{AnalysisLint, SectionEntry};
 use crate::state::State;
 
 
@@ -87,14 +87,14 @@ impl Emulator {
         }
     }
 
-    pub fn update_entries(&mut self, entries: HashMap<usize, SectionEntry>) -> Vec<(Url, Diagnostic)> {
-        let mut diagnostics = Vec::new();
+    pub fn update_entries(&mut self, entries: HashMap<usize, SectionEntry>) -> Vec<AnalysisLint> {
+        let mut lints = Vec::new();
         if self.is_running() {
             /*
             for address in self.entries.keys() {
                 if !entries.contains_key(&address) {
-                    self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry added / removed or changed, restart emulator to synchronize");
-                    return diagnostics;
+                    self.lint(&mut lints, *address, &entries, "ROM entry added / removed or changed, restart emulator to synchronize");
+                    return lints;
                 }
             }*/
 
@@ -111,16 +111,16 @@ impl Emulator {
                                     writes.push((EmulatorAddress::from_raw(address), *b));
                                 }
                             }
-                            self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry changed, temporarily synced to emulator ROM");
+                            self.lint(&mut lints, *address, &entries, "ROM entry changed, temporarily synced to emulator ROM");
                         }
 
                     } else {
-                        // self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry changed, restart emulator to synchronize");
+                        // self.lint(&mut lints, *address, &entries, "ROM entry changed, restart emulator to synchronize");
                         break
                     }
 
                 } else {
-                    // self.diagnostic(&mut diagnostics, *address, &entries, "ROM entry added, restart emulator to synchronize");
+                    // self.lint(&mut lints, *address, &entries, "ROM entry added, restart emulator to synchronize");
                     break
                 }
             }
@@ -128,10 +128,10 @@ impl Emulator {
                 self.state.send_command(EmulatorCommand::WriteRomMemory(writes));
             }
         }
-        diagnostics
+        lints
     }
 
-    fn diagnostic<S: Into<String>>(&self, diagnostics: &mut Vec<(Url, Diagnostic)>, address: usize, entries: &HashMap<usize, SectionEntry>, message: S) {
+    fn lint<S: Into<String>>(&self, lints: &mut Vec<AnalysisLint>, address: usize, entries: &HashMap<usize, SectionEntry>, message: S) {
         let address = if entries.contains_key(&address) {
             address
 
@@ -151,17 +151,21 @@ impl Emulator {
         };
 
         if let Some(loc) = self.state.address_locations().get(&address) {
-            diagnostics.push((loc.uri.clone(), Diagnostic {
-                range: loc.range,
-                severity: Some(DiagnosticSeverity::WARNING),
-                message: message.into(),
-                code: None,
-                code_description: None,
-                source: None,
-                related_information: None,
-                tags: None,
-                data: None
-            }));
+            lints.push(AnalysisLint {
+                uri: loc.uri.clone(),
+                context: "".to_string(),
+                detail: Diagnostic {
+                    range: loc.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: message.into(),
+                    code: None,
+                    code_description: None,
+                    source: None,
+                    related_information: None,
+                    tags: None,
+                    data: None
+                }
+            });
         }
     }
 
@@ -213,7 +217,7 @@ impl Emulator {
                         updated_status = Some(status.clone());
                         state.set_status(Some(status));
                     },
-                    EmulatorResponse::GotoAddress(addr) => {
+                    EmulatorResponse::GotoAddress(_addr) => {
                         // TODO trigger editor to jump to the location of the address
                     }
                 }

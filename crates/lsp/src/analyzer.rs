@@ -16,15 +16,13 @@ use gbd::{EmulatorAddress, EmulatorCommand, Model};
 
 // Internal Dependencies ------------------------------------------------------
 use compiler::lexer::LexerToken;
+use compiler::linker::{AnalysisSymbol, AnalysisMacroExpansion, AnalysisHint};
 
 use crate::{
     state::State,
     emulator::Emulator,
     parser::Parser,
-    types::{
-        InlayHint, InlayKind,
-        GBCSymbol, MacroExpansion, Optimizations
-    }
+    types::{InlayHint, InlayKind}
 };
 
 
@@ -143,7 +141,7 @@ impl Analyzer {
             self.get_symbols(workspace_path).await.into_iter().filter(|symbol| {
                 symbol.kind != SymbolKind::METHOD
 
-            }).map(GBCSymbol::into_symbol_information).collect()
+            }).map(AnalysisSymbol::into_symbol_information).collect()
 
         } else {
            Vec::new()
@@ -157,7 +155,7 @@ impl Analyzer {
             // Return if we either want all symbols or the symbol originates from the current file
             symbol.location.uri == uri && symbol.kind != SymbolKind::METHOD
 
-        }).map(GBCSymbol::into_document_symbol).collect()
+        }).map(AnalysisSymbol::into_document_symbol).collect()
     }
 
     pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<CompletionItem> {
@@ -262,7 +260,7 @@ impl Analyzer {
         }
     }
 
-    pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<GBCSymbol> {
+    pub async fn symbol(&self, current_file: PathBuf, line: usize, col: usize) -> Option<AnalysisSymbol> {
         let uri = Url::from_file_path(&current_file).unwrap();
         if let Some((token, _)) = Parser::get_token(&self.state, current_file.clone(), line, col) {
             let symbol_name = token.inner().value.to_string();
@@ -293,8 +291,8 @@ impl Analyzer {
         };
 
         let uri = Url::from_file_path(current_file.clone()).ok();
-        let (symbols, expansions, optimizations) = self.get_symbols_all(current_file).await;
-        let symbols: Vec<GBCSymbol> = symbols.into_iter().filter(|symbol| {
+        let (symbols, expansions, hints) = self.get_symbols_all(current_file).await;
+        let symbols: Vec<AnalysisSymbol> = symbols.into_iter().filter(|symbol| {
             // Hint if the symbol is from the current file
             Some(&symbol.location.uri) == uri.as_ref()
 
@@ -305,10 +303,10 @@ impl Analyzer {
 
         }).collect();
 
-        let symbol_refs: Vec<&GBCSymbol> = symbols.iter().collect();
+        let symbol_refs: Vec<&AnalysisSymbol> = symbols.iter().collect();
         let emulator_values = self.query_symbol_memory_values(&symbol_refs[..]);
 
-        let mut hints: Vec<InlayHint> = symbols.into_iter().enumerate().flat_map(|(i, symbol)| match symbol.kind {
+        let mut inlay_hints: Vec<InlayHint> = symbols.into_iter().enumerate().flat_map(|(i, symbol)| match symbol.kind {
             SymbolKind::NAMESPACE => Some(InlayHint {
                 kind: InlayKind::TypeHint,
                 label: symbol.value.to_string(),
@@ -375,7 +373,7 @@ impl Analyzer {
         }).collect();
 
         // Macro expansions
-        hints.append(&mut expansions.into_iter().filter(|exp| {
+        inlay_hints.append(&mut expansions.into_iter().filter(|exp| {
             // Hint if the expression is from the current file
             Some(&exp.location.uri) == uri.as_ref()
 
@@ -404,31 +402,31 @@ impl Analyzer {
         }).collect());
 
         // Optimizer results
-        hints.append(&mut optimizations.into_iter().filter(|(location, _)| {
+        inlay_hints.append(&mut hints.into_iter().filter(|hint| {
             // Hint if the symbol is from the current file
-            Some(&location.uri) == uri.as_ref()
+            Some(&hint.location.uri) == uri.as_ref()
 
-        }).filter(|(location, _)| {
+        }).filter(|hint| {
             // Don't generate hints for lines after the current error as they'll be
             // cached and potentially incorrect
-            location.range.start.line < first_error_line as u32
+            hint.location.range.start.line < first_error_line as u32
 
-        }).map(|(location, label)| {
+        }).map(|hint| {
             InlayHint {
                 kind: InlayKind::OptimizerHint,
-                label: format!("{} (optimized)", label),
+                label: format!("{} (optimized)", hint.detail),
                 range: Range {
-                    start: location.range.start,
-                    end: location.range.start
+                    start: hint.location.range.start,
+                    end: hint.location.range.start
                 }
             }
         }).collect());
-        hints
+        inlay_hints
     }
 }
 
 impl Analyzer {
-    async fn get_symbols_all(&self, workspace_path: PathBuf) -> (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations) {
+    async fn get_symbols_all(&self, workspace_path: PathBuf) -> (Vec<AnalysisSymbol>, Vec<AnalysisMacroExpansion>, Vec<AnalysisHint>) {
         if !self.state.has_symbols() {
             Parser::link(workspace_path, self.state.clone()).await;
             self.state.publish_diagnostics().await;
@@ -436,7 +434,7 @@ impl Analyzer {
         self.state.symbols_all().clone().unwrap_or_else(|| (Vec::new(), Vec::new(), Vec::new()))
     }
 
-    async fn get_symbols(&self, workspace_path: PathBuf) -> Vec<GBCSymbol> {
+    async fn get_symbols(&self, workspace_path: PathBuf) -> Vec<AnalysisSymbol> {
         if !self.state.has_symbols() {
             Parser::link(workspace_path, self.state.clone()).await;
             self.state.publish_diagnostics().await;
@@ -444,7 +442,7 @@ impl Analyzer {
         self.state.symbols_cloned().unwrap_or_default()
     }
 
-    fn query_symbol_memory_values(&self, symbols: &[&GBCSymbol]) -> Vec<Option<u16>> {
+    fn query_symbol_memory_values(&self, symbols: &[&AnalysisSymbol]) -> Vec<Option<u16>> {
 
         // Generate initial result set
         let mut result_set = Vec::with_capacity(512);

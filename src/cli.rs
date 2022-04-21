@@ -3,9 +3,9 @@ use clap::{Arg, Command};
 
 pub fn app<'help>() -> Command<'help> {
     Command::new("gbc")
-        .version("0.8.0")
+        .version(env!("CARGO_PKG_VERSION"))
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
-        .about("GameBoy Compiler")
+        .about("An opionated GameBoy Compiler")
         .subcommand(
             Command::new("release")
                 .about("Builds a release ROM using the local \"gbc.toml\" project configuration.")

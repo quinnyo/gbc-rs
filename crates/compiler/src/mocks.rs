@@ -7,7 +7,6 @@ use std::io::{Error as IOError, ErrorKind};
 use file_io::{FileReader, FileWriter, FileError};
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage};
 
-#[derive(Default)]
 pub struct MockFileReader {
     pub base: PathBuf,
     files: HashMap<PathBuf, String>,
@@ -16,6 +15,24 @@ pub struct MockFileReader {
 }
 
 impl MockFileReader {
+    pub fn new() -> Self {
+        Self {
+            base: PathBuf::from("/"),
+            files: HashMap::new(),
+            binary_files: HashMap::new(),
+            commands: HashMap::new()
+        }
+    }
+
+    pub fn from_base(base: PathBuf) -> Self {
+        Self {
+            base,
+            files: HashMap::new(),
+            binary_files: HashMap::new(),
+            commands: HashMap::new()
+        }
+    }
+
     pub fn add_file<S: Into<String>>(&mut self, path: S, content: S) {
         self.files.insert(PathBuf::from(path.into()), content.into());
     }
@@ -99,18 +116,18 @@ impl FileWriter for MockFileReader {
 }
 
 pub fn include_lex<S: Into<String>>(s: S) -> Lexer<IncludeStage> {
-    let mut reader = MockFileReader::default();
-    reader.add_file("main.gb.s", s.into().as_str());
-    let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
+    let mut reader = MockFileReader::new();
+    reader.add_file("/main.gbc", s.into().as_str());
+    let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("IncludeStage failed");
     assert_eq!(lexer.files.len(), 1);
     lexer
 }
 
 pub fn include_lex_child<S: Into<String>>(s: S, c: S) -> Lexer<IncludeStage> {
-    let mut reader = MockFileReader::default();
-    reader.add_file("main.gb.s", s.into().as_str());
-    reader.add_file("child.gb.s", c.into().as_str());
-    Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed")
+    let mut reader = MockFileReader::new();
+    reader.add_file("/main.gbc", s.into().as_str());
+    reader.add_file("/second.gbc", c.into().as_str());
+    Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("IncludeStage failed")
 }
 
 pub fn macro_lex<S: Into<String>>(s: S) -> Lexer<MacroStage> {
@@ -160,10 +177,10 @@ pub fn entry_lex_child_error<S: Into<String>>(s: S, c: S) -> String {
 }
 
 pub fn expr_lex_binary<S: Into<String>>(s: S, b: Vec<u8>) -> Lexer<ExpressionStage> {
-    let mut reader = MockFileReader::default();
-    reader.add_file("main.gb.s", s.into().as_str());
-    reader.add_binary_file("child.bin", b);
-    let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gb.s")).expect("IncludeStage failed");
+    let mut reader = MockFileReader::new();
+    reader.add_file("/main.gbc", s.into().as_str());
+    reader.add_binary_file("/child.bin", b);
+    let lexer = Lexer::<IncludeStage>::from_file(&reader, &PathBuf::from("main.gbc")).expect("IncludeStage failed");
     let lexer = Lexer::<MacroStage>::from_lexer(lexer).expect("MacroStage failed");
     let lexer = Lexer::<ValueStage>::from_lexer(lexer).expect("ValueStage failed");
     Lexer::<ExpressionStage>::from_lexer(lexer).expect("ExpressionStage failed")

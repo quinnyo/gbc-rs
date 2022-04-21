@@ -7,12 +7,13 @@ use std::time::Instant;
 // External Dependencies ------------------------------------------------------
 use colored::Colorize;
 use file_io::{FileReader, FileWriter, Logger};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Url, Range, Position};
 
 
 // Internal Dependencies ------------------------------------------------------
 use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
-use crate::linker::{Linker, SegmentUsage};
+use crate::linker::{AnalysisLint, Linker, SegmentUsage};
 use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage, IntegerMap, MacroDefinition};
 
 
@@ -118,12 +119,12 @@ impl Compiler {
 
         // Report Segment Usage
         if self.print_segment_map {
-            self.print_segment_usage(logger, linker.to_usage_list());
+            self.print_segment_usage(logger, linker.usage_list());
         }
 
-        // Generate symbol file for BGB debugger
+        // Generate symbol file for debuggers
         if let Some(output_file) = self.generate_symbols.take() {
-            let symbols = linker.to_symbol_list().into_iter().map(|(bank, address, name)| {
+            let symbols = linker.symbol_list().into_iter().map(|(bank, address, name)| {
                 format!("{:0>2}:{:0>4x} {}", bank, address, name)
 
             }).collect::<Vec<String>>().join("\n");
@@ -133,6 +134,18 @@ impl Compiler {
                 )
             })?;
             logger.status("Written", format!("symbol map to \"{}\".", output_file.display()));
+        }
+
+        // Report Warnings
+        for lint in &linker.analysis.lints {
+            logger.warning(format!(
+                "{} `{}` (in file \"{}\" on line {}, column {})",
+                lint.detail.message,
+                lint.context,
+                lint.uri.path(),
+                lint.detail.range.start.line + 1,
+                lint.detail.range.start.character + 1
+            ));
         }
         Ok(linker)
     }
@@ -273,10 +286,33 @@ impl CompilationError {
         }
     }
 
-    pub fn into_diagnostic(self) -> Option<(PathBuf, usize, usize, String)> {
+    pub fn into_lint(self) -> Option<AnalysisLint> {
         if let Some(source) = self.source {
             if let Some((path, line, col)) = source.location {
-                Some((path, line, col, source.raw_message))
+                Some(AnalysisLint {
+                    uri: Url::from_file_path(path).unwrap(),
+                    context: "".to_string(),
+                    detail: Diagnostic {
+                        range: Range {
+                            start: Position {
+                                line: line as u32,
+                                character: col as u32
+                            },
+                            end: Position {
+                                line: line as u32,
+                                character: col as u32
+                            }
+                        },
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        message: source.raw_message,
+                        code: None,
+                        code_description: None,
+                        source: None,
+                        related_information: None,
+                        tags: None,
+                        data: None
+                    }
+                })
 
             } else {
                 None
@@ -313,30 +349,30 @@ mod test {
 
     fn compiler<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S) -> String {
         compiler.set_no_color();
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
+        let mut reader = MockFileReader::new();
+        reader.add_file("/main.gbc", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
-        compiler.compile(&mut logger, &mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
+        compiler.compile(&mut logger, &mut reader, PathBuf::from("/main.gbc")).expect("Compilation failed");
         re.replace_all(logger.to_string().as_str(), "XXms").to_string()
     }
 
     fn compiler_writer<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S) -> (String, MockFileReader) {
         compiler.set_no_color();
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
+        let mut reader = MockFileReader::new();
+        reader.add_file("/main.gbc", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
         compiler.set_generate_rom(PathBuf::from("rom.gb"));
-        compiler.compile(&mut logger, &mut reader, PathBuf::from("main.gb.s")).expect("Compilation failed");
+        compiler.compile(&mut logger, &mut reader, PathBuf::from("/main.gbc")).expect("Compilation failed");
         let output = re.replace_all(logger.to_string().as_str(), "XXms").to_string();
         (output, reader)
     }
 
     fn compiler_error<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S) -> (String, String) {
         compiler.set_no_color();
-        let mut reader = MockFileReader::default();
-        reader.add_file("main.gb.s", s.into().as_str());
+        let mut reader = MockFileReader::new();
+        reader.add_file("/main.gbc", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
-        let err = compiler.compile(&mut logger, &mut reader, PathBuf::from("main.gb.s")).err().expect("Expected a CompilationError");
+        let err = compiler.compile(&mut logger, &mut reader, PathBuf::from("/main.gbc")).err().expect("Expected a CompilationError");
         (re.replace_all(logger.to_string().as_str(), "XXms").to_string(), err.to_string())
     }
 
@@ -353,7 +389,7 @@ mod test {
     fn test_empty_input() {
         let l = Logger::new();
         let c = Compiler::new();
-        assert_eq!(compiler(l, c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM verified in XXms.");
+        assert_eq!(compiler(l, c, ""), "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM verified in XXms.");
     }
 
     #[test]
@@ -361,10 +397,10 @@ mod test {
         let l = Logger::new();
         let mut c = Compiler::new();
         c.set_print_segment_map();
-        let output = compiler(l, c, "SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'Vars',WRAM0\nvar: DB\nSECTION 'Buffer',WRAM0\nbuffer: DS 512\nSECTION 'Vars',HRAM\nfoo: DS 128");
+        let output = compiler(l, c, "SECTION 'Data',ROM0\nDS 256\nDS 32\nSECTION 'Data1',ROM0\nDS 8\nDS 4\nSECTION 'Data2',ROM0\nDS 16\nSECTION ROM0\nDS 48\nSECTION 'Extra',ROM0[$200]\nDS 5\nSECTION ROMX\nDS 128\nSECTION 'X',ROMX\nDS 32\nSECTION 'Vars',WRAM0\n_var: DB\nSECTION 'Buffer',WRAM0\n_buffer: DS 512\nSECTION 'Vars',HRAM\n_foo: DS 128");
         assert_eq!(
             output,
-            r#"   Compiling "main.gb.s" ...
+            r#"   Compiling "/main.gbc" ...
      File IO completed in XXms.
      Parsing completed in XXms.
      Linking completed in XXms.
@@ -409,10 +445,10 @@ mod test {
         let l = Logger::new();
         let mut c = Compiler::new();
         c.set_generate_symbols(PathBuf::from("rom.sym"));
-        let (output, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\nglobal:\nld a,a\n.local:\n");
+        let (output, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\n_global:\nld a,a\n.local:\n");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
-        assert_eq!(file, "00:0150 global\n00:0151 global.local");
-        assert_eq!(output, "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
+        assert_eq!(file, "00:0150 _global\n00:0151 _global.local");
+        assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
     // Debug Stripping --------------------------------------------------------
@@ -465,7 +501,7 @@ mod test {
         let l = Logger::new();
         let mut c = Compiler::new();
         c.set_print_rom_info();
-        assert_eq!(compiler(l, c, ""), "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM verified in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
+        assert_eq!(compiler(l, c, ""), "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n   Validated ROM verified in XXms.\n        Info ROM Title: \n        Info ROM Version: 0\n        Info ROM Checksum: $E7 / $162D\n        Info ROM Size: 32768 bytes\n        Info ROM Mapper: ROM");
     }
 
     #[test]
@@ -488,7 +524,7 @@ mod test {
             DW 0                        ; $14e - Global checksum (not important)
         "#;
 
-        let output = r#"   Compiling "main.gb.s" ...
+        let output = r#"   Compiling "/main.gbc" ...
      File IO completed in XXms.
      Parsing completed in XXms.
      Linking completed in XXms.
@@ -507,14 +543,24 @@ mod test {
 
     }
 
+    // Warnings ---------------------------------------------------------------
+    #[test]
+    fn test_warning_unused_label() {
+        let l = Logger::new();
+        let c = Compiler::new();
+        assert_eq!(compiler(l, c, "SECTION 'Test',ROM0\nlabel:"), (
+            "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Warning unused label `label` (in file \"/main.gbc\" on line 2, column 1)\n   Validated ROM verified in XXms."
+        ));
+    }
+
     // Errors -----------------------------------------------------------------
     #[test]
     fn test_error_lexer() {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(compiler_error(l, c, "@"), (
-            "   Compiling \"main.gb.s\" ...".to_string(),
-            "       Error Compilation failed during file inclusion phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here".to_string()
+            "   Compiling \"/main.gbc\" ...".to_string(),
+            "       Error Compilation failed during file inclusion phase!\n\nIn file \"/main.gbc\" on line 1, column 1: Expected a valid jump offset value \"@\".\n\n@\n^--- Here".to_string()
         ));
     }
 
@@ -523,8 +569,8 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(compiler_error(l, c, "ld a,a"), (
-            "   Compiling \"main.gb.s\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.".to_string(),
-            "       Error Compilation failed during section linking phase!\n\nIn file \"main.gb.s\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
+            "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.".to_string(),
+            "       Error Compilation failed during section linking phase!\n\nIn file \"/main.gbc\" on line 1, column 1: Unexpected ROM entry before any section declaration\n\nld a,a\n^--- Here".to_string()
         ));
     }
 }

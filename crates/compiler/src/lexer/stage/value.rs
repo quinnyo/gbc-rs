@@ -925,15 +925,15 @@ mod test {
     fn test_error_parent_label_def_with_arguments() {
         assert_eq!(
             value_lexer_error("parent_label(ld):"),
-            "In file \"main.gb.s\" on line 1, column 14: Only registers are allowed inside label argument\n\nparent_label(ld):\n             ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 14: Only registers are allowed inside label argument\n\nparent_label(ld):\n             ^--- Here"
         );
         assert_eq!(
             value_lexer_error("parent_label(sp):"),
-            "In file \"main.gb.s\" on line 1, column 14: Invalid register in label argument list\n\nparent_label(sp):\n             ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 14: Invalid register in label argument list\n\nparent_label(sp):\n             ^--- Here"
         );
         assert_eq!(
             value_lexer_error("parent_label(a, a):"),
-            "In file \"main.gb.s\" on line 1, column 17: Duplicate register in label argument list\n\nparent_label(a, a):\n                ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 17: Duplicate register in label argument list\n\nparent_label(a, a):\n                ^--- Here"
         );
     }
 
@@ -980,7 +980,7 @@ mod test {
     #[test]
     fn test_parent_file_child_label_def() {
         let tokens = value_lexer_child(
-            "_parent_file_child_label:\nINCLUDE 'child.gb.s'",
+            "_parent_file_child_label:\nINCLUDE 'second.gbc'",
             "_parent_file_child_label:"
 
         ).tokens;
@@ -1001,7 +1001,7 @@ mod test {
     #[test]
     fn test_parent_file_child_label_ref() {
         let tokens = value_lexer_child(
-            "_parent_file_child_label:\n_parent_file_child_label\nINCLUDE 'child.gb.s'",
+            "_parent_file_child_label:\n_parent_file_child_label\nINCLUDE 'second.gbc'",
             "_parent_file_child_label:\n_parent_file_child_label"
 
         ).tokens;
@@ -1030,7 +1030,7 @@ mod test {
     #[test]
     fn test_parent_file_child_label_no_ref() {
         let tokens = value_lexer_child(
-            "_parent_file_child_label\nINCLUDE 'child.gb.s'",
+            "_parent_file_child_label\nINCLUDE 'second.gbc'",
             "_parent_file_child_label"
 
         ).tokens;
@@ -1047,21 +1047,21 @@ mod test {
         assert_eq!(value_lexer_error(
             "parent_label:\nparent_label:"
 
-        ), "In file \"main.gb.s\" on line 2, column 1: A label with the name \"parent_label\" was already defined.\n\nparent_label:\n^--- Here\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
+        ), "In file \"/main.gbc\" on line 2, column 1: A label with the name \"parent_label\" was already defined.\n\nparent_label:\n^--- Here\n\nOriginal definition of label was in file \"/main.gbc\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
     fn test_error_parent_file_child_label_def_duplicate() {
         assert_eq!(
             value_lexer_error("_parent_file_child_label:\n_parent_file_child_label:"),
-            "In file \"main.gb.s\" on line 2, column 1: A label with the name \"_parent_file_child_label\" was already defined.\n\n_parent_file_child_label:\n^--- Here\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 1:\n\n_parent_file_child_label:\n^--- Here"
+            "In file \"/main.gbc\" on line 2, column 1: A label with the name \"_parent_file_child_label\" was already defined.\n\n_parent_file_child_label:\n^--- Here\n\nOriginal definition of label was in file \"/main.gbc\" on line 1, column 1:\n\n_parent_file_child_label:\n^--- Here"
         );
     }
 
     #[test]
     fn test_parent_label_def_child_both_local() {
         let tokens = value_lexer_child(
-            "parent_label:\nINCLUDE 'child.gb.s'",
+            "parent_label:\nINCLUDE 'second.gbc'",
             "parent_label:"
         ).tokens;
 
@@ -1074,7 +1074,7 @@ mod test {
     #[test]
     fn test_parent_label_def_child_one_local() {
         let tokens = value_lexer_child(
-            "GLOBAL parent_label:\nINCLUDE 'child.gb.s'",
+            "GLOBAL parent_label:\nINCLUDE 'second.gbc'",
             "parent_label:"
         ).tokens;
 
@@ -1088,7 +1088,7 @@ mod test {
     #[test]
     fn test_parent_label_ref_global_from_child() {
         let tokens = value_lexer_child(
-            "GLOBAL parent_label:\nINCLUDE 'child.gb.s'",
+            "GLOBAL parent_label:\nINCLUDE 'second.gbc'",
             "parent_label"
         ).tokens;
 
@@ -1101,7 +1101,7 @@ mod test {
     #[test]
     fn test_parent_label_ref_local_child_keep_name() {
         let tokens = value_lexer_child(
-            "parent_label:\nINCLUDE 'child.gb.s'",
+            "parent_label:\nINCLUDE 'second.gbc'",
             "parent_label"
         ).tokens;
 
@@ -1114,10 +1114,10 @@ mod test {
     #[test]
     fn test_error_parent_label_def_duplicate_global_child() {
         assert_eq!(value_lexer_child_error(
-            "GLOBAL parent_label:\nINCLUDE 'child.gb.s'",
+            "GLOBAL parent_label:\nINCLUDE 'second.gbc'",
             "GLOBAL parent_label:"
 
-        ), "In file \"child.gb.s\" on line 1, column 8: A label with the name \"parent_label\" was already defined.\n\nGLOBAL parent_label:\n       ^--- Here\n\nincluded from file \"main.gb.s\" on line 2, column 9\n\nOriginal definition of label was in file \"main.gb.s\" on line 1, column 8:\n\nGLOBAL parent_label:\n       ^--- Here");
+        ), "In file \"/second.gbc\" on line 1, column 8: A label with the name \"parent_label\" was already defined.\n\nGLOBAL parent_label:\n       ^--- Here\n\nincluded from file \"/main.gbc\" on line 2, column 9\n\nOriginal definition of label was in file \"/main.gbc\" on line 1, column 8:\n\nGLOBAL parent_label:\n       ^--- Here");
     }
 
     #[test]
@@ -1125,7 +1125,7 @@ mod test {
         assert_eq!(value_lexer_error(
             "CEIL(parent_label:)"
 
-        ), "In file \"main.gb.s\" on line 1, column 6: A label cannot be defined inside an argument list\n\nCEIL(parent_label:)\n     ^--- Here");
+        ), "In file \"/main.gbc\" on line 1, column 6: A label cannot be defined inside an argument list\n\nCEIL(parent_label:)\n     ^--- Here");
     }
 
     #[test]
@@ -1133,7 +1133,7 @@ mod test {
         assert_eq!(value_lexer_error(
             "parent_label:\nCEIL(.child_label:)"
 
-        ), "In file \"main.gb.s\" on line 2, column 6: A child label cannot be defined inside an argument list\n\nCEIL(.child_label:)\n     ^--- Here");
+        ), "In file \"/main.gbc\" on line 2, column 6: A child label cannot be defined inside an argument list\n\nCEIL(.child_label:)\n     ^--- Here");
     }
 
     #[test]
@@ -1316,7 +1316,7 @@ mod test {
 
     #[test]
     fn test_error_child_label_ref_no_macro_leak() {
-        assert_eq!(value_lexer_error("parent_label:\n.child_label\nFOO()\nMACRO FOO()_macro_label:\n.child_label:\nENDMACRO"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\n.child_label\n^--- Here\n\nDefinition of parent label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
+        assert_eq!(value_lexer_error("parent_label:\n.child_label\nFOO()\nMACRO FOO()_macro_label:\n.child_label:\nENDMACRO"), "In file \"/main.gbc\" on line 2, column 1: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\n.child_label\n^--- Here\n\nDefinition of parent label was in file \"/main.gbc\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
@@ -1359,41 +1359,41 @@ mod test {
     fn test_macro_child_label_ref_with_external_parent() {
         assert_eq!(
             value_lexer_error("MACRO FOO() .child_label:\n.child_label\n ENDMACRO\nparent_label:\nFOO()"),
-            "In file \"main.gb.s\" on line 2, column 1: Reference to child label inside of macro without a any parent label inside the macro.\n\n.child_label\n^--- Here\n\nIn file \"main.gb.s\" on line 5, column 1: Triggered by previous macro invocation\n\nFOO()\n^--- Here"
+            "In file \"/main.gbc\" on line 2, column 1: Reference to child label inside of macro without a any parent label inside the macro.\n\n.child_label\n^--- Here\n\nIn file \"/main.gbc\" on line 5, column 1: Triggered by previous macro invocation\n\nFOO()\n^--- Here"
         );
     }
 
     #[test]
     fn test_error_child_label_def_outside_parent() {
-        assert_eq!(value_lexer_error(".child_label:"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label:\n^--- Here");
+        assert_eq!(value_lexer_error(".child_label:"), "In file \"/main.gbc\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label:\n^--- Here");
     }
 
     #[test]
     fn test_error_child_label_ref_outside_parent() {
-        assert_eq!(value_lexer_error(".child_label"), "In file \"main.gb.s\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label\n^--- Here");
+        assert_eq!(value_lexer_error(".child_label"), "In file \"/main.gbc\" on line 1, column 1: Unexpected definition of child label \"child_label\" without parent.\n\n.child_label\n^--- Here");
     }
 
     #[test]
     fn test_error_child_label_ref_without_def() {
-        assert_eq!(value_lexer_error("parent_label:\n.child_label"), "In file \"main.gb.s\" on line 2, column 1: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\n.child_label\n^--- Here\n\nDefinition of parent label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
+        assert_eq!(value_lexer_error("parent_label:\n.child_label"), "In file \"/main.gbc\" on line 2, column 1: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\n.child_label\n^--- Here\n\nDefinition of parent label was in file \"/main.gbc\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
     fn test_error_child_label_ref_without_def_in_builtin_call() {
-        assert_eq!(value_lexer_error("parent_label:\nCEIL(.child_label)"), "In file \"main.gb.s\" on line 2, column 6: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\nCEIL(.child_label)\n     ^--- Here\n\nDefinition of parent label was in file \"main.gb.s\" on line 1, column 1:\n\nparent_label:\n^--- Here");
+        assert_eq!(value_lexer_error("parent_label:\nCEIL(.child_label)"), "In file \"/main.gbc\" on line 2, column 6: Reference to unknown child label \"child_label\", not defined under the current parent label \"parent_label\".\n\nCEIL(.child_label)\n     ^--- Here\n\nDefinition of parent label was in file \"/main.gbc\" on line 1, column 1:\n\nparent_label:\n^--- Here");
     }
 
     #[test]
     fn test_error_child_label_def_duplicate() {
         assert_eq!(
             value_lexer_error("parent_label:\n.child_label:\n.child_label:"),
-            "In file \"main.gb.s\" on line 3, column 1: child label \"child_label\" was already defined under the current parent label \"parent_label\".\n\n.child_label:\n^--- Here\n\nOriginal definition of child label was in file \"main.gb.s\" on line 2, column 1:\n\n.child_label:\n^--- Here"
+            "In file \"/main.gbc\" on line 3, column 1: child label \"child_label\" was already defined under the current parent label \"parent_label\".\n\n.child_label:\n^--- Here\n\nOriginal definition of child label was in file \"/main.gbc\" on line 2, column 1:\n\n.child_label:\n^--- Here"
         );
     }
 
     #[test]
     fn test_error_child_label_def() {
-        assert_eq!(value_lexer_error(".4"), "In file \"main.gb.s\" on line 1, column 2: Unexpected token \"NumberLiteral\" when parsing child label, expected a \"Name\" token instead.\n\n.4\n ^--- Here");
+        assert_eq!(value_lexer_error(".4"), "In file \"/main.gbc\" on line 1, column 2: Unexpected token \"NumberLiteral\" when parsing child label, expected a \"Name\" token instead.\n\n.4\n ^--- Here");
     }
     #[test]
     fn test_operators() {
@@ -1477,13 +1477,13 @@ mod test {
 
     #[test]
     fn test_error_unknown_double_operator() {
-        assert_eq!(value_lexer_error("="), "In file \"main.gb.s\" on line 1, column 1: Unknown operator \"=\".\n\n=\n^--- Here");
+        assert_eq!(value_lexer_error("="), "In file \"/main.gbc\" on line 1, column 1: Unknown operator \"=\".\n\n=\n^--- Here");
     }
 
     // Value Errors -----------------------------------------------------------
     #[test]
     fn test_error_colon_standlone() {
-        assert_eq!(value_lexer_error(":"), "In file \"main.gb.s\" on line 1, column 1: Unexpected standalone \":\", expected a \"Name\" token to preceed it.\n\n:\n^--- Here");
+        assert_eq!(value_lexer_error(":"), "In file \"/main.gbc\" on line 1, column 1: Unexpected standalone \":\", expected a \"Name\" token to preceed it.\n\n:\n^--- Here");
     }
 
     // If Statements ----------------------------------------------------------
@@ -1690,13 +1690,13 @@ mod test {
 
     #[test]
     fn test_namespace_statement_local_error() {
-        let e = value_lexer_child_error("INCLUDE 'child.gb.s'\nNAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
-        assert_eq!(e, "In file \"child.gb.s\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field\n^--- Here\n\nincluded from file \"main.gb.s\" on line 1, column 9".to_string());
+        let e = value_lexer_child_error("INCLUDE 'second.gbc'\nNAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
+        assert_eq!(e, "In file \"/second.gbc\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field\n^--- Here\n\nincluded from file \"/main.gbc\" on line 1, column 9".to_string());
     }
 
     #[test]
     fn test_namespace_statement_global() {
-        let lexer = value_lexer_child("INCLUDE 'child.gb.s'\nGLOBAL NAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
+        let lexer = value_lexer_child("INCLUDE 'second.gbc'\nGLOBAL NAMESPACE foo field: DB ENDNAMESPACE", "foo::field");
         assert_eq!(lexer.tokens, vec![
             ValueToken::ParentLabelRef(itf!(0, 10, "foo::field", 1), 1),
             ValueToken::ParentLabelDef(itk!(42, 48, "foo::field"), 1, None, false),
@@ -1728,11 +1728,11 @@ mod test {
     fn test_namespace_statement_error_lookup() {
         assert_eq!(
             value_lexer_error("foo::field"),
-            "In file \"main.gb.s\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field\n^--- Here".to_string()
+            "In file \"/main.gbc\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field\n^--- Here".to_string()
         );
         assert_eq!(
             value_lexer_error("foo::field::bar"),
-            "In file \"main.gb.s\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field::bar\n^--- Here".to_string()
+            "In file \"/main.gbc\" on line 1, column 1: Reference to unknown namespace \"foo\".\n\nfoo::field::bar\n^--- Here".to_string()
         );
     }
 
@@ -1740,7 +1740,7 @@ mod test {
     fn test_namespace_statement_error_member_lookup() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo ENDNAMESPACE\nfoo::bar"),
-            "In file \"main.gb.s\" on line 2, column 6: Reference to unknown member \"bar\".\n\nfoo::bar\n     ^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
+            "In file \"/main.gbc\" on line 2, column 6: Reference to unknown member \"bar\".\n\nfoo::bar\n     ^--- Here\n\nin namespace defined in file \"/main.gbc\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
         );
     }
 
@@ -1748,7 +1748,7 @@ mod test {
     fn test_namespace_statement_error_member_lookup_nested() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\nfoo::inner::bar"),
-            "In file \"main.gb.s\" on line 2, column 13: Reference to unknown member \"bar\".\n\nfoo::inner::bar\n            ^--- Here\n\nin namespace defined in file \"main.gb.s\" on line 1, column 15:\n\nNAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\n              ^--- Here".to_string()
+            "In file \"/main.gbc\" on line 2, column 13: Reference to unknown member \"bar\".\n\nfoo::inner::bar\n            ^--- Here\n\nin namespace defined in file \"/main.gbc\" on line 1, column 15:\n\nNAMESPACE foo NAMESPACE inner ENDNAMESPACE ENDNAMESPACE\n              ^--- Here".to_string()
         );
     }
 
@@ -1756,7 +1756,7 @@ mod test {
     fn test_namespace_statement_error_duplicate() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE"),
-            "In file \"main.gb.s\" on line 1, column 38: A namespace with the name \"foo\" was already defined.\n\nNAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE\n                                     ^--- Here\n\nOriginal definition of namespace was in file \"main.gb.s\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
+            "In file \"/main.gbc\" on line 1, column 38: A namespace with the name \"foo\" was already defined.\n\nNAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE\n                                     ^--- Here\n\nOriginal definition of namespace was in file \"/main.gbc\" on line 1, column 11:\n\nNAMESPACE foo ENDNAMESPACE NAMESPACE foo ENDNAMESPACE\n          ^--- Here".to_string()
         );
     }
 
@@ -1764,7 +1764,7 @@ mod test {
     fn test_namespace_statement_error_duplicate_member() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo field: DB field: DB ENDNAMESPACE"),
-            "In file \"main.gb.s\" on line 1, column 25: A member with the name \"field\" was already defined within the current namespace.\n\nNAMESPACE foo field: DB field: DB ENDNAMESPACE\n                        ^--- Here\n\nOriginal definition of member was in file \"main.gb.s\" on line 1, column 15:\n\nNAMESPACE foo field: DB field: DB ENDNAMESPACE\n              ^--- Here".to_string()
+            "In file \"/main.gbc\" on line 1, column 25: A member with the name \"field\" was already defined within the current namespace.\n\nNAMESPACE foo field: DB field: DB ENDNAMESPACE\n                        ^--- Here\n\nOriginal definition of member was in file \"/main.gbc\" on line 1, column 15:\n\nNAMESPACE foo field: DB field: DB ENDNAMESPACE\n              ^--- Here".to_string()
         );
     }
 
@@ -1772,7 +1772,7 @@ mod test {
     fn test_namespace_statement_error_child_label() {
         assert_eq!(
             value_lexer_error("NAMESPACE foo field: DB .child: DB ENDNAMESPACE"),
-            "In file \"main.gb.s\" on line 1, column 25: Unexpected definition of child label \"child\" without parent.\n\nNAMESPACE foo field: DB .child: DB ENDNAMESPACE\n                        ^--- Here".to_string()
+            "In file \"/main.gbc\" on line 1, column 25: Unexpected definition of child label \"child\" without parent.\n\nNAMESPACE foo field: DB .child: DB ENDNAMESPACE\n                        ^--- Here".to_string()
         );
     }
 

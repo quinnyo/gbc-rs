@@ -1391,7 +1391,7 @@ mod test {
     #[test]
     fn test_macro_def_multiple_files() {
         let mut lexer = macro_lex_child(
-            "INCLUDE 'child.gb.s'\nMACRO FOO() hl,a ENDMACRO" ,
+            "INCLUDE 'second.gbc'\nMACRO FOO() hl,a ENDMACRO" ,
             "MACRO FOO() hl,b ENDMACRO"
         );
         assert!(lexer.tokens.is_empty());
@@ -1412,7 +1412,7 @@ mod test {
     #[test]
     fn test_macro_def_multiple_files_global_local() {
         let mut lexer = macro_lex_child(
-            "INCLUDE 'child.gb.s'\nMACRO FOO() hl,a ENDMACRO" ,
+            "INCLUDE 'second.gbc'\nMACRO FOO() hl,a ENDMACRO" ,
             "GLOBAL MACRO FOO() hl,b ENDMACRO"
         );
         assert!(lexer.tokens.is_empty());
@@ -1434,7 +1434,7 @@ mod test {
     fn test_macro_def_outside() {
         assert_eq!(
             macro_lexer_error("ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDMACRO\" token outside of macro definition.\n\nENDMACRO\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 1: Unexpected \"ENDMACRO\" token outside of macro definition.\n\nENDMACRO\n^--- Here"
         );
     }
 
@@ -1442,7 +1442,7 @@ mod test {
     fn test_macro_def_re_builtin() {
         assert_eq!(
             macro_lexer_error("MACRO DBG() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 7: Re-definition of builtin macro \"DBG\".\n\nMACRO DBG() ENDMACRO\n      ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 7: Re-definition of builtin macro \"DBG\".\n\nMACRO DBG() ENDMACRO\n      ^--- Here"
         );
     }
 
@@ -1450,7 +1450,7 @@ mod test {
     fn test_macro_def_re_user_local() {
         assert_eq!(
             macro_lexer_error("MACRO FOO() ENDMACRO MACRO FOO() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 28: Re-definition of non-global user macro \"FOO\".\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n                           ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n      ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 28: Re-definition of non-global user macro \"FOO\".\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n                           ^--- Here\n\nOriginal definition was in file \"/main.gbc\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO MACRO FOO() ENDMACRO\n      ^--- Here"
         );
     }
 
@@ -1458,7 +1458,7 @@ mod test {
     fn test_macro_def_re_user_mixed() {
         assert_eq!(
             macro_lexer_error("MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 35: Re-definition of non-global user macro \"FOO\".\n\nMACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n                                  ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n      ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 35: Re-definition of non-global user macro \"FOO\".\n\nMACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n                                  ^--- Here\n\nOriginal definition was in file \"/main.gbc\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n      ^--- Here"
         );
     }
 
@@ -1466,7 +1466,7 @@ mod test {
     fn test_macro_def_re_user_global_same_file() {
         assert_eq!(
             macro_lexer_error("GLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 42: Re-definition of global user macro \"FOO\".\n\nGLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n                                         ^--- Here\n\nOriginal definition was in file \"main.gb.s\" on line 1, column 14:\n\nGLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n             ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 42: Re-definition of global user macro \"FOO\".\n\nGLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n                                         ^--- Here\n\nOriginal definition was in file \"/main.gbc\" on line 1, column 14:\n\nGLOBAL MACRO FOO() ENDMACRO GLOBAL MACRO FOO() ENDMACRO\n             ^--- Here"
         );
     }
 
@@ -1474,10 +1474,10 @@ mod test {
     fn test_macro_def_re_user_global_other_file_global() {
         assert_eq!(
             macro_lexer_error_child(
-                "INCLUDE 'child.gb.s'\nGLOBAL MACRO FOO() ENDMACRO",
+                "INCLUDE 'second.gbc'\nGLOBAL MACRO FOO() ENDMACRO",
                 "GLOBAL MACRO FOO() ENDMACRO"
             ),
-            "In file \"main.gb.s\" on line 2, column 14: Re-definition of global user macro \"FOO\".\n\nGLOBAL MACRO FOO() ENDMACRO\n             ^--- Here\n\nOriginal definition was in file \"child.gb.s\" on line 1, column 14:\n\nGLOBAL MACRO FOO() ENDMACRO\n             ^--- Here"
+            "In file \"/main.gbc\" on line 2, column 14: Re-definition of global user macro \"FOO\".\n\nGLOBAL MACRO FOO() ENDMACRO\n             ^--- Here\n\nOriginal definition was in file \"/second.gbc\" on line 1, column 14:\n\nGLOBAL MACRO FOO() ENDMACRO\n             ^--- Here"
         );
     }
 
@@ -1485,7 +1485,7 @@ mod test {
     fn test_macro_def_nested() {
         assert_eq!(
             macro_lexer_error("MACRO FOO() MACRO DBG() ENDMACRO ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 13: Invalid nested macro definition.\n\nMACRO FOO() MACRO DBG() ENDMACRO ENDMACRO\n            ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 13: Invalid nested macro definition.\n\nMACRO FOO() MACRO DBG() ENDMACRO ENDMACRO\n            ^--- Here"
         );
     }
 
@@ -1493,7 +1493,7 @@ mod test {
     fn test_macro_def_repeated_names() {
         assert_eq!(
             macro_lexer_error("MACRO FOO(@a, @b, @a) ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 19: Duplicate macro parameter \"a\", a parameter with the same name was already defined.\n\nMACRO FOO(@a, @b, @a) ENDMACRO\n                  ^--- Here"
+            "In file \"/main.gbc\" on line 1, column 19: Duplicate macro parameter \"a\", a parameter with the same name was already defined.\n\nMACRO FOO(@a, @b, @a) ENDMACRO\n                  ^--- Here"
         );
     }
 
@@ -1770,7 +1770,7 @@ mod test {
     fn test_error_macro_call_too_few_parameters() {
         assert_eq!(
             macro_lexer_error("MAX(1)"),
-            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"MAX\", expected 2 parameter(s) but got 1.\n\nMAX(1)\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"MAX\", expected 2 parameter(s) but got 1.\n\nMAX(1)\n^--- Here"
         );
     }
 
@@ -1778,7 +1778,7 @@ mod test {
     fn test_error_macro_call_too_many_parameters() {
         assert_eq!(
             macro_lexer_error("MAX(1, 2, 3)"),
-            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"MAX\", expected 2 parameter(s) but got 3.\n\nMAX(1, 2, 3)\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"MAX\", expected 2 parameter(s) but got 3.\n\nMAX(1, 2, 3)\n^--- Here"
         );
     }
 
@@ -1929,7 +1929,7 @@ mod test {
     #[test]
     fn test_macro_user_call_global() {
         let lexer = macro_lex_child(
-            "INCLUDE 'child.gb.s'\nFOO()",
+            "INCLUDE 'second.gbc'\nFOO()",
             "GLOBAL MACRO FOO() 8 ENDMACRO"
         );
         assert_eq!(lexer.tokens, vec![
@@ -1941,7 +1941,7 @@ mod test {
     #[test]
     fn test_macro_user_call_local_over_global() {
         let lexer = macro_lex_child(
-            "INCLUDE 'child.gb.s'\nMACRO FOO() 4 ENDMACRO\nFOO()",
+            "INCLUDE 'second.gbc'\nMACRO FOO() 4 ENDMACRO\nFOO()",
             "GLOBAL MACRO FOO() 8 ENDMACRO"
         );
         assert_eq!(lexer.tokens, vec![
@@ -1954,10 +1954,10 @@ mod test {
     fn test_macro_error_user_call_defined_non_global_other_file() {
         assert_eq!(
             macro_lexer_error_child(
-                "INCLUDE 'child.gb.s'\nFOO()",
+                "INCLUDE 'second.gbc'\nFOO()",
                 "MACRO FOO() ENDMACRO"
             ),
-            "In file \"main.gb.s\" on line 2, column 1: Invocation of undefined macro \"FOO\"\n\nFOO()\n^--- Here\n\nA non-global macro with the same name is defined in file \"child.gb.s\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO\n      ^--- Here"
+            "In file \"/main.gbc\" on line 2, column 1: Invocation of undefined macro \"FOO\"\n\nFOO()\n^--- Here\n\nA non-global macro with the same name is defined in file \"/second.gbc\" on line 1, column 7:\n\nMACRO FOO() ENDMACRO\n      ^--- Here"
         );
     }
 
@@ -1965,7 +1965,7 @@ mod test {
     fn test_macro_user_recursion_limit() {
         assert_eq!(
             macro_lexer_error("FOO() MACRO FOO() FOO() ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 19: Maximum recursion limit of 8 reached during expansion of macro \"FOO\".\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 1: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 19: Maximum recursion limit of 8 reached during expansion of macro \"FOO\".\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 19: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 1: Triggered by previous macro invocation\n\nFOO() MACRO FOO() FOO() ENDMACRO\n^--- Here"
         );
     }
 
@@ -1973,7 +1973,7 @@ mod test {
     fn test_macro_user_expansion_stack() {
         assert_eq!(
             macro_lexer_error("FOO() MACRO FOO() @b ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 19: Unknown parameter in expansion of macro \"FOO\", parameter \"b\" is not defined in list of macro parameters.\n\nFOO() MACRO FOO() @b ENDMACRO\n                  ^--- Here\n\nIn file \"main.gb.s\" on line 1, column 1: Triggered by previous macro invocation\n\nFOO() MACRO FOO() @b ENDMACRO\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 19: Unknown parameter in expansion of macro \"FOO\", parameter \"b\" is not defined in list of macro parameters.\n\nFOO() MACRO FOO() @b ENDMACRO\n                  ^--- Here\n\nIn file \"/main.gbc\" on line 1, column 1: Triggered by previous macro invocation\n\nFOO() MACRO FOO() @b ENDMACRO\n^--- Here"
         );
     }
 
@@ -1989,7 +1989,7 @@ mod test {
     fn test_error_macro_user_too_few_parameters() {
         assert_eq!(
             macro_lexer_error("FOO() MACRO FOO(@b) b ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"FOO\", expected 1 parameter(s) but got 0.\n\nFOO() MACRO FOO(@b) b ENDMACRO\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"FOO\", expected 1 parameter(s) but got 0.\n\nFOO() MACRO FOO(@b) b ENDMACRO\n^--- Here"
         );
     }
 
@@ -1997,7 +1997,7 @@ mod test {
     fn test_error_macro_user_too_many_parameters() {
         assert_eq!(
             macro_lexer_error("FOO(1, 2) MACRO FOO(@b) b ENDMACRO"),
-            "In file \"main.gb.s\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"FOO\", expected 1 parameter(s) but got 2.\n\nFOO(1, 2) MACRO FOO(@b) b ENDMACRO\n^--- Here"
+            "In file \"/main.gbc\" on line 1, column 1: Incorrect number of parameters for invocation of macro \"FOO\", expected 1 parameter(s) but got 2.\n\nFOO(1, 2) MACRO FOO(@b) b ENDMACRO\n^--- Here"
         );
     }
 
@@ -2116,30 +2116,30 @@ mod test {
 
     #[test]
     fn test_error_if_keywords() {
-        assert_eq!(macro_lexer_error("THEN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"THEN\" token outside of IF statement.\n\nTHEN\n^--- Here");
-        assert_eq!(macro_lexer_error("ELSE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ELSE\" token outside of IF statement.\n\nELSE\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDIF"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDIF\" token outside of IF statement.\n\nENDIF\n^--- Here");
+        assert_eq!(macro_lexer_error("THEN"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"THEN\" token outside of IF statement.\n\nTHEN\n^--- Here");
+        assert_eq!(macro_lexer_error("ELSE"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"ELSE\" token outside of IF statement.\n\nELSE\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDIF"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"ENDIF\" token outside of IF statement.\n\nENDIF\n^--- Here");
     }
 
     #[test]
     fn test_error_if_condition() {
-        assert_eq!(macro_lexer_error("IF"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing IF statement condition.\n\nIF\n^--- Here");
-        assert_eq!(macro_lexer_error("IF IF"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"IF\" token inside of IF statement condition.\n\nIF IF\n   ^--- Here");
-        assert_eq!(macro_lexer_error("IF ELSE"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"ELSE\" token inside of IF statement condition.\n\nIF ELSE\n   ^--- Here");
-        assert_eq!(macro_lexer_error("IF ENDIF"), "In file \"main.gb.s\" on line 1, column 4: Unexpected \"ENDIF\" token inside of IF statement condition.\n\nIF ENDIF\n   ^--- Here");
-        assert_eq!(macro_lexer_error("IF THEN"), "In file \"main.gb.s\" on line 1, column 1: Empty IF statement condition.\n\nIF THEN\n^--- Here");
+        assert_eq!(macro_lexer_error("IF"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input while parsing IF statement condition.\n\nIF\n^--- Here");
+        assert_eq!(macro_lexer_error("IF IF"), "In file \"/main.gbc\" on line 1, column 4: Unexpected \"IF\" token inside of IF statement condition.\n\nIF IF\n   ^--- Here");
+        assert_eq!(macro_lexer_error("IF ELSE"), "In file \"/main.gbc\" on line 1, column 4: Unexpected \"ELSE\" token inside of IF statement condition.\n\nIF ELSE\n   ^--- Here");
+        assert_eq!(macro_lexer_error("IF ENDIF"), "In file \"/main.gbc\" on line 1, column 4: Unexpected \"ENDIF\" token inside of IF statement condition.\n\nIF ENDIF\n   ^--- Here");
+        assert_eq!(macro_lexer_error("IF THEN"), "In file \"/main.gbc\" on line 1, column 1: Empty IF statement condition.\n\nIF THEN\n^--- Here");
     }
 
     #[test]
     fn test_error_if_body() {
-        assert_eq!(macro_lexer_error("IF foo THEN"), "In file \"main.gb.s\" on line 1, column 8: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN\n       ^--- Here");
-        assert_eq!(macro_lexer_error("IF foo THEN ELSE"), "In file \"main.gb.s\" on line 1, column 13: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN ELSE\n            ^--- Here");
-        assert_eq!(macro_lexer_error("IF foo THEN ELSE IF bar THEN "), "In file \"main.gb.s\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN ELSE IF bar THEN \n                        ^--- Here");
+        assert_eq!(macro_lexer_error("IF foo THEN"), "In file \"/main.gbc\" on line 1, column 8: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN\n       ^--- Here");
+        assert_eq!(macro_lexer_error("IF foo THEN ELSE"), "In file \"/main.gbc\" on line 1, column 13: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN ELSE\n            ^--- Here");
+        assert_eq!(macro_lexer_error("IF foo THEN ELSE IF bar THEN "), "In file \"/main.gbc\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN ELSE IF bar THEN \n                        ^--- Here");
     }
 
     #[test]
     fn test_error_if_nested() {
-        assert_eq!(macro_lexer_error("IF foo THEN IF bar THEN ENDIF"), "In file \"main.gb.s\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN IF bar THEN ENDIF\n                        ^--- Here");
+        assert_eq!(macro_lexer_error("IF foo THEN IF bar THEN ENDIF"), "In file \"/main.gbc\" on line 1, column 25: Unexpected end of input while parsing IF statement body.\n\nIF foo THEN IF bar THEN ENDIF\n                        ^--- Here");
     }
 
     // FOR Statements ---------------------------------------------------------
@@ -2158,21 +2158,21 @@ mod test {
 
     #[test]
     fn test_error_for_statement() {
-        assert_eq!(macro_lexer_error("FOR"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing FOR statement, expected a \"Name\" token instead.\n\nFOR\n^--- Here");
-        assert_eq!(macro_lexer_error("FOR foo"), "In file \"main.gb.s\" on line 1, column 5: Unexpected end of input when parsing FOR statement, expected \"IN\" instead.\n\nFOR foo\n    ^--- Here");
-        assert_eq!(macro_lexer_error("FOR foo IN"), "In file \"main.gb.s\" on line 1, column 9: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN\n        ^--- Here");
-        assert_eq!(macro_lexer_error("FOR foo IN 0"), "In file \"main.gb.s\" on line 1, column 12: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0\n           ^--- Here");
-        assert_eq!(macro_lexer_error("FOR foo IN 0 TO"), "In file \"main.gb.s\" on line 1, column 14: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0 TO\n             ^--- Here");
-        assert_eq!(macro_lexer_error("FOR foo IN 0 TO 10"), "In file \"main.gb.s\" on line 1, column 17: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0 TO 10\n                ^--- Here");
-        assert_eq!(macro_lexer_error("FOR foo IN 0 TO 10 REPEAT"), "In file \"main.gb.s\" on line 1, column 20: Unexpected end of input while parsing FOR statement body.\n\nFOR foo IN 0 TO 10 REPEAT\n                   ^--- Here");
+        assert_eq!(macro_lexer_error("FOR"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing FOR statement, expected a \"Name\" token instead.\n\nFOR\n^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo"), "In file \"/main.gbc\" on line 1, column 5: Unexpected end of input when parsing FOR statement, expected \"IN\" instead.\n\nFOR foo\n    ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN"), "In file \"/main.gbc\" on line 1, column 9: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN\n        ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0"), "In file \"/main.gbc\" on line 1, column 12: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0\n           ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0 TO"), "In file \"/main.gbc\" on line 1, column 14: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0 TO\n             ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0 TO 10"), "In file \"/main.gbc\" on line 1, column 17: Unexpected end of input while parsing FOR statement range argument.\n\nFOR foo IN 0 TO 10\n                ^--- Here");
+        assert_eq!(macro_lexer_error("FOR foo IN 0 TO 10 REPEAT"), "In file \"/main.gbc\" on line 1, column 20: Unexpected end of input while parsing FOR statement body.\n\nFOR foo IN 0 TO 10 REPEAT\n                   ^--- Here");
     }
 
     #[test]
     fn test_error_for_keywords() {
-        assert_eq!(macro_lexer_error("IN"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"IN\" token outside of FOR statement.\n\nIN\n^--- Here");
-        assert_eq!(macro_lexer_error("TO"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"TO\" token outside of FOR statement.\n\nTO\n^--- Here");
-        assert_eq!(macro_lexer_error("REPEAT"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"REPEAT\" token outside of FOR statement.\n\nREPEAT\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDFOR"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDFOR\" token outside of FOR statement.\n\nENDFOR\n^--- Here");
+        assert_eq!(macro_lexer_error("IN"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"IN\" token outside of FOR statement.\n\nIN\n^--- Here");
+        assert_eq!(macro_lexer_error("TO"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"TO\" token outside of FOR statement.\n\nTO\n^--- Here");
+        assert_eq!(macro_lexer_error("REPEAT"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"REPEAT\" token outside of FOR statement.\n\nREPEAT\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDFOR"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"ENDFOR\" token outside of FOR statement.\n\nENDFOR\n^--- Here");
     }
 
     // Blocks -----------------------------------------------------------------
@@ -2204,8 +2204,8 @@ mod test {
 
     #[test]
     fn test_error_block() {
-        assert_eq!(macro_lexer_error("BLOCK"), "In file \"main.gb.s\" on line 1, column 1: Expected either a USING or VOLATILE keyword to BLOCK directive.\n\nBLOCK\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDBLOCK"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDBLOCK\" token outside of BLOCK statement.\n\nENDBLOCK\n^--- Here");
+        assert_eq!(macro_lexer_error("BLOCK"), "In file \"/main.gbc\" on line 1, column 1: Expected either a USING or VOLATILE keyword to BLOCK directive.\n\nBLOCK\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDBLOCK"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"ENDBLOCK\" token outside of BLOCK statement.\n\nENDBLOCK\n^--- Here");
     }
 
     // Namespace Statements ---------------------------------------------------
@@ -2322,12 +2322,12 @@ mod test {
 
     #[test]
     fn test_error_namespace_statement() {
-        assert_eq!(macro_lexer_error("NAMESPACE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input when parsing NAMESPACE statement, expected a \"Name\" token instead.\n\nNAMESPACE\n^--- Here");
-        assert_eq!(macro_lexer_error("ENDNAMESPACE"), "In file \"main.gb.s\" on line 1, column 1: Unexpected \"ENDNAMESPACE\" token outside of NAMESPACE statement.\n\nENDNAMESPACE\n^--- Here");
-        assert_eq!(macro_lexer_error("NAMESPACE foo GLOBAL ENDNAMESPACE"), "In file \"main.gb.s\" on line 1, column 15: Namespace members cannot be declared GLOBAL individually.\n\nNAMESPACE foo GLOBAL ENDNAMESPACE\n              ^--- Here");
-        assert_eq!(macro_lexer_error("::"), "In file \"main.gb.s\" on line 1, column 1: Incomplete namespace member access.\n\n::\n^--- Here");
-        assert_eq!(macro_lexer_error("foo::"), "In file \"main.gb.s\" on line 1, column 4: Unexpected end of input when parsing namespace member access, expected a \"Name\" token instead.\n\nfoo::\n   ^--- Here");
-        assert_eq!(macro_lexer_error("foo::DB"), "In file \"main.gb.s\" on line 1, column 6: Unexpected token \"Reserved\" when parsing namespace member access, expected a \"Name\" token instead.\n\nfoo::DB\n     ^--- Here");
+        assert_eq!(macro_lexer_error("NAMESPACE"), "In file \"/main.gbc\" on line 1, column 1: Unexpected end of input when parsing NAMESPACE statement, expected a \"Name\" token instead.\n\nNAMESPACE\n^--- Here");
+        assert_eq!(macro_lexer_error("ENDNAMESPACE"), "In file \"/main.gbc\" on line 1, column 1: Unexpected \"ENDNAMESPACE\" token outside of NAMESPACE statement.\n\nENDNAMESPACE\n^--- Here");
+        assert_eq!(macro_lexer_error("NAMESPACE foo GLOBAL ENDNAMESPACE"), "In file \"/main.gbc\" on line 1, column 15: Namespace members cannot be declared GLOBAL individually.\n\nNAMESPACE foo GLOBAL ENDNAMESPACE\n              ^--- Here");
+        assert_eq!(macro_lexer_error("::"), "In file \"/main.gbc\" on line 1, column 1: Incomplete namespace member access.\n\n::\n^--- Here");
+        assert_eq!(macro_lexer_error("foo::"), "In file \"/main.gbc\" on line 1, column 4: Unexpected end of input when parsing namespace member access, expected a \"Name\" token instead.\n\nfoo::\n   ^--- Here");
+        assert_eq!(macro_lexer_error("foo::DB"), "In file \"/main.gbc\" on line 1, column 6: Unexpected token \"Reserved\" when parsing namespace member access, expected a \"Name\" token instead.\n\nfoo::DB\n     ^--- Here");
     }
 
 }

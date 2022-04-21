@@ -108,7 +108,6 @@ fn main() {
 
     } else {
         cli::app().print_help().ok();
-        println!("");
     }
 }
 

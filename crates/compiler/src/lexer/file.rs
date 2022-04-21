@@ -54,7 +54,7 @@ impl LexerFile {
 
     fn cache_lines(&self) {
         if self.lines.borrow().is_empty() {
-            let mut lines = Vec::new();
+            let mut lines = Vec::with_capacity(1024);
             let mut index = 0;
             for line in self.contents.split_inclusive('\n') {
                 lines.push((index, index + line.len()));

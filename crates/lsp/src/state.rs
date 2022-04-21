@@ -29,12 +29,12 @@ use gbd::{EmulatorCommand, EmulatorStatus};
 
 // Internal Dependencies ------------------------------------------------------
 use compiler::lexer::{stage::include::IncludeToken, LexerFile};
+use compiler::linker::{AnalysisSymbol, AnalysisHint, AnalysisMacroExpansion};
 use crate::{
     emulator::Emulator,
     types::{
         ServerStatusParams, ServerStatusNotification,
-        InlayHintsNotification, InlayHintsParams,
-        GBCSymbol, MacroExpansion, Optimizations
+        InlayHintsNotification, InlayHintsParams
     }
 };
 
@@ -42,7 +42,7 @@ use crate::{
 // Types ----------------------------------------------------------------------
 type DocumentMap = HashMap<String, String>;
 type TokenMap = HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>;
-type SymbolData = (Vec<GBCSymbol>, Vec<MacroExpansion>, Optimizations);
+type SymbolData = (Vec<AnalysisSymbol>, Vec<AnalysisMacroExpansion>, Vec<AnalysisHint>);
 type DiagnosticsMap = HashMap<Url, Vec<Diagnostic>>;
 type AddressesMap = HashMap<usize, Location>;
 type Error = (Url, usize, usize);
@@ -200,7 +200,7 @@ impl State {
         self.symbols.lock().expect("Symbols Lock failed")
     }
 
-    pub fn symbols_cloned(&self) -> Option<Vec<GBCSymbol>> {
+    pub fn symbols_cloned(&self) -> Option<Vec<AnalysisSymbol>> {
         self.symbols.lock().expect("Symbols Lock failed").as_ref().map(|s| s.0.clone())
     }
 

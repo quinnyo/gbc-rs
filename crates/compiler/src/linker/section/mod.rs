@@ -1215,7 +1215,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_constant_eval() {
-        let l = linker_child("CONST PARENT CHILD + 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB PARENT", "GLOBAL CONST CHILD 1");
+        let l = linker_child("CONST PARENT CHILD + 1\nINCLUDE 'second.gbc'\nSECTION ROM0\nDB PARENT", "GLOBAL CONST CHILD 1");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1231,7 +1231,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_no_global_override() {
-        let l = linker_child("CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "CONST FOO 2\nSECTION ROM0\nDB FOO");
+        let l = linker_child("CONST FOO 1\nINCLUDE 'second.gbc'\nSECTION ROM0\nDB FOO", "CONST FOO 2\nSECTION ROM0\nDB FOO");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1254,7 +1254,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_global_override_default_export() {
-        let l = linker_child("GLOBAL DEFAULT CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2");
+        let l = linker_child("GLOBAL DEFAULT CONST FOO 1\nINCLUDE 'second.gbc'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1270,7 +1270,7 @@ mod test {
 
     #[test]
     fn test_section_entry_child_global_no_override_default_private() {
-        let l = linker_child("DEFAULT CONST FOO 1\nINCLUDE 'child.gb.s'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2");
+        let l = linker_child("DEFAULT CONST FOO 1\nINCLUDE 'second.gbc'\nSECTION ROM0\nDB FOO", "GLOBAL CONST FOO 2");
         assert_eq!(linker_section_entries(l), vec![
             vec![
                 (1, EntryData::Data {
@@ -1360,8 +1360,8 @@ mod test {
 
     #[test]
     fn test_error_section_entry_data_rom_db() {
-        assert_eq!(linker_error("SECTION ROM0\nDB 256"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data (256), expected a byte value in the range of -128 to 255 instead.\n\nDB 256\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDB -129"), "In file \"main.gb.s\" on line 2, column 1: Invalid byte data (-129), expected a byte value in the range of -128 to 255 instead.\n\nDB -129\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDB 256"), "In file \"/main.gbc\" on line 2, column 1: Invalid byte data (256), expected a byte value in the range of -128 to 255 instead.\n\nDB 256\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDB -129"), "In file \"/main.gbc\" on line 2, column 1: Invalid byte data (-129), expected a byte value in the range of -128 to 255 instead.\n\nDB -129\n^--- Here");
     }
 
     #[test]
@@ -1403,8 +1403,8 @@ mod test {
 
     #[test]
     fn test_error_section_entry_data_rom_dw_bw() {
-        assert_eq!(linker_error("SECTION ROM0\nDW 65536"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data (65536), expected a word value in the range of -32768 to 65535 instead.\n\nDW 65536\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDW -32769"), "In file \"main.gb.s\" on line 2, column 1: Invalid word data (-32769), expected a word value in the range of -32768 to 65535 instead.\n\nDW -32769\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDW 65536"), "In file \"/main.gbc\" on line 2, column 1: Invalid word data (65536), expected a word value in the range of -32768 to 65535 instead.\n\nDW 65536\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDW -32769"), "In file \"/main.gbc\" on line 2, column 1: Invalid word data (-32769), expected a word value in the range of -32768 to 65535 instead.\n\nDW -32769\n^--- Here");
     }
 
     #[test]
@@ -1462,9 +1462,9 @@ mod test {
 
     #[test]
     fn test_error_section_entry_data_rom_ds() {
-        assert_eq!(linker_error("SECTION ROM0\nDS -1"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDS -1 'FOO'"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1 \'FOO\'\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nDS 2 'FOO'"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, specified capacity must be >= length of stored string data.\n\nDS 2 \'FOO\'\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDS -1"), "In file \"/main.gbc\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDS -1 'FOO'"), "In file \"/main.gbc\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1 \'FOO\'\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nDS 2 'FOO'"), "In file \"/main.gbc\" on line 2, column 1: Invalid storage capacity, specified capacity must be >= length of stored string data.\n\nDS 2 \'FOO\'\n^--- Here");
     }
 
     // RAM Data Entries -------------------------------------------------------
@@ -1548,7 +1548,7 @@ mod test {
         linker("SECTION ROM0[$0000]\n DS16 1");
         linker("SECTION ROM0[$0100]\n DS16 1");
         linker("SECTION ROM0[$1000]\n DS16 1");
-        assert_eq!(linker_error("SECTION ROM0[$0001]\nDS16 1"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.\n\nDS16 1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0001]\nDS16 1"), "In file \"/main.gbc\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS16\" is required to start a low byte value of $00.\n\nDS16 1\n^--- Here");
     }
 
     #[test]
@@ -1556,14 +1556,14 @@ mod test {
         linker("SECTION ROM0[$0000]\n DS8 256");
         linker("SECTION ROM0[$0100]\n DS8 256");
         linker("SECTION ROM0[$0080]\n DS8 128");
-        assert_eq!(linker_error("SECTION ROM0[$0000]\nDS8 257"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[$0100]\nDS8 257"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0[$0080]\nDS8 129"), "In file \"main.gb.s\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 129\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000]\nDS8 257"), "In file \"/main.gbc\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0100]\nDS8 257"), "In file \"/main.gbc\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 257\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0080]\nDS8 129"), "In file \"/main.gbc\" on line 2, column 1: Invalid alignment of Data Declaration, \"DS8\" is required to start and end within the same low byte.\n\nDS8 129\n^--- Here");
     }
 
     #[test]
     fn test_error_section_entry_data_ram_ds() {
-        assert_eq!(linker_error("SECTION WRAM0\nDS -1"), "In file \"main.gb.s\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
+        assert_eq!(linker_error("SECTION WRAM0\nDS -1"), "In file \"/main.gbc\" on line 2, column 1: Invalid storage capacity, expected a positive integer value instead.\n\nDS -1\n^--- Here");
     }
 
     // Address Evaluation -----------------------------------------------------
@@ -1813,8 +1813,8 @@ mod test {
 
     #[test]
     fn test_error_section_instructions_with_arg() {
-        assert_eq!(linker_error("SECTION ROM0\nld hl,$10000"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument (65536), expected a word value in the range of -32768 to 65535 instead.\n\nld hl,$10000\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nld hl,-$8001"), "In file \"main.gb.s\" on line 2, column 1: Invalid word argument (-32769), expected a word value in the range of -32768 to 65535 instead.\n\nld hl,-$8001\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld hl,$10000"), "In file \"/main.gbc\" on line 2, column 1: Invalid word argument (65536), expected a word value in the range of -32768 to 65535 instead.\n\nld hl,$10000\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld hl,-$8001"), "In file \"/main.gbc\" on line 2, column 1: Invalid word argument (-32769), expected a word value in the range of -32768 to 65535 instead.\n\nld hl,-$8001\n^--- Here");
     }
 
     #[test]
@@ -1878,10 +1878,10 @@ mod test {
 
     #[test]
     fn test_error_section_instructions_with_arg_constants() {
-        assert_eq!(linker_error("SECTION ROM0\nbit -1,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value -1, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit -1,a\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nbit 8,a"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 8, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit 8,a\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nrst 2"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 2, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 2\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nrst 41"), "In file \"main.gb.s\" on line 2, column 1: Invalid constant value 41, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 41\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nbit -1,a"), "In file \"/main.gbc\" on line 2, column 1: Invalid constant value -1, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit -1,a\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nbit 8,a"), "In file \"/main.gbc\" on line 2, column 1: Invalid constant value 8, one of the following values is required: 0, 1, 2, 3, 4, 5, 6, 7\n\nbit 8,a\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nrst 2"), "In file \"/main.gbc\" on line 2, column 1: Invalid constant value 2, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 2\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nrst 41"), "In file \"/main.gbc\" on line 2, column 1: Invalid constant value 41, one of the following values is required: 0, 8, 16, 24, 32, 40, 48, 56\n\nrst 41\n^--- Here");
     }
 
     #[test]
@@ -2014,9 +2014,9 @@ mod test {
     #[test]
     fn test_error_section_instructions_jr_range() {
         linker("SECTION ROM0\njr global\nSECTION ROM0[129]\nglobal:");
-        assert_eq!(linker_error("SECTION ROM0\njr global\nSECTION ROM0[130]\nglobal:"), "In file \"main.gb.s\" on line 2, column 1: Relative jump offset of 128 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\njr global\nSECTION ROM0[130]\nglobal:"), "In file \"/main.gbc\" on line 2, column 1: Relative jump offset of 128 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
         linker("SECTION ROM0\nglobal:\nSECTION ROM0[126]\njr global");
-        assert_eq!(linker_error("SECTION ROM0\nglobal:\nSECTION ROM0[127]\njr global"), "In file \"main.gb.s\" on line 4, column 1: Relative jump offset of -129 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal:\nSECTION ROM0[127]\njr global"), "In file \"/main.gbc\" on line 4, column 1: Relative jump offset of -129 is out of range, expected a signed byte value in the range of -128 to 127 instead.\n\njr global\n^--- Here");
     }
 
     #[test]
@@ -2141,7 +2141,7 @@ mod test {
     #[test]
     fn test_error_section_size_bounds() {
         linker("SECTION ROM0[$0000][2]\nld a,a\nld a,a");
-        assert_eq!(linker_error("SECTION ROM0[$0000][2]\nld a,a\nld a,a\nld a,a"), "In file \"main.gb.s\" on line 1, column 1: Section contents exceeds allocated area $0000-$0001 by 1 byte(s)\n\nSECTION ROM0[$0000][2]\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0[$0000][2]\nld a,a\nld a,a\nld a,a"), "In file \"/main.gbc\" on line 1, column 1: Section contents exceeds allocated area $0000-$0001 by 1 byte(s)\n\nSECTION ROM0[$0000][2]\n^--- Here");
     }
 
     // Debug Stripping --------------------------------------------------------
@@ -2195,17 +2195,17 @@ mod test {
         linker("SECTION ROM0\nld a,a\njp @-4");
         linker("SECTION ROM0\nld a,a\njr @-3");
 
-        assert_eq!(linker_error("SECTION ROM0\nld a,a\njr @-1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0002 is neither the start nor end of any section entry.\n\njr @-1\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"main.gb.s\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld a,a\njr @-1"), "In file \"/main.gbc\" on line 3, column 1: Jump instruction does not target a valid address, $0002 is neither the start nor end of any section entry.\n\njr @-1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld a,a\njp @+1"), "In file \"/main.gbc\" on line 3, column 1: Jump instruction does not target a valid address, $0005 is neither the start nor end of any section entry.\n\njp @+1\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nld a,a\njp $2000"), "In file \"/main.gbc\" on line 3, column 1: Jump instruction does not target a valid address, $2000 is neither the start nor end of any section entry.\n\njp $2000\n^--- Here");
     }
 
     // Callable Labels --------------------------------------------------------
     #[test]
     fn test_section_callable_labels() {
-        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label"), "In file \"main.gb.s\" on line 3, column 6: Reference to call-only label\n\ncall global_label\n     ^--- Here\n\nLabel is declared as callable and must be invoked with arguments in file \"main.gb.s\" on line 2, column 1:\n\nglobal_label(a):\n^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label()"), "In file \"main.gb.s\" on line 2, column 1: Invalid number of arguments for label call\n\nglobal_label(a):\n^--- Here\n\nLabel takes 1 arguments, but 0 were supplied in file \"main.gb.s\" on line 3, column 6:\n\ncall global_label()\n     ^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(1, 2)"), "In file \"main.gb.s\" on line 2, column 1: Invalid number of arguments for label call\n\nglobal_label(a):\n^--- Here\n\nLabel takes 1 arguments, but 2 were supplied in file \"main.gb.s\" on line 3, column 6:\n\ncall global_label(1, 2)\n     ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label"), "In file \"/main.gbc\" on line 3, column 6: Reference to call-only label\n\ncall global_label\n     ^--- Here\n\nLabel is declared as callable and must be invoked with arguments in file \"/main.gbc\" on line 2, column 1:\n\nglobal_label(a):\n^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label()"), "In file \"/main.gbc\" on line 2, column 1: Invalid number of arguments for label call\n\nglobal_label(a):\n^--- Here\n\nLabel takes 1 arguments, but 0 were supplied in file \"/main.gbc\" on line 3, column 6:\n\ncall global_label()\n     ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(1, 2)"), "In file \"/main.gbc\" on line 2, column 1: Invalid number of arguments for label call\n\nglobal_label(a):\n^--- Here\n\nLabel takes 1 arguments, but 2 were supplied in file \"/main.gbc\" on line 3, column 6:\n\ncall global_label(1, 2)\n     ^--- Here");
 
         let l = linker("SECTION ROM0\nglobal_label(a):\njr global_label");
         assert_eq!(linker_section_entries(l), vec![
@@ -2585,8 +2585,8 @@ mod test {
             ]
         ]);
 
-        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(hl)"), "In file \"main.gb.s\" on line 3, column 19: 2 byte argument register does not match expected 1 byte register in call signature\n\ncall global_label(hl)\n                  ^--- Here");
-        assert_eq!(linker_error("SECTION ROM0\nglobal_label(hl):\ncall global_label(a)"), "In file \"main.gb.s\" on line 3, column 19: 1 byte argument register does not match expected 2 byte register in call signature\n\ncall global_label(a)\n                  ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(a):\ncall global_label(hl)"), "In file \"/main.gbc\" on line 3, column 19: 2 byte argument register does not match expected 1 byte register in call signature\n\ncall global_label(hl)\n                  ^--- Here");
+        assert_eq!(linker_error("SECTION ROM0\nglobal_label(hl):\ncall global_label(a)"), "In file \"/main.gbc\" on line 3, column 19: 1 byte argument register does not match expected 2 byte register in call signature\n\ncall global_label(a)\n                  ^--- Here");
 
     }
 
@@ -2670,8 +2670,7 @@ mod test {
     // Using Blocks -----------------------------------------------------------
     #[test]
     fn test_section_block_using() {
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
             vec!["--arg".into(), "--arg-two".into()],
@@ -2696,16 +2695,14 @@ mod test {
 
     #[test]
     fn test_error_section_block_using_missing_command() {
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let reader = MockFileReader::from_base(PathBuf::from("src"));
         let l = linker_error_reader(&reader, "SECTION ROM0\nBLOCK USING '' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK");
-        assert_eq!(l, "In file \"main.gb.s\" on line 2, column 1: Failed to execute command \"\":\n\n---\nMissing command name---\n\nBLOCK USING \'\' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK\n^--- Here");
+        assert_eq!(l, "In file \"/main.gbc\" on line 2, column 1: Failed to execute command \"\":\n\n---\nMissing command name---\n\nBLOCK USING \'\' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK\n^--- Here");
     }
 
     #[test]
     fn test_error_section_block_using_failed_command() {
-        let mut reader = MockFileReader::default();
-        reader.base = PathBuf::from("src");
+        let mut reader = MockFileReader::from_base(PathBuf::from("src"));
         reader.add_command(
             "cmd",
             vec![],
@@ -2715,7 +2712,7 @@ mod test {
         );
 
         let l = linker_error_reader(&reader, "SECTION ROM0\nBLOCK USING 'cmd' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK");
-        assert_eq!(l, "In file \"main.gb.s\" on line 2, column 1: Failed to execute command \"cmd\":\n\n---\nCommand failed---\n\nBLOCK USING \'cmd\' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK\n^--- Here");
+        assert_eq!(l, "In file \"/main.gbc\" on line 2, column 1: Failed to execute command \"cmd\":\n\n---\nCommand failed---\n\nBLOCK USING \'cmd\' DB 1 DW 2000 DS 15 DB 42 ENDBLOCK\n^--- Here");
     }
 
 }
