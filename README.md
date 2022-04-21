@@ -362,7 +362,7 @@ retx    2
 
 #### **jc**
 
-Jumps based on a compare (==, !=, >=, <=, >, <) with the `Accumulator`:
+Jumps based on the result of a comparison (==, !=, >=, <=, >, <):
 
 ```asm
 ; cp    20
@@ -382,6 +382,16 @@ jc      a < b,.label
 ; jr    nc,.label
 ; .skip:
 jc      a > c,.label
+
+; ld    a,[someLabel]
+; cp    40
+; jr    z,.label
+jc      [someLabel] == 80,.label
+
+; ld    a,[de]
+; cp    80
+; jr    z,.label
+jc      [de] == 40,.label
 ```
 
 #### **vsync**

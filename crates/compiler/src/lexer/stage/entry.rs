@@ -234,12 +234,7 @@ impl EntryStage {
                 // Instructions
                 ExpressionToken::Instruction(inner) => Self::parse_instruction(&mut tokens, layouts, inner)?,
                 ExpressionToken::MetaInstruction(inner) => {
-                    entry_tokens.append(&mut Self::parse_meta_instruction(&mut tokens, inner)?);
-                    continue;
-                },
-
-                ExpressionToken::MetaInstructionOperator(inner, operator) => {
-                    entry_tokens.append(&mut Self::parse_meta_instruction_operator(&mut tokens, inner, operator, unique_label_id)?);
+                    entry_tokens.append(&mut Self::parse_meta_instruction(&mut tokens, inner, unique_label_id)?);
                     continue;
                 },
 
@@ -340,10 +335,7 @@ impl EntryStage {
                                         ])
                                     },
                                     ExpressionToken::MetaInstruction(inner) => {
-                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction(&mut tokens, inner)?)
-                                    },
-                                    ExpressionToken::MetaInstructionOperator(inner, operator) => {
-                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction_operator(&mut tokens, inner, operator, unique_label_id)?)
+                                        EntryToken::VolatileStatement(inner.clone(), Self::parse_meta_instruction(&mut tokens, inner, unique_label_id)?)
                                     },
                                     token => return Err(inner.error(format!(
                                         "Unexpected {:?} after VOLATILE keyword, expected a Instruction instead.",
@@ -590,7 +582,8 @@ impl EntryStage {
 
     fn parse_meta_instruction(
         tokens: &mut TokenIterator<ExpressionToken>,
-        inner: InnerToken
+        inner: InnerToken,
+        unique_label_id: &mut usize
 
     ) -> Result<Vec<EntryToken>, SourceError> {
         Ok(match inner.value {
@@ -602,7 +595,7 @@ impl EntryStage {
                     let bytes = s.clone().into_bytes();
                     if bytes.len() > 127 - 4 {
                         return Err(expr.error(
-                            format!("Debug message strings literals may be at least 123 bytes long (found {} bytes).", bytes.len())
+                            format!("Debug message strings literals may be most least 123 bytes long (found {} bytes).", bytes.len())
                         ));
 
                     } else {
@@ -815,97 +808,116 @@ impl EntryStage {
                     EntryToken::InstructionWithArg(inner.clone(), 0x20, Expression::Value(ExpressionValue::OffsetAddress(inner, -6))),
                 ]
             },
+
+            // Register Compare and Jump
+            Symbol::Jc => Self::parse_meta_instruction_jc(tokens, inner, unique_label_id)?,
+
             s => unimplemented!("meta instruction {}", s)
         })
     }
 
-    fn parse_meta_instruction_operator(
+    fn parse_meta_instruction_jc(
         tokens: &mut TokenIterator<ExpressionToken>,
         inner: InnerToken,
-        operator: Operator,
         unique_label_id: &mut usize
 
     ) -> Result<Vec<EntryToken>, SourceError> {
-        Ok(match inner.value {
-            Symbol::Jc => {
-                // jc a == expr
-                let cp = if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
-                    EntryToken::InstructionWithArg(inner.clone(), 0xFE, expr)
+        let mut entries = Vec::with_capacity(5);
 
-                // a == [hl]
-                } else if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
-                    tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
-                    tokens.expect(ExpressionTokenType::Register, Some(Symbol::HL), "while parsing instruction argument")?;
-                    tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
-                    EntryToken::Instruction(inner.clone(), 0xBE)
+        // jc a|b|c|d|e|h|l
+        if tokens.peek_is(ExpressionTokenType::Register, None) {
+            let reg = Self::parse_meta_byte_register(tokens)?;
+            if reg != Register::Accumulator {
+                entries.push(EntryToken::Instruction(inner.clone(), 0x78 + reg.instruction_offset()));
+            }
 
-                // jc a == reg
-                } else {
-                    let reg = Self::parse_meta_byte_register(tokens)?;
-                    EntryToken::Instruction(inner.clone(), 0xB8 + reg.instruction_offset())
-                };
+        } else {
+            tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
 
-                // ,label
-                tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction argument")?;
-                let label = Self::parse_meta_label(tokens)?;
-                match operator {
-                    Operator::Equals => {
-                        vec![
-                            cp,
-                            // jp   z,label
-                            EntryToken::InstructionWithArg(inner, 0xCA, label)
-                        ]
-                    },
-                    Operator::Unequals => {
-                        vec![
-                            cp,
-                            // jp   nz,label
-                            EntryToken::InstructionWithArg(inner, 0xC2, label)
-                        ]
-                    },
-                    Operator::LessThan => {
-                        vec![
-                            cp,
-                            // jp   c,label
-                            EntryToken::InstructionWithArg(inner, 0xDA, label)
-                        ]
-                    },
-                    Operator::LessThanEqual => {
-                        vec![
-                            cp,
-                            // jp   c,label
-                            EntryToken::InstructionWithArg(inner.clone(), 0xDA, label.clone()),
-                            // jp   z,label
-                            EntryToken::InstructionWithArg(inner, 0xCA, label)
-                        ]
-                    },
-                    Operator::GreaterThan => {
-                        *unique_label_id += 1;
-                        vec![
-                            cp,
-                            // jp   z,skip
-                            // special handling exists in optimizer to not break this case
-                            EntryToken::InstructionWithArg(inner.clone(), 0x28, Expression::Value(ExpressionValue::ParentLabelAddress(inner.clone(), *unique_label_id))),
-                            // jp   nc,label
-                            EntryToken::InstructionWithArg(inner.clone(), 0xD2, label),
-                            // .skip
-                            EntryToken::ParentLabelDef(inner, *unique_label_id, None, false)
-                        ]
-                    },
-                    Operator::GreaterThanEqual => {
-                        // jp   nc,label
-                        vec![
-                            cp,
-                            EntryToken::InstructionWithArg(inner, 0xD2, label)
-                        ]
-                    },
-                    _ => return Err(inner.error(
-                        format!("Unsupported operator \"{}\" for jc instruction, expected one of the following operators: ==, !=, >=, <=, < or >.", operator.as_str())
-                    ))
-                }
-            },
-            s => unimplemented!("meta instruction operator {}", s)
-        })
+            // jc [de] ==
+            // jc [bc] ==
+            // jc [hl] ==
+            if tokens.peek_is(ExpressionTokenType::Register, None) {
+                let double = Self::parse_meta_word_register(tokens)?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction label argument")?;
+                entries.push(EntryToken::Instruction(inner.clone(), match double {
+                    Register::BC => 0x0A,
+                    Register::DE => 0x1A,
+                    Register::HL => 0x7E,
+                    _ => unreachable!()
+                }));
+
+            // jc [<label>]
+            } else {
+                let expr = Self::parse_meta_bracket_label(tokens)?;
+                entries.push(EntryToken::InstructionWithArg(inner.clone(), 0xFA, expr));
+            }
+        }
+
+        if let ExpressionToken::Comparison { typ, ..} = tokens.expect(ExpressionTokenType::Comparison, None, "while parsing instruction")? {
+            // == expr
+            if let Some(expr) = Self::parse_meta_optional_expression(tokens)? {
+                entries.push(EntryToken::InstructionWithArg(inner.clone(), 0xFE, expr))
+
+            // == [hl]
+            } else if tokens.peek_is(ExpressionTokenType::OpenBracket, None) {
+                tokens.expect(ExpressionTokenType::OpenBracket, Some(Symbol::OpenBracket), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::Register, Some(Symbol::HL), "while parsing instruction argument")?;
+                tokens.expect(ExpressionTokenType::CloseBracket, Some(Symbol::CloseBracket), "while parsing instruction argument")?;
+                entries.push(EntryToken::Instruction(inner.clone(), 0xBE))
+
+            // == reg
+            } else {
+                // TODO special case a == a or does the optimizer remove `cp a`?
+                let reg = Self::parse_meta_byte_register(tokens)?;
+                entries.push(EntryToken::Instruction(inner.clone(), 0xB8 + reg.instruction_offset()));
+            }
+            tokens.expect(ExpressionTokenType::Comma, None, "while parsing instruction argument")?;
+
+            // label
+            let label = Self::parse_meta_label(tokens)?;
+            match typ {
+                Operator::Equals => {
+                    // jp   z,label
+                    entries.push(EntryToken::InstructionWithArg(inner, 0xCA, label));
+                },
+                Operator::Unequals => {
+                    // jp   nz,label
+                    entries.push(EntryToken::InstructionWithArg(inner, 0xC2, label));
+                },
+                Operator::LessThan => {
+                    // jp   c,label
+                    entries.push(EntryToken::InstructionWithArg(inner, 0xDA, label));
+                },
+                Operator::LessThanEqual => {
+                    // jp   c,label
+                    entries.push(EntryToken::InstructionWithArg(inner.clone(), 0xDA, label.clone()));
+                    // jp   z,label
+                    entries.push(EntryToken::InstructionWithArg(inner, 0xCA, label));
+                },
+                Operator::GreaterThan => {
+                    *unique_label_id += 1;
+                    // jp   z,skip
+                    // special handling exists in optimizer to not break this case
+                    entries.push(EntryToken::InstructionWithArg(inner.clone(), 0x28, Expression::Value(ExpressionValue::ParentLabelAddress(inner.clone(), *unique_label_id))));
+                    // jp   nc,label
+                    entries.push(EntryToken::InstructionWithArg(inner.clone(), 0xD2, label));
+                    // .skip
+                    entries.push(EntryToken::ParentLabelDef(inner, *unique_label_id, None, false));
+                },
+                Operator::GreaterThanEqual => {
+                    // jp   nc,label
+                    entries.push(EntryToken::InstructionWithArg(inner, 0xD2, label));
+                },
+                _ => return Err(inner.error(
+                    format!("Unsupported operator \"{}\" for jc instruction, expected one of the following operators: ==, !=, >=, <=, < or >.", typ.as_str())
+                ))
+            }
+            Ok(entries)
+
+        } else {
+            unreachable!();
+        }
     }
 
     fn parse_meta_addw_subw(
@@ -3489,7 +3501,7 @@ mod test {
     fn test_error_meta_instruction_msg() {
         assert_eq!(entry_lexer_error("msg"), "In file \"main.gb.s\" on line 1, column 1: Unexpected end of input while parsing instruction argument.\n\nmsg\n^--- Here");
         assert_eq!(entry_lexer_error("msg 4"), "In file \"main.gb.s\" on line 1, column 5: Unexpected \"4\", expected a string literal argument.\n\nmsg 4\n    ^--- Here");
-        assert_eq!(entry_lexer_error("msg '12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345'"), "In file \"main.gb.s\" on line 1, column 5: Debug message strings literals may be at least 123 bytes long (found 125 bytes).\n\nmsg \'12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\'\n    ^--- Here");
+        assert_eq!(entry_lexer_error("msg '12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345'"), "In file \"main.gb.s\" on line 1, column 5: Debug message strings literals may be most least 123 bytes long (found 125 bytes).\n\nmsg \'12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345\'\n    ^--- Here");
     }
 
     #[test]
@@ -3500,7 +3512,49 @@ mod test {
     }
 
     #[test]
-    fn test_meta_instruction_jc() {
+    fn test_meta_instruction_jc_reg8() {
+        assert_eq!(tfe("global_label:\njc b == 20,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0x78),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(25, 37, "global_label"), 1)))
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_jc_memory_reg() {
+        assert_eq!(tfe("global_label:\njc [bc] == 20,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0x0A),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(28, 40, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc [de] == 20,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0x1A),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(28, 40, "global_label"), 1)))
+        ]);
+        assert_eq!(tfe("global_label:\njc [hl] == 20,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::Instruction(itk!(14, 16, "jc"), 0x7E),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(28, 40, "global_label"), 1)))
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_jc_memory() {
+        assert_eq!(tfe("global_label:\njc [$8040] == 20,global_label"), vec![
+            EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFA, Expression::Value(ExpressionValue::Integer(0x8040))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),
+            EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xCA, Expression::Value(ExpressionValue::ParentLabelAddress(itk!(31, 43, "global_label"), 1)))
+        ]);
+    }
+
+    #[test]
+    fn test_meta_instruction_jc_accumulator() {
         assert_eq!(tfe("global_label:\njc a == 20,global_label"), vec![
             EntryToken::ParentLabelDef(itk!(0, 13, "global_label"), 1, None, false),
             EntryToken::InstructionWithArg(itk!(14, 16, "jc"), 0xFE, Expression::Value(ExpressionValue::Integer(20))),

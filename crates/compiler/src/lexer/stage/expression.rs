@@ -36,7 +36,6 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
     Segment(()),
     Instruction(()),
     MetaInstruction(()),
-    MetaInstructionOperator((Operator)),
     BinaryFile((Vec<u8>)),
     Comma(()),
     OpenBracket(()),
@@ -52,6 +51,9 @@ lexer_token!(ExpressionToken, ExpressionTokenType, (Debug, Eq, PartialEq), {
 }, {
     Register {
         name => Register
+    },
+    Comparison {
+        typ => Operator
     },
     Flag {
         typ => Flag
@@ -69,7 +71,6 @@ impl ExpressionToken {
             ValueToken::Reserved(inner) => Ok(ExpressionToken::Reserved(inner)),
             ValueToken::Instruction(inner) => Ok(ExpressionToken::Instruction(inner)),
             ValueToken::MetaInstruction(inner) => Ok(ExpressionToken::MetaInstruction(inner)),
-            ValueToken::MetaInstructionOperator(inner, op) => Ok(ExpressionToken::MetaInstructionOperator(inner, op)),
             ValueToken::BinaryFile(inner, bytes) => Ok(ExpressionToken::BinaryFile(inner, bytes)),
             ValueToken::Comma(inner) => Ok(ExpressionToken::Comma(inner)),
             ValueToken::OpenBracket(inner) => Ok(ExpressionToken::OpenBracket(inner)),
@@ -79,6 +80,10 @@ impl ExpressionToken {
             ValueToken::Register { inner, name } => Ok(ExpressionToken::Register {
                 inner,
                 name
+            }),
+            ValueToken::Comparison { inner, typ } => Ok(ExpressionToken::Comparison {
+                inner,
+                typ
             }),
             ValueToken::Flag { inner, typ } => Ok(ExpressionToken::Flag {
                 inner,

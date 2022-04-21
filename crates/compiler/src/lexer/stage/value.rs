@@ -34,7 +34,6 @@ lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
     Segment(()),
     Instruction(()),
     MetaInstruction(()),
-    MetaInstructionOperator((Operator)),
     BinaryFile((Vec<u8>)),
     Comma(()),
     OpenParen(()),
@@ -66,6 +65,9 @@ lexer_token!(ValueToken, ValueTokenType, (Debug, Eq, PartialEq), {
         value => String
     },
     Operator {
+        typ => Operator
+    },
+    Comparison {
         typ => Operator
     },
     Register {
@@ -128,6 +130,7 @@ impl ValueStage {
 
         let mut child_labels: HashMap<ChildLabelIndex, InnerToken> = HashMap::with_capacity(16);
 
+        let mut emit_comparison_token = false;
         let mut value_tokens = Vec::with_capacity(tokens.len());
         let mut tokens = TokenIterator::new(tokens);
         while let Some(token) = tokens.next() {
@@ -161,10 +164,8 @@ impl ValueStage {
                 MacroToken::Segment(inner) => ValueToken::Segment(inner),
                 MacroToken::Instruction(inner) => ValueToken::Instruction(inner),
                 MacroToken::MetaInstruction(inner @ InnerToken { value: Symbol::Jc, ..}) => {
-                    tokens.expect(MacroTokenType::Register, Some(Symbol::A), "while parsing jc meta instruction")?;
-                    let op = tokens.expect(MacroTokenType::Operator, None, "while parsing jc meta instruction")?;
-                    let (_, operator) = Self::parse_operator(&mut tokens, op.into_inner())?;
-                    ValueToken::MetaInstructionOperator(inner, operator)
+                    emit_comparison_token = true;
+                    ValueToken::MetaInstruction(inner)
                 },
                 MacroToken::MetaInstruction(inner) => ValueToken::MetaInstruction(inner),
                 MacroToken::BinaryFile(inner, bytes) => ValueToken::BinaryFile(inner, bytes),
@@ -365,9 +366,18 @@ impl ValueStage {
                 // Operators
                 MacroToken::Operator(inner) => {
                     let (inner, typ) = Self::parse_operator(&mut tokens, inner)?;
-                    ValueToken::Operator {
-                        inner,
-                        typ
+                    if emit_comparison_token {
+                        emit_comparison_token = false;
+                        ValueToken::Comparison {
+                            inner,
+                            typ
+                        }
+
+                    } else {
+                        ValueToken::Operator {
+                            inner,
+                            typ
+                        }
                     }
                 }
             };
