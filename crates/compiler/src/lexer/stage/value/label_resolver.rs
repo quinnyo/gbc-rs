@@ -15,6 +15,7 @@ pub type ParentLabelIndex = (Symbol, Option<usize>, MacroCallIndex);
 pub type ChildLabelIndex = (Symbol, MacroCallIndex);
 pub type NamespaceIndex = (Symbol, Option<usize>, MacroCallIndex);
 
+type NamespaceStructMap = HashMap<NamespaceIndex, (InnerToken, HashMap<String, (InnerToken, usize)>)>;
 type ParentLabelEntry = Option<(usize, Vec<(ChildLabelIndex, usize)>, Vec<(ChildLabelIndex, usize, ChildCallIndex, Option<usize>)>)>;
 type ChildCallIndex = Option<(usize, usize)>;
 type ChildLabelError = (usize, usize, ChildCallIndex);
@@ -69,7 +70,7 @@ impl LabelResolver {
 
     pub fn convert_parent_label_refs(
         parent_labels: &HashMap<ParentLabelIndex, (InnerToken, usize)>,
-        structs: &HashMap<NamespaceIndex, (InnerToken, HashMap<String, (InnerToken, usize)>)>,
+        structs: &NamespaceStructMap,
         tokens: &mut [ValueToken]
 
     ) -> Result<(), SourceError> {

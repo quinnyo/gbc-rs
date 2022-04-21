@@ -36,6 +36,15 @@ pub struct ForStatement {
     pub body: Vec<EntryToken>
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SectionLayout {
+    pub name: OptionalDataExpression,
+    pub segment_name: Symbol,
+    pub segment_offset: OptionalDataExpression,
+    pub segment_size: OptionalDataExpression,
+    pub bank_index: OptionalDataExpression
+}
+
 // Entry Specific Tokens ------------------------------------------------------
 lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     Instruction((u16)),
@@ -48,6 +57,8 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
     IfStatement((Vec<IfStatementBranch>)),
     // FOR [String] IN [ConstExpression] TO [ConstExpression] REPEAT .. ENDFOR
     ForStatement((ForStatement)),
+    // SECTION EXPR[String]
+    SectionDeclaration ((Box<SectionLayout>)),
     UsingStatement((String, Vec<EntryToken>)),
     VolatileStatement((Vec<EntryToken>))
 
@@ -66,14 +77,6 @@ lexer_token!(EntryToken, EntryTokenType, (Debug, Clone, Eq, PartialEq), {
         storage => DataStorage,
         is_constant => bool,
         debug_only => bool
-    },
-    // SECTION EXPR[String]
-    SectionDeclaration {
-        name => OptionalDataExpression,
-        segment_name => Symbol,
-        segment_offset => OptionalDataExpression,
-        segment_size => OptionalDataExpression,
-        bank_index => OptionalDataExpression
     }
 });
 
@@ -106,17 +109,17 @@ impl EntryToken {
             EntryToken::Data { storage, .. } => {
                 storage.replace_constant(constant, new_value);
             },
-            EntryToken::SectionDeclaration { name, segment_offset, segment_size, bank_index, .. } => {
-                if let Some(ref mut name) = name {
+            EntryToken::SectionDeclaration(_, layout) => {
+                if let Some(ref mut name) = layout.name {
                     name.replace_constant(constant, new_value);
                 }
-                if let Some(ref mut segment_offset) = segment_offset {
+                if let Some(ref mut segment_offset) = layout.segment_offset {
                     segment_offset.replace_constant(constant, new_value);
                 }
-                if let Some(ref mut segment_size) = segment_size {
+                if let Some(ref mut segment_size) = layout.segment_size {
                     segment_size.replace_constant(constant, new_value);
                 }
-                if let Some(ref mut bank_index) = bank_index {
+                if let Some(ref mut bank_index) = layout.bank_index {
                     bank_index.replace_constant(constant, new_value);
                 }
             },
@@ -299,14 +302,13 @@ impl EntryStage {
                                 None
                             };
 
-                            EntryToken::SectionDeclaration {
-                                inner,
+                            EntryToken::SectionDeclaration(inner, Box::new(SectionLayout {
                                 name,
                                 segment_name,
                                 segment_offset,
                                 segment_size,
                                 bank_index
-                            }
+                            }))
                         },
                         Symbol::DB => {
                             Self::parse_data_directive_db(&mut tokens, inner)?
@@ -2307,7 +2309,7 @@ impl EntryStage {
 mod test {
     use crate::lexer::{Lexer, Symbol};
     use crate::mocks::{expr_lex, expr_lex_binary, entry_lex_child_error};
-    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement, Register};
+    use super::{EntryStage, EntryToken, InnerToken, DataEndianess, DataAlignment, DataStorage, IfStatementBranch, ForStatement, Register, SectionLayout};
     use crate::expression::{Expression, ExpressionValue, Operator};
 
     #[track_caller]
@@ -2771,74 +2773,86 @@ mod test {
     // Section Declarations ---------------------------------------------------
     #[test]
     fn test_section_without_name() {
-        assert_eq!(tfe("SECTION ROM0"), vec![EntryToken::SectionDeclaration {
-            inner: itk!(0, 7, "SECTION"),
-            name: None,
-            segment_name: Symbol::from("ROM0".to_string()),
-            segment_offset: None,
-            segment_size: None,
-            bank_index: None
-        }]);
+        assert_eq!(tfe("SECTION ROM0"), vec![EntryToken::SectionDeclaration(
+            itk!(0, 7, "SECTION"),
+            Box::new(SectionLayout {
+                name: None,
+                segment_name: Symbol::from("ROM0".to_string()),
+                segment_offset: None,
+                segment_size: None,
+                bank_index: None
+            })
+        )]);
     }
 
     #[test]
     fn test_section_with_name() {
-        assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![EntryToken::SectionDeclaration {
-            inner: itk!(0, 7, "SECTION"),
-            name: Some(Expression::Value(ExpressionValue::String("Foo".to_string()))),
-            segment_name: Symbol::from("ROM0".to_string()),
-            segment_offset: None,
-            segment_size: None,
-            bank_index: None
-        }]);
+        assert_eq!(tfe("SECTION 'Foo',ROM0"), vec![EntryToken::SectionDeclaration(
+            itk!(0, 7, "SECTION"),
+            Box::new(SectionLayout {
+                name: Some(Expression::Value(ExpressionValue::String("Foo".to_string()))),
+                segment_name: Symbol::from("ROM0".to_string()),
+                segment_offset: None,
+                segment_size: None,
+                bank_index: None
+            })
+        )]);
     }
 
     #[test]
     fn test_section_with_offset() {
-        assert_eq!(tfe("SECTION ROM0[$0000]"), vec![EntryToken::SectionDeclaration {
-            inner: itk!(0, 7, "SECTION"),
-            name: None,
-            segment_name: Symbol::from("ROM0".to_string()),
-            segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
-            segment_size: None,
-            bank_index: None
-        }]);
+        assert_eq!(tfe("SECTION ROM0[$0000]"), vec![EntryToken::SectionDeclaration(
+            itk!(0, 7, "SECTION"),
+            Box::new(SectionLayout {
+                name: None,
+                segment_name: Symbol::from("ROM0".to_string()),
+                segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
+                segment_size: None,
+                bank_index: None
+            })
+        )]);
     }
 
     #[test]
     fn test_section_with_offset_and_size() {
-        assert_eq!(tfe("SECTION ROM0[$0000][$800]"), vec![EntryToken::SectionDeclaration {
-            inner: itk!(0, 7, "SECTION"),
-            name: None,
-            segment_name: Symbol::from("ROM0".to_string()),
-            segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
-            segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
-            bank_index: None
-        }]);
+        assert_eq!(tfe("SECTION ROM0[$0000][$800]"), vec![EntryToken::SectionDeclaration(
+            itk!(0, 7, "SECTION"),
+            Box::new(SectionLayout {
+                name: None,
+                segment_name: Symbol::from("ROM0".to_string()),
+                segment_offset: Some(Expression::Value(ExpressionValue::Integer(0))),
+                segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
+                bank_index: None
+            })
+        )]);
     }
 
     #[test]
     fn test_section_without_offset_and_size() {
-        assert_eq!(tfe("SECTION ROM0[][$800]"), vec![EntryToken::SectionDeclaration {
-            inner: itk!(0, 7, "SECTION"),
-            name: None,
-            segment_name: Symbol::from("ROM0".to_string()),
-            segment_offset: None,
-            segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
-            bank_index: None
-        }]);
+        assert_eq!(tfe("SECTION ROM0[][$800]"), vec![EntryToken::SectionDeclaration(
+            itk!(0, 7, "SECTION"),
+            Box::new(SectionLayout {
+                name: None,
+                segment_name: Symbol::from("ROM0".to_string()),
+                segment_offset: None,
+                segment_size: Some(Expression::Value(ExpressionValue::Integer(2048))),
+                bank_index: None
+            })
+        )]);
     }
 
     #[test]
     fn test_section_with_bank() {
-        assert_eq!(tfe("SECTION ROM0,BANK[1]"), vec![EntryToken::SectionDeclaration {
-            inner: itk!(0, 7, "SECTION"),
-            name: None,
-            segment_name: Symbol::from("ROM0".to_string()),
-            segment_offset: None,
-            segment_size: None,
-            bank_index: Some(Expression::Value(ExpressionValue::Integer(1))),
-        }]);
+        assert_eq!(tfe("SECTION ROM0,BANK[1]"), vec![EntryToken::SectionDeclaration(
+            itk!(0, 7, "SECTION"),
+            Box::new(SectionLayout {
+                name: None,
+                segment_name: Symbol::from("ROM0".to_string()),
+                segment_offset: None,
+                segment_size: None,
+                bank_index: Some(Expression::Value(ExpressionValue::Integer(1)))
+            })
+        )]);
     }
 
     #[test]

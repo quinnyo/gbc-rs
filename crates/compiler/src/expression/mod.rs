@@ -1,3 +1,7 @@
+// STD Dependencies -----------------------------------------------------------
+use std::fmt;
+
+
 // External Dependencies ------------------------------------------------------
 use gb_cpu::Register;
 use ordered_float::OrderedFloat;
@@ -128,6 +132,21 @@ pub enum ExpressionResult {
     String(String)
 }
 
+impl fmt::Display for ExpressionResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ExpressionResult::Integer(i) => if *i <= 255 {
+                write!(f, "{}", i)
+
+            } else {
+                write!(f, "${:0>4X}", i)
+            },
+            ExpressionResult::Float(v) => write!(f, "{:.2}", v),
+            ExpressionResult::String(s) => write!(f, "{:?}", s)
+        }
+    }
+}
+
 impl ExpressionResult {
 
     pub fn is_truthy(&self) -> bool {
@@ -135,19 +154,6 @@ impl ExpressionResult {
             ExpressionResult::Integer(i) => *i != 0,
             ExpressionResult::Float(f) => f.into_inner() != 0.0,
             ExpressionResult::String(s) => !s.is_empty()
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            ExpressionResult::Integer(i) => if *i <= 255 {
-                format!("{}", i)
-
-            } else {
-                format!("${:0>4X}", i)
-            },
-            ExpressionResult::Float(f) => format!("{:.2}", f),
-            ExpressionResult::String(s) => format!("{:?}", s)
         }
     }
 

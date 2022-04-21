@@ -1,7 +1,7 @@
 // STD Dependencies -----------------------------------------------------------
 use std::cmp;
 use std::mem;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 
 // Modules --------------------------------------------------------------------
@@ -20,7 +20,7 @@ use crate::error::SourceError;
 use crate::lexer::stage::macros::MacroCall;
 use crate::lexer::{InnerToken, Lexer, LexerToken, LexerFile, EntryStage, EntryToken, Symbol, MacroDefinition, IntegerMap};
 use crate::expression::{ExpressionResult, ExpressionValue};
-use crate::expression::evaluator::{ConstantIndex, EvaluatorContext, EvaluatorConstant, UsageInformation};
+use crate::expression::evaluator::{ConstantIndex, ConstantUsageMap, EvaluatorContext, EvaluatorConstant, LabelUsageMap, UsageInformation};
 use self::section::Section;
 pub use crate::expression::evaluator::AccessKind;
 pub use self::analyzer::AnalyzerNotes;
@@ -43,10 +43,10 @@ pub struct LinkerContext<'a> {
     pub files: &'a [LexerFile],
     pub constants: &'a HashMap<ConstantIndex, EvaluatorConstant>,
     pub constant_values: &'a HashMap<ConstantIndex, ExpressionResult>,
-    pub constant_usage: &'a HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
+    pub constant_usage: &'a ConstantUsageMap,
     pub labels: &'a HashMap<(Symbol, usize, bool), InnerToken>,
     pub label_addresses: &'a HashMap<usize, usize>,
-    pub label_usage: &'a HashMap<usize, HashSet<(usize, usize, Option<usize>, AccessKind)>>,
+    pub label_usage: &'a LabelUsageMap,
     pub integers: &'a IntegerMap,
     pub optimizations: &'a OptimizerNotes,
     pub analyzer_notes: &'a AnalyzerNotes,
@@ -121,23 +121,23 @@ impl Linker {
         let mut section_index = 0;
         let mut sections: Vec<Section> = Vec::with_capacity(16);
         for (volatile, token) in entry_tokens {
-            if let EntryToken::SectionDeclaration { inner, name, segment_name, segment_offset, segment_size, bank_index } = token {
+            if let EntryToken::SectionDeclaration(inner, layout) = token {
 
                 // Parse options
-                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&name, &mut usage, &inner)?, "Invalid section name")?;
-                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_offset, &mut usage, &inner)?, "Invalid section offset")?;
-                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&segment_size, &mut usage, &inner)?, "Invalid section size")?;
-                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&bank_index, &mut usage, &inner)?, "Invalid section bank index")?;
+                let name = util::opt_string(&inner, context.resolve_opt_const_expression(&layout.name, &mut usage, &inner)?, "Invalid section name")?;
+                let segment_offset = util::opt_integer(&inner, context.resolve_opt_const_expression(&layout.segment_offset, &mut usage, &inner)?, "Invalid section offset")?;
+                let segment_size = util::opt_integer(&inner, context.resolve_opt_const_expression(&layout.segment_size, &mut usage, &inner)?, "Invalid section size")?;
+                let bank_index = util::opt_integer(&inner, context.resolve_opt_const_expression(&layout.bank_index, &mut usage, &inner)?, "Invalid section bank index")?;
 
                 // If a offset is specified create a new section
                 if let Some(offset) = segment_offset {
                     let id = sections.len();
-                    sections.push(Section::new(id, segment_name, name, inner, Some(offset), segment_size, bank_index)?);
+                    sections.push(Section::new(id, layout.segment_name, name, inner, Some(offset), segment_size, bank_index)?);
                     section_index = id;
 
                 } else {
                     // If no offset is specified, search from the end for a matching hash
-                    let hash = Section::default_hash(&segment_name, bank_index);
+                    let hash = Section::default_hash(&layout.segment_name, bank_index);
                     if let Some(id) = sections.iter().rev().find(|s| s.hash() == hash).map(|s| s.id) {
                         section_index = id;
 
@@ -151,7 +151,7 @@ impl Linker {
                     // If no section is found create a new section
                     } else {
                         let id = sections.len();
-                        sections.push(Section::new(id, segment_name, name, inner, None, segment_size, bank_index)?);
+                        sections.push(Section::new(id, layout.segment_name, name, inner, None, segment_size, bank_index)?);
                         section_index = id;
                     }
                 }
@@ -422,6 +422,7 @@ impl Linker {
         });
 
         // Limit end_address of sections to next section start_address - 1
+        #[allow(clippy::needless_collect)]
         let section_starts: Vec<(usize, usize, Symbol)> = sections.iter().skip(1).map(|s| {
             (s.start_address, s.bank, s.segment.clone())
 

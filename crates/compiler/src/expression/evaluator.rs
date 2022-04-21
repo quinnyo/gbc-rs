@@ -17,6 +17,8 @@ use crate::expression::{DataExpression, Expression, ExpressionValue, ExpressionR
 // Expression Evaluator -------------------------------------------------------
 type FileIndex = Option<usize>;
 pub type ConstantIndex = (Symbol, FileIndex);
+pub type ConstantUsageMap = HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>;
+pub type LabelUsageMap = HashMap<usize, HashSet<(usize, usize, Option<usize>, AccessKind)>>;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 pub enum AccessKind {
@@ -36,8 +38,8 @@ pub struct EvaluatorConstant {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UsageInformation {
-    pub constants: HashMap<ConstantIndex, HashSet<(usize, usize, Option<usize>)>>,
-    pub labels: HashMap<usize, HashSet<(usize, usize, Option<usize>, AccessKind)>>,
+    pub constants: ConstantUsageMap,
+    pub labels: LabelUsageMap,
     pub expressions: HashMap<(FileIndex, usize), ExpressionResult>,
     pub integers: HashMap<(usize, usize, usize), (InnerToken, i32)>
 }

@@ -579,15 +579,12 @@ impl MacroStage {
         while let Some(token) = first_tokens.next() {
             if token.is(IncludeType::Name) && first_tokens.peek_is(IncludeType::OpenParen, None) {
                 // Builtin
-                if Self::get_macro_by_name(builtin_macro_defs, token.symbol(), None).is_some() {
-                    prepass_tokens.push(token);
+                if Self::get_macro_by_name(builtin_macro_defs, token.symbol(), None).is_some() ||
+                    // File local lookup
+                    Self::get_macro_by_name(user_macro_defs, token.symbol(), Some(token.inner().file_index)).is_some() ||
+                    // Global lookup
+                    Self::get_macro_by_name(user_macro_defs, token.symbol(), None).is_some() {
 
-                // File local lookup
-                } else if Self::get_macro_by_name(user_macro_defs, token.symbol(), Some(token.inner().file_index)).is_some() {
-                    prepass_tokens.push(token);
-
-                // Global lookup
-                } else if Self::get_macro_by_name(user_macro_defs, token.symbol(), None).is_some() {
                     prepass_tokens.push(token);
 
                 // Callable label definition
