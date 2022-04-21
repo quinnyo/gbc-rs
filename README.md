@@ -38,28 +38,27 @@ Pre-compiled binaries:
 
 ```
 USAGE:
-    gbc [FLAGS] [OPTIONS] <SOURCE_FILE>
-
-FLAGS:
-    -D, --debug          Enable debug instructions for BGB debugger
-    -h, --help           Prints help information
-    -i, --info           Display ROM info
-        --no-optimize    Disable instruction optimizations
-    -S, --segments       Display segments usage
-    -s, --silent         Surpress all output
-    -V, --version        Prints version information
-
-OPTIONS:
-    -m, --symbol-map <FILE>    Output symbol mapping for BGB debugger
-    -o, --output-rom <FILE>    ROM file to generate
+    gbc [OPTIONS] [SOURCE_FILE] [SUBCOMMAND]
 
 ARGS:
     <SOURCE_FILE>    Input source file
 
+OPTIONS:
+    -d, --decompile            Decompile the input file instead
+    -D, --debug                Enable debug instructions for BGB debugger
+    -h, --help                 Print help information
+    -i, --info                 Display ROM info
+    -m, --symbol-map <FILE>    Output symbol mapping for BGB debugger
+        --no-optimize          Disable instruction optimizations
+    -o, --output-rom <FILE>    ROM file to generate
+    -s, --silent               Surpress all output
+    -S, --segments             Display segments usage
+    -V, --version              Print version information
+
 SUBCOMMANDS:
     debug      Builds a debug ROM using the local "gbc.toml" project configuration.
     emu        Builds a ROM and emulates it via the specified configuration.
-    help       Prints this message or the help of the given subcommand(s)
+    help       Print this message or the help of the given subcommand(s)
     release    Builds a release ROM using the local "gbc.toml" project configuration.
 ```
 

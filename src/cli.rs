@@ -15,10 +15,6 @@ pub fn app<'help>() -> Command<'help> {
                 .about("Builds a debug ROM using the local \"gbc.toml\" project configuration.")
         )
         .subcommand(
-            Command::new("lint")
-                .about("Lint a debug ROM using the local \"gbc.toml\" project configuration.")
-        )
-        .subcommand(
             Command::new("emu")
                 .about("Builds a ROM and emulates it via the specified configuration.")
                 .arg(Arg::new("EMULATOR")
@@ -54,11 +50,6 @@ pub fn app<'help>() -> Command<'help> {
             .long("segments")
             .short('S')
             .help("Display segments usage")
-        )
-        .arg(Arg::new("lint")
-            .long("lint")
-            .short('l')
-            .help("Run linter only and display warnings")
         )
         .arg(Arg::new("silent")
             .long("silent")
