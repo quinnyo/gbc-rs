@@ -158,7 +158,7 @@ impl Analyzer {
         }).map(AnalysisSymbol::into_document_symbol).collect()
     }
 
-    pub async fn completions(&self, current_file: PathBuf, _line: usize, _col: usize) -> Vec<CompletionItem> {
+    pub async fn completions(&self, current_file: PathBuf, line: usize, _col: usize) -> Vec<CompletionItem> {
         let uri = Url::from_file_path(current_file.clone()).ok();
         return self.get_symbols(current_file).await.into_iter().filter(|symbol| {
             // Complete if the symbol is either global or originates from the current file
@@ -190,6 +190,12 @@ impl Analyzer {
                 .. CompletionItem::default()
             }),
             SymbolKind::FIELD => Some(CompletionItem {
+                label: symbol.name,
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some(format!("@ {}", symbol.value)),
+                .. CompletionItem::default()
+            }),
+            SymbolKind::METHOD if line > symbol.line_range.0 && line <= symbol.line_range.1 => Some(CompletionItem {
                 label: symbol.name,
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some(format!("@ {}", symbol.value)),

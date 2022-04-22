@@ -45,6 +45,7 @@ pub struct AnalysisSymbol {
     pub name: String,
     pub value: String,
     pub width: usize,
+    pub line_range: (usize, usize),
     pub result: Option<ExpressionResult>,
     pub children: Vec<AnalysisSymbol>,
     pub references: Vec<Location>,
@@ -198,6 +199,7 @@ impl Analysis {
                     address: None,
                     name,
                     width: 0,
+                    line_range: (0, 0),
                     result: Some(result.clone()),
                     value: result.to_string(),
                     children: Vec::new(),
@@ -220,6 +222,7 @@ impl Analysis {
                 name: section.name.to_string(),
                 address: None,
                 width: 0,
+                line_range: (0, 0),
                 result: None,
                 value: format!("{}[${:0>4X}-${:0>4X}][{}]", section.segment, section.start_address, section.end_address, section.bank),
                 children: Vec::new(),
@@ -244,6 +247,7 @@ impl Analysis {
                     address: None,
                     name:  def.name.value.to_string(),
                     width: 0,
+                    line_range: (0, 0),
                     result: None,
                     value: format!("({})", def.parameters.iter().map(|(_, name)| {
                         format!("@{}", name.value)
@@ -295,28 +299,26 @@ impl Analysis {
 
                         // Child labels
                         if let EntryData::Label { is_local: true, name, .. } = data {
-                            let mut label = AnalysisSymbol {
+                            let label = AnalysisSymbol {
                                 kind: SymbolKind::METHOD,
                                 is_global: false,
                                 in_macro: inner.macro_call_id.is_some(),
                                 location: location_from_file_index(ctx.files, inner.file_index, inner.start_index, inner.end_index),
                                 address: None,
-                                name: format!(".{}", name),
+                                name: name.clone(),//format!(".{}", name),
                                 width: 0,
+                                line_range: (0, 0),
                                 result: None,
                                 value: "".to_string(),
                                 children: Vec::new(),
                                 references: Vec::new(),
-                                jumps: Vec::new(), // TODO figure out actual jumps here?
+                                jumps: Vec::new(),
                                 calls: Vec::new(),
                                 reads: Vec::new(),
                                 writes: Vec::new()
                             };
-                            children.push(label.clone());
-                            label.name = name.clone();
-
-                            // Copy for goto definition
-                            symbols.push(label);
+                            children.push(label);
+                            //label.name = name.clone();
                             entries.next();
 
                         // Collect Data Storage
@@ -354,6 +356,16 @@ impl Analysis {
                         if inner.macro_call_id.is_none() {
                             end_index = end_index.max(inner.end_index);
                         }
+                    }
+
+                    // Update children and create symbols for them
+                    let file = &ctx.files[file_index];
+                    let (line, _) = file.get_line_and_col(start_index);
+                    let (eline, _) = file.get_line_and_col(end_index);
+                    let line_range = (line, eline);
+                    for c in &mut children {
+                        c.line_range = line_range;
+                        symbols.push(c.clone());
                     }
 
                     // Find matching label in context
@@ -402,7 +414,7 @@ impl Analysis {
 
                             }).unwrap_or_else(Vec::new);
 
-                            // TODO show signature for callable labels, match by finding the macro with the same inner token
+
                             symbols.push(AnalysisSymbol {
                                 kind,
                                 is_global: *is_global,
@@ -411,6 +423,7 @@ impl Analysis {
                                 address: Some(*address),
                                 name,
                                 width: data_size,
+                                line_range,
                                 result: None,
                                 value: format!("${:0>4X}", address),
                                 children,
