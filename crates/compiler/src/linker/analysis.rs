@@ -527,7 +527,7 @@ impl Analysis {
                         uri: symbol.location.uri.clone(),
                         context: symbol.name.clone(),
                         detail: Diagnostic {
-                            message: format!("{} never used outside current file", symbol.typ()),
+                            message: format!("global {} only ever used locally", symbol.typ()),
                             range: symbol.location.range,
                             severity: Some(DiagnosticSeverity::WARNING),
                             .. Diagnostic::default()

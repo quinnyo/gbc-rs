@@ -139,7 +139,7 @@ impl Compiler {
         // Report Warnings
         for lint in &linker.analysis.lints {
             logger.warning(format!(
-                "{} `{}` (in file \"{}\" on line {}, column {})",
+                "{}: `{}` (in file \"{}\" on line {}, column {})",
                 lint.detail.message,
                 lint.context,
                 lint.uri.path(),
@@ -549,7 +549,16 @@ mod test {
         let l = Logger::new();
         let c = Compiler::new();
         assert_eq!(compiler(l, c, "SECTION 'Test',ROM0\nlabel:"), (
-            "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Warning unused label `label` (in file \"/main.gbc\" on line 2, column 1)\n   Validated ROM verified in XXms."
+            "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Warning unused label: `label` (in file \"/main.gbc\" on line 2, column 1)\n   Validated ROM verified in XXms."
+        ));
+    }
+
+    #[test]
+    fn test_warning_global_label_only_used_locally() {
+        let l = Logger::new();
+        let c = Compiler::new();
+        assert_eq!(compiler(l, c, "SECTION 'Test',ROM0\nDW label\nGLOBAL label:"), (
+            "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Warning global label only ever used locally: `label` (in file \"/main.gbc\" on line 3, column 8)\n   Validated ROM verified in XXms."
         ));
     }
 
