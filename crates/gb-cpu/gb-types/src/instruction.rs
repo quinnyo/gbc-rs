@@ -32,6 +32,17 @@ impl Instruction {
         op_code == 0x18
     }
 
+    pub fn is_accumlator_store_into(op_code: u16) -> bool {
+        op_code == 0x02 || op_code == 0x12 ||
+        op_code == 0x22 || op_code == 0x32 ||
+        op_code == 0x47 || op_code == 0x4F ||
+        op_code == 0x57 || op_code == 0x5F ||
+        op_code == 0x67 || op_code == 0x6F ||
+        op_code == 0x77 || op_code == 0x7F ||
+        op_code == 0xE0 || op_code == 0xE2 ||
+        op_code == 0xEA
+    }
+
     pub fn is_memory_read_op_code(op_code: u16) -> bool {
         op_code == 0xF0 || op_code == 0xFA
     }
