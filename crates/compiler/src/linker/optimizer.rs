@@ -177,11 +177,56 @@ fn optimize_instructions(
             }]))
         },
 
+        // ld b,X
+        // ld c,Y
+        // ->
+        // ld bc,XY
+        (0x06, Some((0x0E, _, _, obytes, _)), _) => {
+            let value = ((bytes[1] as u16) << 8) | (obytes[1] as u16);
+            Some((1, vec![EntryData::Instruction {
+                op_code: 0x01,
+                expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(value)))),
+                bytes: instruction::bytes(0x01),
+                volatile: false,
+                debug_only: false
+            }]))
+        },
+
+        // ld d,X
+        // ld e,Y
+        // ->
+        // ld de,XY
+        (0x16, Some((0x1E, _, _, obytes, _)), _) => {
+            let value = ((bytes[1] as u16) << 8) | (obytes[1] as u16);
+            Some((1, vec![EntryData::Instruction {
+                op_code: 0x11,
+                expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(value)))),
+                bytes: instruction::bytes(0x11),
+                volatile: false,
+                debug_only: false
+            }]))
+        },
+
+        // ld h,X
+        // ld l,Y
+        // ->
+        // ld hl,XY
+        (0x26, Some((0x2E, _, _, obytes, _)), _) => {
+            let value = ((bytes[1] as u16) << 8) | (obytes[1] as u16);
+            Some((1, vec![EntryData::Instruction {
+                op_code: 0x21,
+                expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(value)))),
+                bytes: instruction::bytes(0x21),
+                volatile: false,
+                debug_only: false
+            }]))
+        },
+
         /*
         // and a,X
         // cp 0
         // jr/jp z/nz
-        (0xA0..=0xA7, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) | (0xE6, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) => {
+        (0xA0..=0xA7, Some((0xFE, _, _ , cp_bytes, _)), Some((jo, _, expr, _, _))) | (0xE6, Some((0xFE, _, _ , cp_bytes, _)), Some((jo, _, expr, _, _))) => {
             // Check for jr z,nz or jp z,nz
             if cp_bytes[1] == 0x00 && (jo == 0x28 || jo == 0x20 || jo == 0xC2 || jo == 0xCA) {
                 // TODO remove cp 0
@@ -196,7 +241,7 @@ fn optimize_instructions(
         // or a,X
         // cp 0
         // jr/jp z/nz
-        (0xB0..=0xB7, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) | (0xF6, Some((0xFE, _, _ , cp_bytes)), Some((jo, _, expr, _))) => {
+        (0xB0..=0xB7, Some((0xFE, _, _ , cp_bytes, _)), Some((jo, _, expr, _, _))) | (0xF6, Some((0xFE, _, _ , cp_bytes, _)), Some((jo, _, expr, _, _))) => {
             // Check for jr z,nz or jp z,nz
             if cp_bytes[1] == 0x00 && (jo == 0x28 || jo == 0x20 || jo == 0xC2 || jo == 0xCA) {
                 // TODO remove cp 0
@@ -258,6 +303,35 @@ fn optimize_instructions(
             }]))
         },
 
+        // ld [someLabel],a
+        // ld a,[someLabel]
+        (0xEA, Some((0xFA, _, _, obytes, oinner)), _) => {
+            // Need to avoid messing with joypad register (0xFF00) polling
+            let addr = ((bytes[2] as u16) << 8) | (bytes[1] as u16);
+            if bytes[1] == obytes[1] && bytes[2] == obytes[2] && addr != 0xFF00 {
+                notes.push((inner.clone(), "removed".to_string()));
+                notes.push((oinner.clone(), "removed".to_string()));
+                Some((1, vec![]))
+
+            } else {
+                None
+            }
+        },
+
+        // ldh [someLabel],a
+        // ldh a,[someLabel]
+        (0xE0, Some((0xF0, _, _, obytes, oinner)), _) => {
+            // Need to avoid messing with joypad register (0xFF00) polling
+            if bytes[1] == obytes[1] && bytes[1] != 0 {
+                notes.push((inner.clone(), "removed".to_string()));
+                notes.push((oinner.clone(), "removed".to_string()));
+                Some((1, vec![]))
+
+            } else {
+                None
+            }
+        },
+
         // jp c,label  -> jr c,label
         // jp nc,label -> jr nc,label
         // jp z,label  -> jr z,label
@@ -268,8 +342,8 @@ fn optimize_instructions(
         (0xC2, _, _) |
 
         // jp label    -> jr label
-        // We only want jp's without that are not followed by a nop to
-        // avoid messing with potential jump tables
+        // We only want jp's that are not followed by a nop to
+        // avoid messing with a potential jump table
         (0xC3, None, _) |
         (0xC3, Some((0x01..=512, _, _, _, _)), _) => {
             let address = i32::from(bytes[1]) | (i32::from(bytes[2]) << 8);
@@ -277,7 +351,7 @@ fn optimize_instructions(
 
             // Since the resulting instruction shrinks in size we might now be able
             // to reach the full jump range when the target is at a fixed distance
-            // due to a rom section boundray
+            // due to a rom section boundary
             if relative > -128 && relative < 127 {
                 notes.push((inner.clone(), "jr".to_string()));
 
@@ -888,6 +962,75 @@ mod test {
                     expression: None,
                     bytes: vec![254, 0],
                     volatile: true,
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    // Redundant address store/load -------------------------------------------
+    #[test]
+    fn test_remove_redundant_address_store_load() {
+        let l = linker_optimize("SECTION ROM0\nld [$8000],a\n ld a,[$8000]");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![]
+        ]);
+        let l = linker_optimize("SECTION ROM0\nld [$FF00],a\n ld a,[$FF00]");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 224,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0))),
+                    bytes: vec![224, 0],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 240,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0))),
+                    bytes: vec![240, 0],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+    }
+
+    // Combine individual loads -----------------------------------------------
+    #[test]
+    fn test_combine_ld_bc_de_hl() {
+        let l = linker_optimize("SECTION ROM0\nld b,$80\nld c,$40");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 0x01,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x8040))),
+                    bytes: vec![0x01, 64, 128],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+        let l = linker_optimize("SECTION ROM0\nld d,$80\nld e,$40");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 0x11,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x8040))),
+                    bytes: vec![0x11, 64, 128],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+        let l = linker_optimize("SECTION ROM0\nld h,$80\nld l,$40");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 0x21,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x8040))),
+                    bytes: vec![0x21, 64, 128],
+                    volatile: false,
                     debug_only: false
                 })
             ]
