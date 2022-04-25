@@ -479,8 +479,8 @@ impl IncludeStage {
                         None => {}
                     }
                 }
-                gen.assert_char('`', "Unclosed token group.".to_string())?;
-                gen.assert_index_changed(group_start, "Unclosed token group.".to_string())?;
+                gen.assert_char('`', "Unclosed token group.")?;
+                gen.assert_index_changed(group_start, "Unclosed token group.")?;
                 Ok(Some(IncludeToken::TokenGroup(index_token, tokens)))
             },
             // Operator
@@ -543,7 +543,7 @@ impl IncludeStage {
                 TokenChar::Valid(c)
             }
         })?;
-        gen.assert_char(delimeter, "Unclosed string literal.".to_string())?;
+        gen.assert_char(delimeter, "Unclosed string literal.")?;
         Ok(t)
     }
 

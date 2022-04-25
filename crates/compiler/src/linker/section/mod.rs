@@ -216,7 +216,7 @@ impl Section {
             bank_offset,
             bank,
 
-            entries: Vec::with_capacity(256),
+            entries: Vec::with_capacity(2048),
             bytes_in_use: 0
         };
         if let Some(name) = name {

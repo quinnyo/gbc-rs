@@ -71,12 +71,12 @@ impl TokenGenerator {
         self.state.index
     }
 
-    pub fn assert_char(&self, c: char, message: String) -> Result<(), SourceError> {
+    pub fn assert_char<S: Into<String>>(&self, c: char, message: S) -> Result<(), SourceError> {
         if self.state.current != c || self.state.input_exhausted {
             Err(SourceError::new(
                 self.file_index,
                 self.state.index,
-                message
+                message.into()
             ))
 
         } else {
@@ -84,12 +84,12 @@ impl TokenGenerator {
         }
     }
 
-    pub fn assert_index_changed(&self, previous: usize, message: String) -> Result<(), SourceError> {
+    pub fn assert_index_changed<S: Into<String>>(&self, previous: usize, message: S) -> Result<(), SourceError> {
         if self.state.index == previous {
             Err(SourceError::new(
                 self.file_index,
                 self.state.index,
-                message
+                message.into()
             ))
 
         } else {
@@ -119,19 +119,20 @@ impl TokenGenerator {
     }
 
     pub fn collect_double(&mut self) -> InnerToken {
-        let p = self.state.current;
-        let t = self.next();
+        let mut s = String::with_capacity(2);
+        s.push(self.state.current);
+        s.push(self.next());
         InnerToken::new(
             self.file_index,
             self.state.index - 2,
             self.state.index,
-            format!("{}{}", p, t)
+            s
         )
     }
 
     pub fn collect<C: FnMut(char, char) -> TokenChar>(&mut self, inclusive: bool, cb: C) -> Result<InnerToken, SourceError> {
         self.state.start = self.state.index - 1;
-        let mut chars = String::with_capacity(8);
+        let mut chars = String::with_capacity(16);
         if inclusive {
             chars.push(self.state.current);
         }

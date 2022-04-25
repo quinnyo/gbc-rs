@@ -380,7 +380,7 @@ impl MacroStage {
         let parameters: Vec<(ExpressionArgumenType, InnerToken)> = param_tokens.into_iter().map(|t| (ExpressionArgumenType::Any, t.into_inner())).collect();
 
         // Check against duplicate names
-        let mut param_names: HashSet<Symbol> = HashSet::new();
+        let mut param_names: HashSet<Symbol> = HashSet::with_capacity(parameters.len());
         for (_, arg) in &parameters {
             if param_names.contains(&arg.value) {
                 return Err(arg.error(format!("Duplicate macro parameter \"{}\", a parameter with the same name was already defined.", arg.value)));

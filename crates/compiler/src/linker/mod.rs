@@ -204,7 +204,7 @@ impl Linker {
         }
 
         // Analyze
-        let ctx = LinkerContext {
+        let analysis = Analysis::from_context(LinkerContext {
             files,
             sections: &sections[..],
             constants: &context.raw_constants,
@@ -216,8 +216,8 @@ impl Linker {
             integers: &usage.integers,
             macro_defs: &macro_defs[..],
             macro_calls: &macro_calls[..]
-        };
-        let analysis = Analysis::from_context(ctx, hints);
+
+        }, hints);
 
         Ok(Self {
             sections,
