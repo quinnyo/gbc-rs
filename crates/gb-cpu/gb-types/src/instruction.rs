@@ -32,6 +32,37 @@ impl Instruction {
         op_code == 0x18
     }
 
+    pub fn does_not_modify_accumulator(op_code: u16) -> bool {
+        match op_code {
+            0x00..=0x06 => true,
+            0x08..=0x09 => true,
+            0x0B..=0x0E => true,
+
+            0x10..=0x16 => true,
+            0x19 => true,
+            0x1B..=0x1E => true,
+
+            0x21..=0x26 => true,
+            0x29 => true,
+            0x2B..=0x2E => true,
+
+            0x31..=0x36 => true,
+            0x39 => true,
+            0x3B => true,
+
+            0x40..=0x77 => true,
+            0xA7 => true,
+            0xB7..=0xBF => true,
+
+            0xC0 | 0xC1 | 0xC5 | 0xC8 | 0xC9 => true,
+            0xD0 | 0xD1 | 0xD5 | 0xD8 => true,
+            0xE0 | 0xE1 | 0xE2 | 0xE5 | 0xE8 | 0xEA => true,
+            0xF8 | 0xF9 | 0xFE => true,
+            // TODO CB prefix
+            _ => false
+        }
+    }
+
     pub fn is_accumlator_store_into(op_code: u16) -> bool {
         op_code == 0x02 || op_code == 0x12 ||
         op_code == 0x22 || op_code == 0x32 ||

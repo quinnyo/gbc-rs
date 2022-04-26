@@ -29,31 +29,6 @@ struct OptEntry<'a> {
 // Low Level Instruction Optimizer --------------------------------------------
 pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Vec<OptimizerInfo>, strip_debug: bool) -> bool {
 
-    fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<OptEntry> {
-        if let Some(entry) = entries.get(i) {
-            if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
-                if volatile {
-                    None
-
-                } else {
-                    Some(OptEntry {
-                        op_code: *op_code,
-                        end_of_instruction: (entry.offset + entry.size) as i32,
-                        expression,
-                        bytes,
-                        inner: &entry.inner
-                    })
-                }
-
-            } else {
-                None
-            }
-
-        } else {
-            None
-        }
-    }
-
     // Do a dry run to figure out of there is anything to optimize at all
     // But keep the optimized entries so we don't have to generate them twice
     let mut i = 0;
@@ -85,7 +60,7 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Vec
     }
 
     // Perform actual optimizations
-    if !optimized_entries.is_empty() {
+    let optimized = if !optimized_entries.is_empty() {
         let mut i = 0;
         let mut entries_with_optimizations: Vec<SectionEntry> = Vec::with_capacity(optimized_length);
         while i < entries.len() {
@@ -143,7 +118,129 @@ pub fn optimize_section_entries(entries: &mut Vec<SectionEntry>, notes: &mut Vec
 
     } else {
         false
+    };
+    optimized_accumulator_loads(entries, notes) || optimized
+}
+
+fn optimized_accumulator_loads(entries: &mut Vec<SectionEntry>, notes: &mut Vec<OptimizerInfo>) -> bool {
+    let mut i = 0;
+    let mut optimized = false;
+    while i < entries.len() {
+        // Search for initial Accumulator immediate load
+        if let Some(a @ OptEntry { op_code: 0x3E | 0xAF, .. }) = get_instruction(entries, i) {
+            let mut prev_value = a.bytes.get(1).cloned().unwrap_or(0);
+            i += 1;
+            loop {
+                // Skip over any instructions that cannot modify the Accumulator
+                while let Some(b) = get_instruction(entries, i) {
+                    if Instruction::does_not_modify_accumulator(b.op_code) {
+                        i += 1;
+
+                    } else {
+                        break;
+                    }
+                }
+
+                // Check if there is a chained load
+                if let Some(c @ OptEntry { op_code: 0x3E | 0xAF, .. }) = get_instruction(entries, i) {
+                    // Check if we can replace the loaded value with a faster / short alternative
+                    let next_value = c.bytes.get(1).cloned().unwrap_or(0);
+                    if next_value == prev_value {
+                        notes.push((c.inner.clone(), "removed".to_string()));
+                        entries.remove(i);
+                        optimized = true;
+
+                    } else if next_value == prev_value.wrapping_add(1) {
+                        notes.push((c.inner.clone(), "replaced".to_string()));
+                        let e = entries.get_mut(i).expect("missing entry");
+                        e.data = EntryData::Instruction {
+                            op_code: 0x3C,
+                            expression: None,
+                            bytes: instruction::bytes(0x3C),
+                            volatile: false,
+                            debug_only: false
+                        };
+                        e.size = 1;
+                        optimized = true;
+                        i += 1;
+
+                    } else if next_value == prev_value.wrapping_sub(1) {
+                        notes.push((c.inner.clone(), "replaced".to_string()));
+                        let e = entries.get_mut(i).expect("missing entry");
+                        e.data = EntryData::Instruction {
+                            op_code: 0x3D,
+                            expression: None,
+                            bytes: instruction::bytes(0x3D),
+                            volatile: false,
+                            debug_only: false
+                        };
+                        e.size = 1;
+                        optimized = true;
+                        i += 1;
+
+                    // TODO handle multiply by 2 via `add a` instruction
+
+                    } else {
+                        i += 1;
+                        break;
+                    }
+                    prev_value = next_value;
+
+                } else {
+                    break;
+                }
+            }
+
+        } else if let Some(a @ OptEntry { op_code: 0xF0 | 0xFA, .. }) = get_instruction(entries, i) {
+            let mut prev_addr = if a.bytes.len() == 3 {
+                ((a.bytes[2] as u16) << 8) | (a.bytes[1] as u16)
+
+            } else {
+                0xFF00 | a.bytes[1] as u16
+            };
+            i += 1;
+            loop {
+                // Skip over any instructions that cannot modify the Accumulator
+                while let Some(b) = get_instruction(entries, i) {
+                    if Instruction::does_not_modify_accumulator(b.op_code) {
+                        i += 1;
+
+                    } else {
+                        break;
+                    }
+                }
+
+                // Check if there is a chained load
+                if let Some(c @ OptEntry { op_code: 0xF0 | 0xFA, .. }) = get_instruction(entries, i) {
+                    let next_addr = if c.bytes.len() == 3 {
+                        ((c.bytes[2] as u16) << 8) | (c.bytes[1] as u16)
+
+                    } else {
+                        0xFF00 | c.bytes[1] as u16
+                    };
+
+                    // Need to avoid messing with IO (0xFF00..0xFF80) polling
+                    if next_addr == prev_addr && !is_volatile_address(prev_addr) {
+                        notes.push((c.inner.clone(), "removed".to_string()));
+                        entries.remove(i);
+                        optimized = true;
+
+                    } else {
+                        i += 1;
+                        break;
+                    }
+                    prev_addr = next_addr;
+
+                } else {
+                    break;
+                }
+            }
+
+        } else {
+            i += 1;
+        }
     }
+    optimized
 }
 
 // TODO keep track of how many bytes / cycles got optimized
@@ -191,88 +288,6 @@ fn optimize_instructions(
                 volatile: false,
                 debug_only: false
             }]))
-        },
-
-        // ld a,X
-        // ld ?,a
-        // ld a,X
-        //
-        // save 0/1 byte and 4/8 cycles
-        (0x3E, Some(b), Some(c @ OptEntry { op_code: 0x3E, .. })) => {
-            let x = a.bytes[1];
-            let y = c.bytes[1];
-            if Instruction::is_accumlator_store_into(b.op_code) && y == x {
-                notes.push((c.inner.clone(), "removed".to_string()));
-                Some((2, vec![EntryData::Instruction {
-                    op_code: 0x3E,
-                    expression: a.expression.clone(),
-                    bytes: a.bytes.to_vec(),
-                    volatile: false,
-                    debug_only: false
-
-                }, EntryData::Instruction {
-                    op_code: b.op_code,
-                    expression: b.expression.clone(),
-                    bytes: b.bytes.to_vec(),
-                    volatile: false,
-                    debug_only: false
-                }]))
-
-            // TODO currently chained increments are not fully optimized since we loose
-            // the context of the previously optimized load
-            } else if Instruction::is_accumlator_store_into(b.op_code) && y == x.wrapping_add(1) {
-                notes.push((c.inner.clone(), "inc a".to_string()));
-                Some((2, vec![EntryData::Instruction {
-                    op_code: 0x3E,
-                    expression: a.expression.clone(),
-                    bytes: a.bytes.to_vec(),
-                    volatile: false,
-                    debug_only: false
-
-                }, EntryData::Instruction {
-                    op_code: b.op_code,
-                    expression: b.expression.clone(),
-                    bytes: b.bytes.to_vec(),
-                    volatile: false,
-                    debug_only: false
-
-                }, EntryData::Instruction {
-                    op_code: 0x3C,
-                    expression: None,
-                    bytes: instruction::bytes(0x3C),
-                    volatile: false,
-                    debug_only: false
-                }]))
-
-            // TODO currently chained decrements are not fully optimized since we loose
-            // the context of the previously optimized load
-            } else if Instruction::is_accumlator_store_into(b.op_code) && y == x.wrapping_sub(1) {
-                notes.push((c.inner.clone(), "dec a".to_string()));
-                Some((2, vec![EntryData::Instruction {
-                    op_code: 0x3E,
-                    expression: a.expression.clone(),
-                    bytes: a.bytes.to_vec(),
-                    volatile: false,
-                    debug_only: false
-
-                }, EntryData::Instruction {
-                    op_code: b.op_code,
-                    expression: b.expression.clone(),
-                    bytes: b.bytes.to_vec(),
-                    volatile: false,
-                    debug_only: false
-
-                }, EntryData::Instruction {
-                    op_code: 0x3D,
-                    expression: None,
-                    bytes: instruction::bytes(0x3D),
-                    volatile: false,
-                    debug_only: false
-                }]))
-
-            } else {
-                None
-            }
         },
 
         // ld b,X
@@ -392,7 +407,7 @@ fn optimize_instructions(
             Some((0, vec![EntryData::Instruction {
                 op_code: 0xF0,
                 expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(a.bytes[1])))),
-                bytes: instruction::bytes(0xF0),
+                bytes: vec![0xF0, a.bytes[1]],
                 volatile: false,
                 debug_only: false
             }]))
@@ -405,7 +420,7 @@ fn optimize_instructions(
             Some((0, vec![EntryData::Instruction {
                 op_code: 0xE0,
                 expression: Some(Expression::Value(ExpressionValue::Integer(i32::from(a.bytes[1])))),
-                bytes: instruction::bytes(0xE0),
+                bytes: vec![0xE0, a.bytes[1]],
                 volatile: false,
                 debug_only: false
             }]))
@@ -416,9 +431,8 @@ fn optimize_instructions(
         //
         // save 6 byte and 32 cycles
         (0xEA, Some(b @ OptEntry { op_code: 0xFA, .. }), _) => {
-            // Need to avoid messing with joypad register (0xFF00) polling
             let addr = ((a.bytes[2] as u16) << 8) | (a.bytes[1] as u16);
-            if a.bytes[1] == b.bytes[1] && a.bytes[2] == b.bytes[2] && addr != 0xFF00 {
+            if a.bytes[1] == b.bytes[1] && a.bytes[2] == b.bytes[2] && !is_volatile_address(addr) {
                 notes.push((a.inner.clone(), "removed".to_string()));
                 notes.push((b.inner.clone(), "removed".to_string()));
                 Some((1, vec![]))
@@ -433,8 +447,7 @@ fn optimize_instructions(
         //
         // save 4 byte and 24 cycles
         (0xE0, Some(b @ OptEntry { op_code: 0xF0, .. }), _) => {
-            // Need to avoid messing with joypad register (0xFF00) polling
-            if a.bytes[1] == b.bytes[1] && a.bytes[1] != 0 {
+            if a.bytes[1] == b.bytes[1] && !is_volatile_address(0xFF00 | a.bytes[1] as u16) {
                 notes.push((a.inner.clone(), "removed".to_string()));
                 notes.push((b.inner.clone(), "removed".to_string()));
                 Some((1, vec![]))
@@ -567,6 +580,36 @@ fn optimize_instructions(
             ]))
         },
         _ => None
+    }
+}
+
+fn is_volatile_address(addr: u16) -> bool {
+    // IO registers and mapper registers
+    matches!(addr, 0xFF00..=0xFF7F | 0x0000..=0x7FFF)
+}
+
+fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<OptEntry> {
+    if let Some(entry) = entries.get(i) {
+        if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
+            if volatile {
+                None
+
+            } else {
+                Some(OptEntry {
+                    op_code: *op_code,
+                    end_of_instruction: (entry.offset + entry.size) as i32,
+                    expression,
+                    bytes,
+                    inner: &entry.inner
+                })
+            }
+
+        } else {
+            None
+        }
+
+    } else {
+        None
     }
 }
 
@@ -1213,7 +1256,7 @@ mod test {
 
     // Redundant Accumulator Loads --------------------------------------------
     #[test]
-    fn test_remove_redundant_acummulator_load() {
+    fn test_remove_redundant_acummulator_immediate_load() {
         let l = linker_optimize("SECTION ROM0\nld a,$FF\nld b,a\nld a,$FF\nld c,a");
         assert_eq!(linker_section_entries(l), vec![
             vec![
@@ -1266,20 +1309,20 @@ mod test {
                 })
             ]
         ]);
-        let l = linker_optimize("SECTION ROM0\nld a,1\nld b,a\nld a,2\nld c,a\nld a,3\nld d,a");
+        let l = linker_optimize("SECTION ROM0\nxor a\ninc hl\nld a,1\nld b,a\nld h,b\nld a,2\ninc sp\nld a,3\nld d,a\nld a,5");
         assert_eq!(linker_section_entries(l), vec![
             vec![
-                (2, EntryData::Instruction {
-                    op_code: 0x3E,
+                (1, EntryData::Instruction {
+                    op_code: 175,
                     expression: None,
-                    bytes: vec![0x3E, 1],
+                    bytes: vec![175],
                     volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 71,
+                    op_code: 35,
                     expression: None,
-                    bytes: vec![71],
+                    bytes: vec![35],
                     volatile: false,
                     debug_only: false
                 }),
@@ -1291,17 +1334,37 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 79,
+                    op_code: 71,
                     expression: None,
-                    bytes: vec![79],
+                    bytes: vec![71],
                     volatile: false,
                     debug_only: false
                 }),
-                // This load can no longer be optimized due to how the optimizer works
-                (2, EntryData::Instruction {
-                    op_code: 0x3E,
+                (1, EntryData::Instruction {
+                    op_code: 96,
                     expression: None,
-                    bytes: vec![0x3E, 3],
+                    bytes: vec![96],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 60,
+                    expression: None,
+                    bytes: vec![60],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 51,
+                    expression: None,
+                    bytes: vec![51],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 60,
+                    expression: None,
+                    bytes: vec![60],
                     volatile: false,
                     debug_only: false
                 }),
@@ -1311,16 +1374,27 @@ mod test {
                     bytes: vec![87],
                     volatile: false,
                     debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 62,
+                    expression: None,
+                    bytes: vec![62, 5],
+                    volatile: false,
+                    debug_only: false
                 })
             ]
         ]);
-        let l = linker_optimize("SECTION ROM0\nld a,3\nld b,a\nld a,2\nld c,a\nld a,1\nld d,a");
+    }
+
+    #[test]
+    fn test_remove_redundant_acummulator_address_load() {
+        let l = linker_optimize("SECTION ROM0\nld a,[$CD00]\nld b,a\nld a,[$CD00]\nld c,a");
         assert_eq!(linker_section_entries(l), vec![
             vec![
-                (2, EntryData::Instruction {
-                    op_code: 0x3E,
+                (3, EntryData::Instruction {
+                    op_code: 0xFA,
                     expression: None,
-                    bytes: vec![0x3E, 3],
+                    bytes: vec![0xFA, 0, 205],
                     volatile: false,
                     debug_only: false
                 }),
@@ -1332,9 +1406,45 @@ mod test {
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 61,
+                    op_code: 79,
                     expression: None,
-                    bytes: vec![61],
+                    bytes: vec![79],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+        let l = linker_optimize("SECTION ROM0\nlabel:\nld a,[$CD00]\nld b,a\n.child:\nld a,[$CD00]\nld c,a");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (0, EntryData::Label {
+                    id: 1,
+                    is_local: false,
+                    name: "label".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 0xFA,
+                    expression: None,
+                    bytes: vec![0xFA, 0, 205],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 71,
+                    expression: None,
+                    bytes: vec![71],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (0, EntryData::Label {
+                    id: 2,
+                    is_local: true,
+                    name: "child".to_string()
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 0xFA,
+                    expression: None,
+                    bytes: vec![0xFA, 0, 205],
                     volatile: false,
                     debug_only: false
                 }),
@@ -1344,19 +1454,63 @@ mod test {
                     bytes: vec![79],
                     volatile: false,
                     debug_only: false
-                }),
-                // This load can no longer be optimized due to how the optimizer works
-                (2, EntryData::Instruction {
-                    op_code: 0x3E,
+                })
+            ]
+        ]);
+        let l = linker_optimize("SECTION ROM0\nld a,[$CD00]\nld a,b\nld a,[$CD00]\nld c,a");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (3, EntryData::Instruction {
+                    op_code: 0xFA,
                     expression: None,
-                    bytes: vec![0x3E, 1],
+                    bytes: vec![0xFA, 0, 205],
                     volatile: false,
                     debug_only: false
                 }),
                 (1, EntryData::Instruction {
-                    op_code: 87,
+                    op_code: 120,
                     expression: None,
-                    bytes: vec![87],
+                    bytes: vec![120],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (3, EntryData::Instruction {
+                    op_code: 0xFA,
+                    expression: None,
+                    bytes: vec![0xFA, 0, 205],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 79,
+                    expression: None,
+                    bytes: vec![79],
+                    volatile: false,
+                    debug_only: false
+                })
+            ]
+        ]);
+        let l = linker_optimize("SECTION ROM0\nld a,[$FF41]\nld b,a\nld a,[$FF41]");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (2, EntryData::Instruction {
+                    op_code: 0xF0,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x41))),
+                    bytes: vec![0xF0, 0x41],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (1, EntryData::Instruction {
+                    op_code: 71,
+                    expression: None,
+                    bytes: vec![71],
+                    volatile: false,
+                    debug_only: false
+                }),
+                (2, EntryData::Instruction {
+                    op_code: 0xF0,
+                    expression: Some(Expression::Value(ExpressionValue::Integer(0x41))),
+                    bytes: vec![0xF0, 0x41],
                     volatile: false,
                     debug_only: false
                 })
