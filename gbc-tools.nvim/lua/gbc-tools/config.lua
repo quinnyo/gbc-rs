@@ -13,6 +13,11 @@ local defaults = {
         -- default: true
         autoSetHints = true,
 
+
+        -- how to execute terminal commands
+        -- options right now: termopen / quickfix
+        executor = require("gbc-tools/executors").termopen,
+
         -- These apply to the default GBCSetInlayHints command
         inlay_hints = {
 

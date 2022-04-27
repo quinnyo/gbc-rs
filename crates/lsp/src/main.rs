@@ -72,6 +72,7 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec![
+                        "project/runnables".to_string(),
                         "view/inlay_hints".to_string(),
                         "debugger/toggle_breakpoint".to_string(),
                         "debugger/step".to_string(),
@@ -193,6 +194,10 @@ impl LanguageServer for Backend {
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
         match params.command.as_str() {
+            "project/runnables" => {
+                let runnables = self.analyzer.runnables();
+                return Ok(Some(serde_json::to_value(&runnables).unwrap()))
+            }
             "view/inlay_hints" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
                 let hints = self.analyzer.inlay_hints(PathBuf::from(params.text_document.uri.path())).await;
                 return Ok(Some(serde_json::to_value(&hints).unwrap()))

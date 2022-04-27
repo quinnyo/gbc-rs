@@ -3,6 +3,7 @@ local config = require("gbc-tools.config")
 local utils = require("gbc-tools.utils.utils")
 local inlay = require("gbc-tools.inlay_hints")
 local outline = require("gbc-tools.outline")
+local runnables = require("gbc-tools.runnables")
 
 local M = {}
 
@@ -98,6 +99,13 @@ local function setupCommands()
             end,
             '-nargs=0',
             description = '`:GBCBuildRom` Builds the ROM for the current workspace',
+        },
+        GBCRunnables = {
+            function()
+                utils.command("project/runnables", runnables.handler)  
+            end,
+            '-nargs=0',
+            description = '`:GBCRunnables` List runnables for the current workspace',
         },
         GBCWriteMemory = {
             function(...)

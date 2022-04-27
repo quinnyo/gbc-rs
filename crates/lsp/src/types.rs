@@ -18,6 +18,21 @@ pub enum InlayKind {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct Runnable {
+    pub label: String,
+    pub kind: String,
+    pub args: RunnableArgs,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RunnableArgs {
+    #[serde(rename="gbcArgs")]
+    pub gbc_args: Vec<String>,
+    #[serde(rename="workspaceRoot")]
+    pub workspace_root: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct InlayHint {
     pub range: Range,
     pub kind: InlayKind,
