@@ -48,11 +48,12 @@ OPTIONS:
     -D, --debug                Enable debug instructions for BGB debugger
     -h, --help                 Print help information
     -i, --info                 Display ROM info
-    -m, --symbol-map <FILE>    Output symbol mapping for BGB debugger
+    -m, --symbol-map <FILE>    Output symbol mapping for debuggers
         --no-optimize          Disable instruction optimizations
     -o, --output-rom <FILE>    ROM file to generate
     -s, --silent               Surpress all output
     -S, --segments             Display segments usage
+    -u, --source-map <FILE>    Output source mapping for debuggers
     -V, --version              Print version information
 
 SUBCOMMANDS:

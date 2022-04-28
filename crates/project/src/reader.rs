@@ -38,10 +38,6 @@ impl ProjectReader {
         }
     }
 
-    pub fn base_dir(&self) -> &PathBuf {
-        &self.base
-    }
-
     pub fn overlay_file(&self, path: PathBuf, text: String) {
         let mut overlays = self.overlay.borrow_mut();
         overlays.insert(path, text);
@@ -76,6 +72,10 @@ impl ProjectReader {
 }
 
 impl FileReader for ProjectReader {
+
+    fn base_dir(&self) -> &Path {
+        &self.base
+    }
 
     fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String> {
         let mut child = Command::new(name)

@@ -7,7 +7,7 @@ use std::time::Instant;
 // External Dependencies ------------------------------------------------------
 use colored::Colorize;
 use file_io::{FileReader, FileWriter, Logger};
-use lsp_types::{Diagnostic, DiagnosticSeverity, Url, Range, Position};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Url, Range, Position, Location};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -24,7 +24,8 @@ pub struct Compiler {
     optimize_instructions: bool,
     print_segment_map: bool,
     print_rom_info: bool,
-    generate_symbols: Option<PathBuf>,
+    generate_source_map: Option<PathBuf>,
+    generate_symbol_map: Option<PathBuf>,
     generate_rom: Option<PathBuf>
 }
 
@@ -37,7 +38,8 @@ impl Compiler {
             optimize_instructions: false,
             print_segment_map: false,
             print_rom_info: false,
-            generate_symbols: None,
+            generate_source_map: None,
+            generate_symbol_map: None,
             generate_rom: None
         }
     }
@@ -58,8 +60,12 @@ impl Compiler {
         self.generate_rom = Some(path);
     }
 
-    pub fn set_generate_symbols(&mut self, path: PathBuf) {
-        self.generate_symbols = Some(path);
+    pub fn set_generate_symbol_map(&mut self, path: PathBuf) {
+        self.generate_symbol_map = Some(path);
+    }
+
+    pub fn set_generate_source_map(&mut self, path: PathBuf) {
+        self.generate_source_map = Some(path);
     }
 
     pub fn set_strip_debug_code(&mut self) {
@@ -70,7 +76,13 @@ impl Compiler {
         self.optimize_instructions = true;
     }
 
-    pub fn compile<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
+    pub fn compile<T: FileReader + FileWriter>(
+        &mut self,
+        logger: &mut Logger,
+        io: &mut T,
+        file: PathBuf
+
+    ) -> Result<Linker, CompilationError> {
         colored::control::set_override(!self.no_color);
         self.status(logger, "Compiling", format!("\"{}\" ...", file.display()));
         let (entry_lexer, macro_defs, integers) = self.parse(logger, io, file)?;
@@ -79,7 +91,13 @@ impl Compiler {
         Ok(linker)
     }
 
-    pub fn create_linker<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, file: PathBuf) -> Result<Linker, CompilationError> {
+    pub fn create_linker<T: FileReader + FileWriter>(
+        &mut self,
+        logger: &mut Logger,
+        io: &mut T,
+        file: PathBuf
+
+    ) -> Result<Linker, CompilationError> {
         colored::control::set_override(false);
         let (entry_lexer, macro_defs, integers) = self.parse(logger, io, file)?;
         self.link(logger, io, entry_lexer, macro_defs, integers)
@@ -87,8 +105,13 @@ impl Compiler {
 }
 
 impl Compiler {
+    fn parse<T: FileReader>(
+        &mut self,
+        logger: &mut Logger,
+        io: &T,
+        file: PathBuf
 
-    fn parse<T: FileReader>(&mut self, logger: &mut Logger, io: &T, file: PathBuf) -> Result<(Lexer<EntryStage>, Vec<MacroDefinition>, IntegerMap), CompilationError> {
+    ) -> Result<(Lexer<EntryStage>, Vec<MacroDefinition>, IntegerMap), CompilationError> {
         let start = Instant::now();
         let include_lexer = Lexer::<IncludeStage>::from_file(io, &file).map_err(|e| CompilationError::new("file inclusion", e))?;
         self.status(logger, "File IO", format!("completed in {}ms.", start.elapsed().as_millis()));
@@ -103,7 +126,15 @@ impl Compiler {
         Ok((entry_lexer, macro_defs, integers))
     }
 
-    fn link<T: FileReader + FileWriter>(&mut self, logger: &mut Logger, io: &mut T, entry_lexer: Lexer<EntryStage>, macro_defs: Vec<MacroDefinition>, integers: IntegerMap) -> Result<Linker, CompilationError> {
+    fn link<T: FileReader + FileWriter>(
+        &mut self,
+        logger: &mut Logger,
+        io: &mut T,
+        entry_lexer: Lexer<EntryStage>,
+        macro_defs: Vec<MacroDefinition>,
+        integers: IntegerMap
+
+    ) -> Result<Linker, CompilationError> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
             io,
@@ -123,7 +154,7 @@ impl Compiler {
         }
 
         // Generate symbol file for debuggers
-        if let Some(output_file) = self.generate_symbols.take() {
+        if let Some(output_file) = self.generate_symbol_map.take() {
             let symbols = linker.symbol_list().into_iter().map(|(bank, address, name)| {
                 format!("{:0>2}:{:0>4x} {}", bank, address, name)
 
@@ -134,6 +165,33 @@ impl Compiler {
                 )
             })?;
             logger.status("Written", format!("symbol map to \"{}\".", output_file.display()));
+        }
+
+        // Generate source map file for debuggers
+        if let Some(output_file) = self.generate_source_map.take() {
+            let mut addresses: Vec<(usize, Location)> = linker.address_location_map().into_iter().collect();
+            addresses.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+            let base_dir = io.base_dir();
+            let offsets = addresses.into_iter().map(|(offset, location)| {
+                let p = PathBuf::from(location.uri.path());
+                let relative = p.strip_prefix(base_dir).unwrap_or(&p);
+                format!(
+                    "{:0>2}:{:0>4x} {:?},{},{}",
+                    offset / 0x4000,
+                    offset % 0x4000,
+                    relative.display(),
+                    location.range.start.line + 1,
+                    location.range.start.character + 1
+                )
+
+            }).collect::<Vec<String>>().join("\n");
+            io.write_file(&output_file, offsets).map_err(|err| {
+                CompilationError::from_string(
+                    format!("Failed to write source map to file \"{}\"", err.path.display())
+                )
+            })?;
+            logger.status("Written", format!("source map to \"{}\".", output_file.display()));
         }
 
         // Report Warnings
@@ -150,7 +208,13 @@ impl Compiler {
         Ok(linker)
     }
 
-    fn generate<T: FileWriter>(&mut self, logger: &mut Logger, io: &mut T, linker: &Linker) -> Result<(), CompilationError> {
+    fn generate<T: FileWriter>(
+        &mut self,
+        logger: &mut Logger,
+        io: &mut T,
+        linker: &Linker
+
+    ) -> Result<(), CompilationError> {
         let start = Instant::now();
         let mut generator = Generator::from_linker(linker);
 
@@ -203,7 +267,6 @@ impl Compiler {
     }
 
     fn print_segment_usage(&mut self, logger: &mut Logger, segments: Vec<SegmentUsage>) {
-
         logger.newline();
         logger.info("Segment usage");
         logger.newline();
@@ -256,7 +319,6 @@ impl Compiler {
     fn status(&self, logger: &mut Logger, p: &str, s: String) {
         logger.status(p, s);
     }
-
 }
 
 
@@ -444,11 +506,23 @@ mod test {
     fn test_symbol_map() {
         let l = Logger::new();
         let mut c = Compiler::new();
-        c.set_generate_symbols(PathBuf::from("rom.sym"));
+        c.set_generate_symbol_map(PathBuf::from("rom.sym"));
         let (output, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\n_global:\nld a,a\n.local:\n");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
         assert_eq!(file, "00:0150 _global\n00:0151 _global.local");
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
+    }
+
+    // Source Map -------------------------------------------------------------
+    #[test]
+    fn test_source_map() {
+        let l = Logger::new();
+        let mut c = Compiler::new();
+        c.set_generate_source_map(PathBuf::from("rom.map"));
+        let (output, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld b,b\n\nld c,c");
+        let file = writer.get_file("rom.map").expect("Expected source map to be written");
+        assert_eq!(file, "00:0150 \"main.gbc\",3,1\n00:0151 \"main.gbc\",5,1\n00:0152 \"main.gbc\",7,1");
+        assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written source map to \"rom.map\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
     // Debug Stripping --------------------------------------------------------

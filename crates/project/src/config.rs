@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 // External Dependencies ------------------------------------------------------
 use serde::Deserialize;
-use file_io::Logger;
+use file_io::{FileReader, Logger};
 use compiler::linker::Linker;
 use compiler::compiler::{Compiler, CompilationError};
 
@@ -24,6 +24,8 @@ pub struct ProjectConfig {
     pub rom: RomConfig,
     pub emulator: HashMap<String, EmulatorConfig>,
     #[serde(default)]
+    pub map: MapConfig,
+    #[serde(default)]
     pub report: ReportConfig
 }
 
@@ -36,7 +38,7 @@ impl ProjectConfig {
             },
             Err(err) => {
                 logger.error(Logger::format_error(
-                    format!("Failed when trying to parse project configuration file!\n\n{}", err.to_string())
+                    format!("Failed when trying to parse project configuration file!\n\n{}", err)
                 ));
                 std::process::exit(1);
             }
@@ -70,12 +72,18 @@ impl ProjectConfig {
         // Remove debug code in release builds
         if release {
             compiler.set_strip_debug_code();
+        }
 
-        // But generate symbols in debug builds
-        } else {
-            let mut symbol_file = project.rom.output.clone();
-            symbol_file.set_extension("sym");
-            compiler.set_generate_symbols(symbol_file);
+        // Generate symbols if configured
+        if project.map.symbols {
+            let mut map_file = project.rom.output.clone();
+            map_file.set_extension("sym");
+            compiler.set_generate_symbol_map(map_file);
+        }
+        if project.map.source {
+            let mut map_file = project.rom.output.clone();
+            map_file.set_extension("map");
+            compiler.set_generate_source_map(map_file);
         }
 
         compiler.set_generate_rom(project.rom.output.clone());
@@ -101,7 +109,7 @@ impl ProjectConfig {
     }
 
     pub fn try_load(reader: &ProjectReader) -> Result<ProjectConfig, IOError> {
-        let mut dir = reader.base_dir().clone();
+        let mut dir = reader.base_dir().to_path_buf();
         loop {
             let mut config_file = dir.clone();
             config_file.push("gbc.toml");
@@ -119,9 +127,8 @@ impl ProjectConfig {
                 input_file.push(project.rom.input);
                 project.rom.input = input_file;
 
-                let mut output_file = dir.clone();
-                output_file.push(project.rom.output);
-                project.rom.output = output_file;
+                dir.push(project.rom.output);
+                project.rom.output = dir;
 
                 return Ok(project);
 
@@ -140,6 +147,14 @@ impl ProjectConfig {
 pub struct RomConfig {
     pub input: PathBuf,
     pub output: PathBuf,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MapConfig {
+    #[serde(default)]
+    pub symbols: bool,
+    #[serde(default)]
+    pub source: bool
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -172,6 +172,8 @@ pub trait FileReader {
         })
     }
 
+    fn base_dir(&self) -> &Path;
+
     fn resolve_path(base: &PathBuf, parent: Option<&PathBuf>, child: &Path) -> PathBuf {
         let mut full_path = base.clone();
         if child.is_absolute() {

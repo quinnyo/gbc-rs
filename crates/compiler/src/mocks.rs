@@ -64,6 +64,10 @@ impl MockFileReader {
 
 impl FileReader for MockFileReader {
 
+    fn base_dir(&self) -> &Path {
+        &self.base
+    }
+
     fn run_command(&self, name: String, args: Vec<String>, input: &[u8]) -> Result<Vec<u8>, String> {
         let (expected, output, stderr) = self.commands.get(&(name.clone(), args)).cloned().ok_or_else(|| {
             format!("{}: mock command not found", name)

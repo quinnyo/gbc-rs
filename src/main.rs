@@ -91,8 +91,12 @@ fn main() {
                 compiler.set_generate_rom(PathBuf::from(rom));
             }
 
-            if let Some(map) = matches.value_of("MAP_FILE") {
-                compiler.set_generate_symbols(PathBuf::from(map));
+            if let Some(map) = matches.value_of("SYMBOL_MAP_FILE") {
+                compiler.set_generate_symbol_map(PathBuf::from(map));
+            }
+
+            if let Some(map) = matches.value_of("SOURCE_MAP_FILE") {
+                compiler.set_generate_source_map(PathBuf::from(map));
             }
 
             match compiler.compile(&mut logger, &mut reader, main_file) {
