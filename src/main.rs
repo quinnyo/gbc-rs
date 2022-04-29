@@ -45,31 +45,21 @@ fn main() {
             process::exit(1);
         }
 
-    // Emulation
-    } else if let Some(matches) = matches.subcommand_matches("emu") {
-        let name = matches.value_of("EMULATOR").unwrap();
-        if !try_emulator(&mut logger, false, name) {
-            logger.error(Logger::format_error(
-                format!("No emulator configuration for \"{}\".", name)
-            ));
-            process::exit(1);
-        }
+    // Running
+    } else if let Some(matches) = matches.subcommand_matches("run") {
+        let args = matches.values_of("RUNNER").unwrap().collect();
+        try_runner(&mut logger, false, args);
 
     // De- / Compilation
     } else if let Some(file) = matches.value_of("SOURCE_FILE") {
-
-        // Create a project reader with the directory of the supplied argument file as the project
-        // base so includes can be relative to the base directory by prefixing them with "/"
+        // Compile if main is a file and ends with .gbc
         let main = PathBuf::from(file);
-        let main_file = PathBuf::from(main.file_name().unwrap());
-        let mut reader = ProjectReader::from_relative(main.clone());
+        if main.is_file() && main.extension().map(|e| e.to_str() == Some("gbc")).unwrap_or(false) {
+            let main_file = PathBuf::from(main.file_name().unwrap());
 
-        // If the file does not exist, check if it is a configured emulator shortcut
-        if !main.is_file() && try_emulator(&mut logger, true, &main.display().to_string()) {
-            // Empty
-
-        // Compile
-        } else {
+            // Create a project reader with the directory of the supplied argument file as the project
+            // base so includes can be relative to the base directory by prefixing them with "/"
+            let mut reader = ProjectReader::from_relative(main.clone());
             let mut compiler = Compiler::new();
             if matches.occurrences_of("segments") > 0 {
                 compiler.set_print_segment_map();
@@ -108,6 +98,11 @@ fn main() {
                     process::exit(1);
                 }
             }
+        } else {
+            logger.error(Logger::format_error(
+                format!("Argument `SOURCE_FILE` (\"{}\") is not a .gbc file", file)
+            ));
+            process::exit(2);
         }
 
     } else {
@@ -115,7 +110,8 @@ fn main() {
     }
 }
 
-fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
+fn try_runner(logger: &mut Logger, optional: bool, mut args: Vec<&str>) {
+    // A project config is required
     let config = if !optional {
         ProjectConfig::load(logger, &ProjectReader::from_absolute(env::current_dir().unwrap()))
 
@@ -123,24 +119,36 @@ fn try_emulator(logger: &mut Logger, optional: bool, name: &str) -> bool {
         project
 
     } else {
-        return false;
+        logger.error(Logger::format_error(
+            format!("No runner configuration for \"{}\".", args.join(" "))
+        ));
+        process::exit(3);
     };
-    if let Some(emulator) = config.emulator.get(name) {
-        if ProjectConfig::build(&config, logger, None, !emulator.debug).is_err() {
-            process::exit(1);
-        }
-        logger.status("Emulating", format!("Running \"{}\"...", emulator.command));
-        logger.flush();
 
-        let mut args = emulator.command.split(' ');
+    // Get command to run
+    let (command, name, mut args, debug) = if let Some(runner) = config.runner.get(args[0]) {
+        let mut args = runner.command.as_str().split(' ');
         let name = args.next().expect("Failed to get command name");
-        let mut args: Vec<String> = args.map(|arg| arg.to_string()).collect();
-        args.push(config.rom.output.display().to_string());
-        let status = Command::new(name).args(args).status().expect("Command failed");
-        status.success()
+        let args: Vec<String> = args.map(|arg| arg.to_string()).collect();
+        (runner.command.clone(), name, args, runner.debug)
 
     } else {
-        false
+        let command = args.join(" ");
+        (command, args.remove(0), args.into_iter().map(|arg| arg.to_string()).collect(), true)
+    };
+
+    // Build ROM
+    if ProjectConfig::build(&config, logger, None, !debug).is_err() {
+        process::exit(1);
+    }
+    logger.status("Running", format!("via \"{}\"...", command));
+    logger.flush();
+    args.push(config.rom.output.display().to_string());
+    if let Err(err) = Command::new(name).args(args).status() {
+        logger.error(Logger::format_error(
+            format!("Failed running ROM via \"{}\": {}", command, err)
+        ));
+        process::exit(4);
     }
 }
 

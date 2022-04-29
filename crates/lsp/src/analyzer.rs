@@ -80,32 +80,33 @@ impl Analyzer {
     pub fn runnables(&self) -> Vec<Runnable> {
         let workspace_path = self.state.workspace_path().clone();
         let workspace_root = workspace_path.clone().map(|p| p.to_string_lossy().to_string());
-        let mut runnables = Vec::new();
-        runnables.push(Runnable {
-            label: "Build Release ROM".to_string(),
-            kind: "gbc".to_string(),
-            args: RunnableArgs {
-                workspace_root: workspace_root.clone(),
-                gbc_args: vec!["release".to_string()]
+        let mut runnables = vec![
+            Runnable {
+                label: "Build Release ROM".to_string(),
+                kind: "gbc".to_string(),
+                args: RunnableArgs {
+                    workspace_root: workspace_root.clone(),
+                    gbc_args: vec!["release".to_string()]
+                }
+            },
+            Runnable {
+                label: "Build Debug ROM".to_string(),
+                kind: "gbc".to_string(),
+                args: RunnableArgs {
+                    workspace_root: workspace_root.clone(),
+                    gbc_args: vec!["debug".to_string()]
+                }
             }
-        });
-        runnables.push(Runnable {
-            label: "Build Debug ROM".to_string(),
-            kind: "gbc".to_string(),
-            args: RunnableArgs {
-                workspace_root: workspace_root.clone(),
-                gbc_args: vec!["debug".to_string()]
-            }
-        });
+        ];
         if let Some(workspace_path) = workspace_path {
             if let Ok(config) = ProjectConfig::try_load(&ProjectReader::from_absolute(workspace_path.clone())) {
-                for name in config.emulator.into_keys() {
+                for name in config.runner.into_keys() {
                     runnables.push(Runnable {
-                        label: format!("Start \"{}\" Emulator", name),
+                        label: format!("Run via \"{}\"", name),
                         kind: "gbc".to_string(),
                         args: RunnableArgs {
                             workspace_root: workspace_root.clone(),
-                            gbc_args: vec!["emu".to_string(), name]
+                            gbc_args: vec!["run".to_string(), name]
                         }
                     });
                 }

@@ -22,7 +22,7 @@ pub struct ProjectConfig {
     #[serde(default)]
     file: PathBuf,
     pub rom: RomConfig,
-    pub emulator: HashMap<String, EmulatorConfig>,
+    pub runner: HashMap<String, RunnerConfig>,
     #[serde(default)]
     pub map: MapConfig,
     #[serde(default)]
@@ -166,7 +166,7 @@ pub struct ReportConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct EmulatorConfig {
+pub struct RunnerConfig {
     pub command: String,
     #[serde(default)]
     pub debug: bool
