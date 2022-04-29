@@ -9,12 +9,10 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
 use serde::Deserialize;
 use serde_json::Value;
-use gbd::Model;
 
 
 // Modules --------------------------------------------------------------------
 mod analyzer;
-mod emulator;
 mod parser;
 mod types;
 mod state;
@@ -25,22 +23,7 @@ use self::analyzer::Analyzer;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandDocumentParams {
-    #[serde(default)]
-    range: Range,
     text_document: TextDocumentIdentifier
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WriteMemoryParams {
-    address: String,
-    value: String
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelParams {
-    model: Model
 }
 
 
@@ -73,17 +56,7 @@ impl LanguageServer for Backend {
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec![
                         "project/runnables".to_string(),
-                        "view/inlay_hints".to_string(),
-                        "debugger/toggle_breakpoint".to_string(),
-                        "debugger/step".to_string(),
-                        "debugger/step_over".to_string(),
-                        "debugger/finish".to_string(),
-                        "debugger/continue".to_string(),
-                        "debugger/undo".to_string(),
-                        "emulator/start".to_string(),
-                        "emulator/write_memory".to_string(),
-                        "emulator/stop".to_string(),
-                        "build/rom".to_string()
+                        "view/inlay_hints".to_string()
                     ],
                     work_done_progress_options: Default::default(),
                 }),
@@ -104,7 +77,6 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        self.analyzer.emulator_stop().await;
         Ok(())
     }
 
@@ -201,30 +173,7 @@ impl LanguageServer for Backend {
             "view/inlay_hints" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
                 let hints = self.analyzer.inlay_hints(PathBuf::from(params.text_document.uri.path())).await;
                 return Ok(Some(serde_json::to_value(&hints).unwrap()))
-            },
-            "debugger/toggle_breakpoint" => if let Some(Ok(params)) = params.arguments.first().map(|v| serde_json::from_value::<CommandDocumentParams>(v.clone())) {
-                self.analyzer.toggle_breakpoint(Location {
-                    uri: params.text_document.uri,
-                    range: params.range
-
-                }).await;
-            },
-            "emulator/start" => {
-                let options = params.arguments.get(1).map(|v| serde_json::from_value::<ModelParams>(v.clone()));
-                log::info!("Start params: {:?} -> {:?}", params.arguments, options);
-                if let Some(Ok(params)) = options {
-                    self.analyzer.emulator_start(Some(params.model)).await;
-
-                } else {
-                    self.analyzer.emulator_start(None).await;
-                }
-            },
-            "emulator/stop" => {
-                self.analyzer.emulator_stop().await;
-            },
-            "build/rom" => {
-                self.analyzer.build_rom().await;
-            },
+            }
             _ => {}
         }
         Ok(None)
@@ -243,9 +192,6 @@ async fn run_server() {
     Server::new(stdin, stdout, messages)
         .serve(service)
         .await;
-
-    // Exit with force here so that emulator on the main thread also exits
-    std::process::exit(0);
 }
 
 fn main() {
@@ -253,15 +199,12 @@ fn main() {
 
     // Workaround needed to make the built-in emulator UI run on the main thread
     // otherwise winit will panic due to compatability issues
-    std::thread::spawn(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                run_server().await;
-            });
-    });
-    emulator::Emulator::main_thread_loop();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            run_server().await;
+        });
 }
 

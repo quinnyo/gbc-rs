@@ -1,22 +1,18 @@
 // STD Dependencies -----------------------------------------------------------
 use std::path::PathBuf;
-use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
-use file_io::Logger;
+use file_io::{FileReader, Logger};
 use project::{ProjectConfig, ProjectReader};
 use compiler::{
     compiler::Compiler,
-    generator::Generator,
     lexer::{
         stage::include::{IncludeStage, IncludeToken},
         LexerToken,
         LexerFile
     },
-    linker::{
-        AnalysisLint, SectionEntry
-    }
+    linker::AnalysisLint
 };
 
 
@@ -52,13 +48,7 @@ impl Parser {
             Ok(mut linker) => {
                 log::info!("Linked in {}ms", start.elapsed().as_millis());
 
-                // Generate ROM entry diff for running emulator process
-                if let Some(process) = state.emulator().as_mut() {
-                    lints.append(&mut process.update_entries(linker.rom_entry_map()));
-                }
-
                 let start = std::time::Instant::now();
-                state.set_address_locations(linker.address_location_map());
                 state.set_symbols((linker.analysis.symbols, linker.analysis.macros, linker.analysis.hints));
                 state.end_progress(progress_token, "Done").await;
                 lints.append(&mut linker.analysis.lints);
@@ -99,36 +89,6 @@ impl Parser {
         // Trigger new inlay hint fetching
         state.client().send_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
         Some(())
-    }
-
-    pub async fn build(workspace_path: PathBuf, state: State) -> Option<(HashMap<usize, SectionEntry>, Vec<(u16, u16, String)>, Vec<u8>, PathBuf)> {
-        // Try and load config for current workspace
-        let (mut config, reader) = Self::load_project(&state, workspace_path)?;
-        config.report.segments = false;
-        config.report.info = false;
-
-        // Tell client about the build
-        let progress_token = state.start_progress("Build", "Running...").await;
-
-        let mut logger = Logger::new();
-        logger.set_silent();
-
-        // Run compiler
-        match ProjectConfig::build(&config, &mut logger, Some(reader), false) {
-            Ok(linker) => {
-                // Generate Labels and ROM image (note order is swapped in emulator!)
-                let labels = linker.symbol_list().into_iter().map(|(bank, addr, name)| (addr as u16, bank as u16, name)).collect();
-                let mut generator = Generator::from_linker(&linker);
-                generator.finalize_rom();
-
-                state.end_progress(progress_token, "Complete").await;
-                Some((linker.rom_entry_map(), labels, generator.buffer, config.rom.output))
-            },
-            Err(_) => {
-                state.end_progress(progress_token, "Failed").await;
-                None
-            }
-        }
     }
 
     pub fn get_token(

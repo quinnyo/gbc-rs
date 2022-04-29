@@ -17,15 +17,20 @@ linux-musl:
   stage: build
   script:
     - cargo build --release --target x86_64-unknown-linux-musl
-    - strip -S target/x86_64-unknown-linux-musl/release/gbc
     - cd crates/gbt
     - cargo build --release --target x86_64-unknown-linux-musl
+    - cd ../lsp
+    - cargo build --release --target x86_64-unknown-linux-musl
     - cd ../..
+    - strip -S target/x86_64-unknown-linux-musl/release/gbc
     - strip -S target/x86_64-unknown-linux-musl/release/gbt
+    - strip -S target/x86_64-unknown-linux-musl/release/lsp
+    - mv target/x86_64-unknown-linux-musl/release/lsp target/x86_64-unknown-linux-musl/release/gbc-analyzer
   artifacts:
     paths:
       - target/x86_64-unknown-linux-musl/release/gbc
       - target/x86_64-unknown-linux-musl/release/gbt
+      - target/x86_64-unknown-linux-musl/release/gbc-analyzer
 
 windows-mingw:
   stage: build
@@ -33,8 +38,13 @@ windows-mingw:
     - cargo build --release --target x86_64-pc-windows-gnu
     - cd crates/gbt
     - cargo build --release --target x86_64-pc-windows-gnu
+    - cd ../lsp
+    - cargo build --release --target x86_64-pc-windows-gnu
+    - cd ../..
+    - mv target/x86_64-pc-windows-gnu/release/lsp.exe target/x86_64-pc-windows-gnu/release/gbc-analyzer.exe
   artifacts:
     paths:
       - target/x86_64-pc-windows-gnu/release/gbc.exe
       - target/x86_64-pc-windows-gnu/release/gbt.exe
+      - target/x86_64-pc-windows-gnu/release/gbc-analyzer.exe
 

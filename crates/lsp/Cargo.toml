@@ -1,11 +1,8 @@
 [package]
 name = "lsp"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
 edition = "2021"
-
-[workspace]
-resolver = "2"
 
 [dependencies]
 toml = "0.5.8"
@@ -13,67 +10,10 @@ serde = { version = "1.0", features = ["derive"] }
 compiler = { version = "0.9.0", path = "../compiler" }
 project = { version = "0.5.0", path = "../project" }
 file-io = { version = "0.5.0", path = "../file-io" }
-gbd = { version = "0.1.0", git = "https://gitlab.com/BonsaiDen/gbd-rs" }
 lazy_static = "1.4.0"
 serde_json = "1.0"
 log = "0.4"
 env_logger = "0.9.0"
 tower-lsp = "0.17.0"
 tokio = { version = "1.6", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "time"] }
-
-[profile.dev.package.gbd]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.edt]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.analyzer]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.arrayvec]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.pixels]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.imgui]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.winit]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.wgpu-hal]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.wgpu]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.parking_lot]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.wgpu-core]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.cpal]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.sameboy-rs-sys]
-overflow-checks = false
-opt-level = 3
-
-[profile.dev.package.sameboy-rs]
-overflow-checks = false
-opt-level = 3
 

@@ -4,39 +4,30 @@ use std::path::PathBuf;
 use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
-use std::sync::mpsc::Sender;
 use std::collections::HashMap;
 
 
 // External Dependencies ------------------------------------------------------
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity,
-    Url, Location, NumberOrString,
+    Diagnostic,
+    Url, NumberOrString,
     PublishDiagnosticsParams,
     ProgressParams,
     ProgressParamsValue,
     WorkDoneProgress,
     WorkDoneProgressBegin,
-    WorkDoneProgressReport,
     WorkDoneProgressEnd,
     WorkDoneProgressCreateParams,
 };
 use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp::lsp_types::notification::{Progress, PublishDiagnostics};
-use gbd::{EmulatorCommand, EmulatorStatus};
 
 
 // Internal Dependencies ------------------------------------------------------
 use compiler::lexer::{stage::include::IncludeToken, LexerFile};
 use compiler::linker::{AnalysisSymbol, AnalysisHint, AnalysisMacroExpansion};
-use crate::{
-    emulator::Emulator,
-    types::{
-        ServerStatusParams, ServerStatusNotification,
-        InlayHintsNotification, InlayHintsParams
-    }
-};
+use crate::types::{ServerStatusParams, ServerStatusNotification};
 
 
 // Types ----------------------------------------------------------------------
@@ -44,9 +35,7 @@ type DocumentMap = HashMap<String, String>;
 type TokenMap = HashMap<PathBuf, (Vec<IncludeToken>, LexerFile)>;
 type SymbolData = (Vec<AnalysisSymbol>, Vec<AnalysisMacroExpansion>, Vec<AnalysisHint>);
 type DiagnosticsMap = HashMap<Url, Vec<Diagnostic>>;
-type AddressesMap = HashMap<usize, Location>;
 type Error = (Url, usize, usize);
-type ResultMap = HashMap<u16, u8>;
 
 
 // Analyzer State -------------------------------------------------------------
@@ -65,16 +54,7 @@ pub struct State {
     // Document Data
     workspace_path: Arc<Mutex<Option<PathBuf>>>,
     documents: Arc<Mutex<DocumentMap>>,
-    tokens: Arc<Mutex<TokenMap>>,
-
-    // Address<->Location Lookup
-    addresses: Arc<Mutex<AddressesMap>>,
-
-    // Emulator
-    emulator: Arc<Mutex<Option<Emulator>>>,
-    status: Arc<Mutex<Option<EmulatorStatus>>>,
-    results: Arc<Mutex<ResultMap>>,
-    commands: Arc<Mutex<Option<Sender<EmulatorCommand>>>>
+    tokens: Arc<Mutex<TokenMap>>
 }
 
 impl State {
@@ -93,36 +73,7 @@ impl State {
             // Document Data
             workspace_path: Arc::new(Mutex::new(None)),
             documents: Arc::new(Mutex::new(HashMap::new())),
-            tokens: Arc::new(Mutex::new(HashMap::new())),
-
-            // Address<->Location Lookup
-            addresses: Arc::new(Mutex::new(HashMap::new())),
-
-            // Emulator
-            emulator: Arc::new(Mutex::new(None)),
-            status: Arc::new(Mutex::new(None)),
-            results: Arc::new(Mutex::new(HashMap::new())),
-            commands: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    pub fn send_command(&self, command: EmulatorCommand) {
-        if let Ok(commands) = self.commands.lock() {
-            if let Some(commands) = commands.as_ref() {
-                commands.send(command).ok();
-            }
-        }
-    }
-
-    pub fn set_emulator(&self, p: Option<Emulator>) {
-        if let Ok(mut process) = self.emulator.lock() {
-            *process = p;
-        }
-    }
-
-    pub fn set_status(&self, st: Option<EmulatorStatus>) {
-        if let Ok(mut status) = self.status.lock() {
-            *status = st;
+            tokens: Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -138,30 +89,10 @@ impl State {
         }
     }
 
-    pub fn set_address_locations(&self, addresses: AddressesMap) {
-        if let Ok(mut map) = self.addresses.lock() {
-            *map = addresses;
-        }
-    }
-
     pub fn set_symbols(&self, symbols: SymbolData) {
         if let Ok(mut data) = self.symbols.lock() {
             *data = Some(symbols);
         }
-    }
-
-    pub fn set_command_sender(&self, s: Option<Sender<EmulatorCommand>>) {
-        if let Ok(mut commands) = self.commands.lock() {
-            *commands = s;
-        }
-    }
-
-    pub fn emulator(&self) -> MutexGuard<Option<Emulator>> {
-        self.emulator.lock().expect("Emulator Lock failed")
-    }
-
-    pub fn status(&self) -> MutexGuard<Option<EmulatorStatus>> {
-        self.status.lock().expect("Status Lock failed")
     }
 
     pub fn error(&self) -> MutexGuard<Option<Error>> {
@@ -180,16 +111,8 @@ impl State {
         self.documents.lock().expect("Documents Lock failed")
     }
 
-    pub fn address_locations(&self) -> MutexGuard<AddressesMap> {
-        self.addresses.lock().expect("Addresses Lock failed")
-    }
-
     pub fn tokens(&self) -> MutexGuard<TokenMap> {
         self.tokens.lock().expect("Tokens Lock failed")
-    }
-
-    pub fn results(&self) -> MutexGuard<ResultMap> {
-        self.results.lock().expect("Result Lock failed")
     }
 
     pub fn has_symbols(&self) -> bool {
@@ -241,19 +164,6 @@ impl State {
         }
     }
 
-    pub async fn update_progress<S: Display>(&self, token: Option<NumberOrString>, message: S) {
-        if let Some(token) = token {
-            self.client.send_notification::<Progress>(ProgressParams {
-                token,
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(WorkDoneProgressReport {
-                    cancellable: Some(false),
-                    message: Some(message.to_string()),
-                    percentage: None
-                }))
-            }).await;
-        }
-    }
-
     pub async fn end_progress<S: Display>(&self, token: Option<NumberOrString>, message: S) {
         if let Some(token) = token {
             self.client.send_notification::<Progress>(ProgressParams {
@@ -265,10 +175,6 @@ impl State {
         }
     }
 
-    pub async fn trigger_client_hints_refresh(&self) {
-        self.client.send_notification::<InlayHintsNotification>(InlayHintsParams {}).await;
-    }
-
     pub async fn publish_diagnostics(&self) {
         // Remove any Information diagnostics
         for (_, diagnostics) in self.diagnostics().iter_mut() {
@@ -276,32 +182,6 @@ impl State {
                 !d.message.starts_with("Debugger")
 
             }).collect();
-        }
-
-        // Add debugger location
-        if let Some(status) = self.status().clone() {
-            for b in &status.breakpoints {
-                if let Some(location) = self.address_locations().get(&(b.address as usize)) {
-                    let info = Diagnostic {
-                        message: format!("Debugger Breakpoint @ ${:0>4X}", b.address),
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        .. Diagnostic::default()
-                    };
-                    self.diagnostics().entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
-                }
-            }
-            if status.halted {
-                if let Some(location) = self.address_locations().get(&(status.pc as usize)) {
-                    let info = Diagnostic {
-                        message: "Debugger halted here".to_string(),
-                        range: location.range,
-                        severity: Some(DiagnosticSeverity::HINT),
-                        .. Diagnostic::default()
-                    };
-                    self.diagnostics().entry(location.uri.clone()).or_insert_with(Vec::new).push(info);
-                }
-            }
         }
 
         // Send diagnostics for all files

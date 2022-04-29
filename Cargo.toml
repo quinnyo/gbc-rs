@@ -7,6 +7,7 @@ members = [
     "crates/gb-cpu",
     "crates/gb-cpu/gb-types",
     "crates/gbt",
+    "crates/lsp",
     "crates/project",
     "."
 ]
@@ -28,8 +29,4 @@ clap = "3.1.8"
 
 [profile.dev.package.compiler]
 # opt-level = 3
-
-[profile.release]
-lto = 'fat'
-codegen-units = 1
 
