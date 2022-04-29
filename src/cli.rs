@@ -17,6 +17,11 @@ pub fn app<'help>() -> Command<'help> {
         .subcommand(
             Command::new("run")
                 .about("Builds a ROM and runs it via the specified configuration.")
+                .arg(Arg::new("PASS_SOURCE_DIR")
+                    .long("pass-source-dir")
+                    .short('p')
+                    .help("Pass the source dir to the executed command")
+                )
                 .arg(Arg::new("RUNNER")
                     .help("Runner config to use, if the configuration does not exist the argument will be interpreted as a program instead")
                     .required(true)

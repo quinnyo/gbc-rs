@@ -61,8 +61,8 @@ local function setup_dap()
     local dap = require("dap")
     dap.adapters.gbc = {
        type = 'executable',
-       command = '/home/ivo/dev/22/dap/target/debug/dap',
-       args = {'--stdin' },
+       command = 'gbc',
+       args = { 'run', '-p', 'gbd', '--', '--dap' },
     }
     dap.configurations.gbc = {
         {

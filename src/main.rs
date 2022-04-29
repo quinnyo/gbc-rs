@@ -6,7 +6,7 @@ use std::process::{self, Command};
 
 // External Dependencies ------------------------------------------------------
 use project::{ProjectConfig, ProjectReader};
-use file_io::Logger;
+use file_io::{FileReader, Logger};
 use compiler::compiler::Compiler;
 
 
@@ -48,7 +48,8 @@ fn main() {
     // Running
     } else if let Some(matches) = matches.subcommand_matches("run") {
         let args = matches.values_of("RUNNER").unwrap().collect();
-        try_runner(&mut logger, false, args);
+        let pass_source_dir = matches.occurrences_of("PASS_SOURCE_DIR") > 0;
+        try_runner(&mut logger, false, args, pass_source_dir);
 
     // De- / Compilation
     } else if let Some(file) = matches.value_of("SOURCE_FILE") {
@@ -110,7 +111,7 @@ fn main() {
     }
 }
 
-fn try_runner(logger: &mut Logger, optional: bool, mut args: Vec<&str>) {
+fn try_runner(logger: &mut Logger, optional: bool, mut args: Vec<&str>, pass_source_dir: bool) {
     // A project config is required
     let config = if !optional {
         ProjectConfig::load(logger, &ProjectReader::from_absolute(env::current_dir().unwrap()))
@@ -143,6 +144,15 @@ fn try_runner(logger: &mut Logger, optional: bool, mut args: Vec<&str>) {
     }
     logger.status("Running", format!("via \"{}\"...", command));
     logger.flush();
+
+    // Pass source dir to command
+    if pass_source_dir {
+        let reader = ProjectReader::from_relative(config.rom.input.clone());
+        args.push("--source-dir".to_string());
+        args.push(reader.base_dir().display().to_string());
+    }
+
+    // Hand over ROM path to command
     args.push(config.rom.output.display().to_string());
     if let Err(err) = Command::new(name).args(args).status() {
         logger.error(Logger::format_error(
