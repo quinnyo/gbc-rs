@@ -590,8 +590,8 @@ fn is_volatile_address(addr: u16) -> bool {
 
 fn get_instruction(entries: &[SectionEntry], i: usize) -> Option<OptEntry> {
     if let Some(entry) = entries.get(i) {
-        if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, .. } = entry.data {
-            if volatile {
+        if let EntryData::Instruction { ref op_code, ref bytes, ref expression, volatile, debug_only, .. } = entry.data {
+            if volatile || debug_only {
                 None
 
             } else {
@@ -632,6 +632,34 @@ mod test {
         }
     }
 
+    // No Optimizations -------------------------------------------------------
+    #[test]
+    fn test_no_optimize_debug_instructions() {
+        let l = linker_optimize_keep_debug("SECTION ROM0\nmsg \"Hello World\"");
+        assert_eq!(linker_section_entries(l), vec![
+            vec![
+                (1, EntryData::Instruction { op_code: 82, expression: None, bytes: vec![82], volatile: false, debug_only: true }),
+                (2, EntryData::Instruction {
+                    op_code: 24,
+                    expression: Some(Expression::Value(ExpressionValue::OffsetAddress(itk!(13, 16, "msg"), 15))),
+                    bytes: vec![24, 15],
+                    volatile: false,
+                    debug_only: true
+                }),
+                (1, EntryData::Instruction { op_code: 100, expression: None, bytes: vec![100], volatile: false, debug_only: true }),
+                (1, EntryData::Instruction { op_code: 100, expression: None, bytes: vec![100], volatile: false, debug_only: true }),
+                (1, EntryData::Instruction { op_code: 0, expression: None, bytes: vec![0], volatile: false, debug_only: true }),
+                (1, EntryData::Instruction { op_code: 0, expression: None, bytes: vec![0], volatile: false, debug_only: true }),
+                (11, EntryData::Data {
+                    alignment: crate::expression::data::DataAlignment::Byte,
+                    endianess: crate::expression::data::DataEndianess::Little,
+                    expressions: None,
+                    bytes: Some(vec![72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]),
+                    debug_only: true
+                })
+            ]
+        ]);
+    }
 
     // Optimizations ----------------------------------------------------------
     #[test]
