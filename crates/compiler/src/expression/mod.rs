@@ -1,5 +1,6 @@
 // STD Dependencies -----------------------------------------------------------
 use std::fmt;
+use std::collections::HashSet;
 
 
 // External Dependencies ------------------------------------------------------
@@ -70,6 +71,35 @@ impl Expression {
         }
     }
 
+    pub fn label_references(&self, references: &mut HashSet<String>) {
+        match self {
+            Expression::Binary { left, right, .. } => {
+                left.label_references(references);
+                right.label_references(references);
+            },
+            Expression::Unary { right, .. } => {
+                right.label_references(references);
+            },
+            Expression::Value(value) => {
+                value.label_references(references);
+            },
+            Expression::BuiltinCall { args, .. } => {
+                for a in args {
+                    a.label_references(references);
+                }
+            },
+            Expression::ParentLabelCall { args, .. } => {
+                for a in args {
+                    a.label_references(references);
+                }
+            },
+            Expression::RegisterArgument { .. } => {},
+            Expression::MemoryArgument { value, .. } => {
+                value.label_references(references);
+            }
+        }
+    }
+
     pub fn is_register(&self) -> bool {
         matches!(self, Expression::RegisterArgument { .. })
     }
@@ -99,7 +129,6 @@ impl Expression {
             },
             _ => {}
         }
-
     }
 }
 
@@ -115,7 +144,6 @@ pub enum ExpressionValue {
 }
 
 impl ExpressionValue {
-
     fn is_constant(&self) -> bool {
         match self {
             ExpressionValue::ConstantValue(_, _) | ExpressionValue::Integer(_) | ExpressionValue::Float(_) | ExpressionValue::String(_) => true,
@@ -123,6 +151,11 @@ impl ExpressionValue {
         }
     }
 
+    fn label_references(&self, references: &mut HashSet<String>) {
+        if let Self::ParentLabelAddress(inner, _) = self {
+            references.insert(inner.value.to_string());
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

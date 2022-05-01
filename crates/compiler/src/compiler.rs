@@ -7,7 +7,7 @@ use std::time::Instant;
 // External Dependencies ------------------------------------------------------
 use colored::Colorize;
 use file_io::{FileReader, FileWriter, Logger};
-use lsp_types::{Diagnostic, DiagnosticSeverity, Url, Range, Position, Location};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Url, Range, Position, Location, SymbolKind};
 
 
 // Internal Dependencies ------------------------------------------------------
@@ -156,7 +156,21 @@ impl Compiler {
         // Generate symbol file for debuggers
         if let Some(output_file) = self.generate_symbol_map.take() {
             let symbols = linker.symbol_list().into_iter().map(|(bank, address, name)| {
-                format!("{:0>2}:{:0>4x} {}", bank, address, name)
+                let mut size = None;
+                for s in &linker.analysis.symbols {
+                    if s.name == *name {
+                        if s.kind == SymbolKind::VARIABLE && s.width > 0 {
+                            size = Some(s.width);
+                        }
+                        break;
+                    }
+                }
+                if let Some(s) = size {
+                    format!("{:0>2}:{:0>4x} {}:{}", bank, address, name, s)
+
+                } else {
+                    format!("{:0>2}:{:0>4x} {}", bank, address, name)
+                }
 
             }).collect::<Vec<String>>().join("\n");
             io.write_file(&output_file, symbols).map_err(|err| {
@@ -173,11 +187,11 @@ impl Compiler {
             addresses.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
             let base_dir = io.base_dir();
-            let offsets = addresses.into_iter().map(|(offset, location)| {
+            let mut locations = addresses.into_iter().map(|(offset, location)| {
                 let p = PathBuf::from(location.uri.path());
                 let relative = p.strip_prefix(base_dir).unwrap_or(&p);
                 format!(
-                    "{:0>2}:{:0>4x} {:?},{},{}",
+                    "a {:0>2}:{:0>4x} {:?},{},{}",
                     offset / 0x4000,
                     offset % 0x4000,
                     relative.display(),
@@ -185,8 +199,21 @@ impl Compiler {
                     location.range.start.character + 1
                 )
 
-            }).collect::<Vec<String>>().join("\n");
-            io.write_file(&output_file, offsets).map_err(|err| {
+            }).collect::<Vec<String>>();
+            let mut scopes = linker.analysis.scopes.iter().map(|s| {
+                format!(
+                    "s {:0>2}:{:0>4X}-{:0>2}:{:0>4X} {} {}",
+                    s.address_range.0 / 0x4000,
+                    s.address_range.0 % 0x4000,
+                    s.address_range.1 / 0x4000,
+                    s.address_range.1 % 0x4000,
+                    s.io_references.join(","),
+                    s.symbol_references.join(",")
+                )
+
+            }).collect::<Vec<String>>();
+            locations.append(&mut scopes);
+            io.write_file(&output_file, locations.join("\n")).map_err(|err| {
                 CompilationError::from_string(
                     format!("Failed to write source map to file \"{}\"", err.path.display())
                 )
@@ -507,9 +534,9 @@ mod test {
         let l = Logger::new();
         let mut c = Compiler::new();
         c.set_generate_symbol_map(PathBuf::from("rom.sym"));
-        let (output, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\n_global:\nld a,a\n.local:\n");
+        let (output, mut writer) = compiler_writer(l, c, "SECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
-        assert_eq!(file, "00:0150 _global\n00:0151 _global.local");
+        assert_eq!(file, "00:0150 _global\n00:0151 _global.local\n00:ff80 variable:1");
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
@@ -519,9 +546,9 @@ mod test {
         let l = Logger::new();
         let mut c = Compiler::new();
         c.set_generate_source_map(PathBuf::from("rom.map"));
-        let (output, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld b,b\n\nld c,c");
+        let (output, mut writer) = compiler_writer(l, c, "CONST rSCX $FF42\nSECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]\nld a,[$FF40]\nld [rSCX],a\n\ncall _global");
         let file = writer.get_file("rom.map").expect("Expected source map to be written");
-        assert_eq!(file, "00:0150 \"main.gbc\",3,1\n00:0151 \"main.gbc\",5,1\n00:0152 \"main.gbc\",7,1");
+        assert_eq!(file, "a 00:0150 \"main.gbc\",6,1\na 00:0151 \"main.gbc\",8,1\na 00:0154 \"main.gbc\",9,1\na 00:0157 \"main.gbc\",10,1\na 00:015a \"main.gbc\",12,1\ns 00:0150-00:015A FF40,FF42 _global,variable");
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written source map to \"rom.map\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 

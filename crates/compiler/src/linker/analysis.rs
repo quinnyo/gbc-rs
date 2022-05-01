@@ -10,6 +10,7 @@ use super::{AccessKind, LinkerContext, OptimizerInfo};
 use super::section::entry::{EntryData, SectionEntry};
 
 
+use gb_cpu::Instruction;
 // External Dependencies ------------------------------------------------------
 use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, SymbolInformation, SymbolKind, Url, Range, Position, Location};
 
@@ -33,6 +34,14 @@ pub struct AnalysisMacroExpansion {
     pub location: Location,
     pub children: usize,
     pub size: usize
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalysisScope {
+    pub name: String,
+    pub symbol_references: Vec<String>,
+    pub io_references: Vec<String>,
+    pub address_range: (usize, usize)
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +167,7 @@ impl AnalysisSymbol {
 #[derive(Default)]
 pub struct Analysis {
     pub symbols: Vec<AnalysisSymbol>,
+    pub scopes: Vec<AnalysisScope>,
     pub macros: Vec<AnalysisMacroExpansion>,
     pub lints: Vec<AnalysisLint>,
     pub hints: Vec<AnalysisHint>,
@@ -165,18 +175,19 @@ pub struct Analysis {
 
 impl Analysis {
     pub fn from_context(ctx: LinkerContext, hints: Vec<OptimizerInfo>) -> Self {
-        let (symbols, macros) = Self::symbols(ctx);
+        let (symbols, macros, scopes) = Self::symbols(ctx);
         Self {
             lints: Self::lints(&symbols),
             hints: Self::hints(ctx, hints),
             symbols,
+            scopes,
             macros
         }
     }
 }
 
 impl Analysis {
-    fn symbols(ctx: LinkerContext) -> (Vec<AnalysisSymbol>, Vec<AnalysisMacroExpansion>) {
+    fn symbols(ctx: LinkerContext) -> (Vec<AnalysisSymbol>, Vec<AnalysisMacroExpansion>, Vec<AnalysisScope>) {
         let mut symbols: Vec<AnalysisSymbol> = Vec::with_capacity(1024);
 
         // Constants
@@ -270,6 +281,7 @@ impl Analysis {
             }
         }
 
+        let mut scopes = Vec::with_capacity(64);
         let mut macro_call_sizes: HashMap<usize, usize> = HashMap::with_capacity(64);
         for entry in ctx.section_entries() {
 
@@ -277,6 +289,8 @@ impl Analysis {
             let mut entries = entry.iter().peekable();
             while let Some(entry) = entries.next() {
 
+                let start_address = entry.offset;
+                let mut end_address = entry.offset;
                 let file_index = entry.inner.file_index;
                 let entry_name = &entry.inner.value;
                 let start_index = entry.inner.start_index;
@@ -285,9 +299,11 @@ impl Analysis {
                 if let EntryData::Label { .. } = &entry.data {
 
                     let mut children = Vec::with_capacity(16);
+                    let mut symbol_references = HashSet::with_capacity(8);
+                    let mut io_references = HashSet::with_capacity(8);
                     let mut kind = SymbolKind::FUNCTION;
                     let mut data_size = 0;
-                    while let Some(SectionEntry { size, data, inner, .. }) = entries.peek() {
+                    while let Some(SectionEntry { size, data, inner, offset, .. }) = entries.peek() {
 
                         // Encountered next parent label
                         if let EntryData::Label { is_local: false, .. } = data {
@@ -344,6 +360,23 @@ impl Analysis {
 
                         // Any other entry like an instruction
                         } else {
+                            if kind == SymbolKind::FUNCTION {
+                                if let EntryData::Instruction { op_code, bytes, expression, .. } = data {
+                                    let addr = match bytes.len() {
+                                        3 => ((bytes[2] as u16) << 8) | (bytes[1] as u16),
+                                        2 => 0xFF00 | bytes[1] as u16,
+                                        _ => 0
+                                    };
+
+                                    // record memory addresses for I/O registers
+                                    if addr >= 0xFF00 && addr < 0xFF80 && (Instruction::is_memory_read_op_code(*op_code) || Instruction::is_memory_write_op_code(*op_code)) {
+                                        io_references.insert(format!("{:>04X}", addr));
+
+                                    } else if let Some(expression) = expression {
+                                        expression.label_references(&mut symbol_references);
+                                    }
+                                }
+                            }
                             if let Some(id) = inner.macro_call_id {
                                 let e = macro_call_sizes.entry(id).or_insert(0);
                                 *e += *size;
@@ -355,6 +388,7 @@ impl Analysis {
                         // Update range of label body
                         if inner.macro_call_id.is_none() {
                             end_index = end_index.max(inner.end_index);
+                            end_address = end_address.max(*offset);
                         }
                     }
 
@@ -414,6 +448,18 @@ impl Analysis {
 
                             }).unwrap_or_else(Vec::new);
 
+                            if kind == SymbolKind::FUNCTION {
+                                let mut symbol_references: Vec<String> = symbol_references.into_iter().collect();
+                                symbol_references.sort_unstable();
+                                let mut io_references: Vec<String> = io_references.into_iter().collect();
+                                io_references.sort_unstable();
+                                scopes.push(AnalysisScope {
+                                    name: name.clone(),
+                                    symbol_references,
+                                    io_references,
+                                    address_range: (start_address, end_address)
+                                });
+                            }
 
                             symbols.push(AnalysisSymbol {
                                 kind,
@@ -494,11 +540,14 @@ impl Analysis {
             a.name.cmp(&b.name)
         });
 
+        // Sort scopes by start address
+        scopes.sort_unstable_by(|a, b| a.address_range.0.cmp(&b.address_range.0));
+
         // Ignore symbols from files generated via using statements
         (unique_symbols.into_iter().filter(|s| {
             s.location.uri.path().ends_with(".gbc")
 
-        }).collect(), macro_expansions)
+        }).collect(), macro_expansions, scopes)
     }
 
     fn lints(symbols: &[AnalysisSymbol]) -> Vec<AnalysisLint> {
