@@ -35,7 +35,7 @@ end
 
 function M.run_command(choice, result)
   -- do nothing if choice is too high or too low
-  if choice < 1 or choice > #result then
+  if choice == nil or choice < 1 or choice > #result then
     return
   end
 
