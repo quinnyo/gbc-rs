@@ -369,7 +369,7 @@ source = "git+https://gitlab.com/BonsaiDen/gb-cpu#a1d990ca6170d7c1ab8c93025abe48
 
 [[package]]
 name = "gbc"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "clap 3.1.8",
  "compiler",

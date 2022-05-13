@@ -12,7 +12,7 @@ members = [
 
 [package]
 name = "gbc"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["Ivo Wetzel <ivo.wetzel@googlemail.com>"]
 edition = "2021"
 

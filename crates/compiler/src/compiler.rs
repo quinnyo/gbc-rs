@@ -156,21 +156,24 @@ impl Compiler {
         // Generate symbol file for debuggers
         if let Some(output_file) = self.generate_symbol_map.take() {
             let symbols = linker.symbol_list().into_iter().map(|(bank, address, name)| {
-                let mut size = None;
+                let mut code_size = 0;
+                let mut data_size = 0;
+                let mut variable_size = 0;
                 for s in &linker.analysis.symbols {
                     if s.name == *name {
-                        if s.kind == SymbolKind::VARIABLE && s.width > 0 {
-                            size = Some(s.width);
+                        if s.kind == SymbolKind::VARIABLE {
+                            variable_size = s.width;
+
+                        } else if s.kind == SymbolKind::FIELD {
+                            data_size = s.width;
+
+                        } else if s.kind == SymbolKind::FUNCTION {
+                            code_size = s.width;
                         }
                         break;
                     }
                 }
-                if let Some(s) = size {
-                    format!("{:0>2}:{:0>4x} {}:{}", bank, address, name, s)
-
-                } else {
-                    format!("{:0>2}:{:0>4x} {}", bank, address, name)
-                }
+                format!("{:0>2}:{:0>4x} {} {}:{}:{}", bank, address, name, code_size, data_size, variable_size)
 
             }).collect::<Vec<String>>().join("\n");
             io.write_file(&output_file, symbols).map_err(|err| {
@@ -534,9 +537,9 @@ mod test {
         let l = Logger::new();
         let mut c = Compiler::new();
         c.set_generate_symbol_map(PathBuf::from("rom.sym"));
-        let (output, mut writer) = compiler_writer(l, c, "SECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]");
+        let (output, mut writer) = compiler_writer(l, c, "SECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]\nld hl,storage\nstorage:\n DB $42");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
-        assert_eq!(file, "00:0150 _global\n00:0151 _global.local\n00:ff80 variable:1");
+        assert_eq!(file, "00:0150 _global 7:0:0\n00:0151 _global.local 0:0:0\n00:0157 storage 0:1:0\n00:ff80 variable 0:0:1");
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
