@@ -4,8 +4,6 @@ members = [
     "crates/compiler",
     "crates/decompiler",
     "crates/file-io",
-    "crates/gb-cpu",
-    "crates/gb-cpu/gb-types",
     "crates/gbt",
     "crates/lsp",
     "crates/project",
