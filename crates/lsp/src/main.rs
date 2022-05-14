@@ -130,7 +130,12 @@ impl LanguageServer for Backend {
         let pos = params.text_document_position_params;
         let file = pos.text_document.uri.path();
         if let Some(symbol) = self.analyzer.symbol(PathBuf::from(file), pos.position.line as usize, pos.position.character as usize).await {
-            Ok(Some(GotoDefinitionResponse::Scalar(symbol.location)))
+            if symbol.is_generated() {
+                Ok(None)
+
+            } else {
+                Ok(Some(GotoDefinitionResponse::Scalar(symbol.location)))
+            }
 
         } else {
             Ok(None)

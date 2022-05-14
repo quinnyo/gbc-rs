@@ -198,7 +198,7 @@ impl Analyzer {
                     Some(format!("SECTION \"{}\",{}", symbol.name, symbol.value))
                 },
                 SymbolKind::CONSTANT => {
-                    Some(format!("CONST {}", symbol.name))
+                    Some(format!("CONST {} = {}", symbol.name, symbol.value))
                 },
                 // TODO show expanded tokens, need to record expanded entries (already needed above)
                 // and then be able to to_string() them all again into source code
