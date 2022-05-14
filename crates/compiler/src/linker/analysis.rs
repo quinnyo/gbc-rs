@@ -65,6 +65,14 @@ pub struct AnalysisSymbol {
 }
 
 impl AnalysisSymbol {
+    pub fn is_generated(&self) -> bool {
+        !self.location.uri.path().ends_with(".gbc")
+    }
+
+    pub fn is_library(&self) -> bool {
+        self.location.uri.path().contains("lib")
+    }
+
     pub fn info(&self) -> String {
         let mut parts = Vec::with_capacity(3);
         if self.width == 1 {
@@ -321,8 +329,8 @@ impl Analysis {
                                 in_macro: inner.macro_call_id.is_some(),
                                 location: location_from_file_index(ctx.files, inner.file_index, inner.start_index, inner.end_index),
                                 address: None,
-                                name: name.clone(),//format!(".{}", name),
-                                width: 0,
+                                name: name.clone(),
+                                width: data_size,
                                 line_range: (0, 0),
                                 result: None,
                                 value: "".to_string(),
@@ -392,19 +400,14 @@ impl Analysis {
                         }
                     }
 
-                    // Update children and create symbols for them
+                    // Find matching label in context
                     let file = &ctx.files[file_index];
                     let (line, _) = file.get_line_and_col(start_index);
                     let (eline, _) = file.get_line_and_col(end_index);
                     let line_range = (line, eline);
-                    for c in &mut children {
-                        c.line_range = line_range;
-                        symbols.push(c.clone());
-                    }
-
-                    // Find matching label in context
                     for ((symbol, label_id, is_global), token) in ctx.labels {
                         if token.file_index == file_index && symbol == entry_name {
+                            // Get parent information
                             let name = symbol.to_string();
                             let address = ctx.label_addresses.get(label_id).unwrap_or(&0);
 
@@ -467,18 +470,26 @@ impl Analysis {
                                 in_macro: token.macro_call_id.is_some(),
                                 location: location_from_file_index(ctx.files, file_index, start_index, end_index),
                                 address: Some(*address),
-                                name,
+                                name: name.clone(),
                                 width: data_size,
                                 line_range,
                                 result: None,
                                 value: format!("${:0>4X}", address),
-                                children,
+                                children: children.clone(),
                                 references,
                                 calls,
                                 jumps,
                                 reads,
                                 writes
                             });
+
+                            // Update children and create symbols for them
+                            for c in &mut children {
+                                c.name = format!("{}.{}", name, c.name);
+                                c.line_range = line_range;
+                                c.width = data_size.saturating_sub(c.width);
+                                symbols.push(c.clone());
+                            }
                             break;
                         }
                     }
@@ -543,11 +554,7 @@ impl Analysis {
         // Sort scopes by start address
         scopes.sort_unstable_by(|a, b| a.address_range.0.cmp(&b.address_range.0));
 
-        // Ignore symbols from files generated via using statements
-        (unique_symbols.into_iter().filter(|s| {
-            s.location.uri.path().ends_with(".gbc")
-
-        }).collect(), macro_expansions, scopes)
+        (unique_symbols, macro_expansions, scopes)
     }
 
     fn lints(symbols: &[AnalysisSymbol]) -> Vec<AnalysisLint> {
@@ -560,7 +567,8 @@ impl Analysis {
                 || symbol.kind == SymbolKind::METHOD
                 || symbol.in_macro
                 || symbol.name.starts_with('_')
-                || symbol.location.uri.path().contains("lib") {
+                || symbol.is_generated()
+                || symbol.is_library() {
                 continue;
             }
 

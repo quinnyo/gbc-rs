@@ -163,14 +163,16 @@ impl Compiler {
                     if s.name == *name {
                         if s.kind == SymbolKind::VARIABLE {
                             variable_size = s.width;
+                            break;
 
                         } else if s.kind == SymbolKind::FIELD {
                             data_size = s.width;
+                            break;
 
-                        } else if s.kind == SymbolKind::FUNCTION {
+                        } else if s.kind == SymbolKind::METHOD || s.kind == SymbolKind::FUNCTION {
                             code_size = s.width;
+                            break;
                         }
-                        break;
                     }
                 }
                 format!("{:0>2}:{:0>4x} {} {}:{}:{}", bank, address, name, code_size, data_size, variable_size)
@@ -539,7 +541,7 @@ mod test {
         c.set_generate_symbol_map(PathBuf::from("rom.sym"));
         let (output, mut writer) = compiler_writer(l, c, "SECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]\nld hl,storage\nstorage:\n DB $42");
         let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
-        assert_eq!(file, "00:0150 _global 7:0:0\n00:0151 _global.local 0:0:0\n00:0157 storage 0:1:0\n00:ff80 variable 0:0:1");
+        assert_eq!(file, "00:0150 _global 7:0:0\n00:0151 _global.local 6:0:0\n00:0157 storage 0:1:0\n00:ff80 variable 0:0:1");
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
