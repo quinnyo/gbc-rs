@@ -218,15 +218,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "decompiler"
-version = "0.1.0"
-dependencies = [
- "colored 2.0.0",
- "file-io",
- "gb-cpu",
-]
-
-[[package]]
 name = "deflate"
 version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -354,8 +345,8 @@ dependencies = [
 
 [[package]]
 name = "gb-cpu"
-version = "0.5.0"
-source = "git+https://gitlab.com/BonsaiDen/gb-cpu#a1d990ca6170d7c1ab8c93025abe488301738839"
+version = "0.5.2"
+source = "git+https://gitlab.com/BonsaiDen/gb-cpu#f3cafceead7200859d9c74a7ad5c112dab329162"
 dependencies = [
  "gb-types",
  "serde",
@@ -365,7 +356,7 @@ dependencies = [
 [[package]]
 name = "gb-types"
 version = "0.1.0"
-source = "git+https://gitlab.com/BonsaiDen/gb-cpu#a1d990ca6170d7c1ab8c93025abe488301738839"
+source = "git+https://gitlab.com/BonsaiDen/gb-cpu#f3cafceead7200859d9c74a7ad5c112dab329162"
 
 [[package]]
 name = "gbc"
@@ -373,7 +364,6 @@ version = "0.13.0"
 dependencies = [
  "clap 3.1.8",
  "compiler",
- "decompiler",
  "file-io",
  "project",
  "serde",
