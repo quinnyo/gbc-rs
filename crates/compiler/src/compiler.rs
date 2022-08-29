@@ -1,7 +1,8 @@
 // STD Dependencies -----------------------------------------------------------
-use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Instant;
+use std::{fmt, io};
 
 // External Dependencies ------------------------------------------------------
 use colored::Colorize;
@@ -20,6 +21,21 @@ use crate::linker::{AnalysisLint, Linker, SegmentUsage};
 pub enum SymbolFileFormat {
     Native,
     Bgb,
+}
+
+impl FromStr for SymbolFileFormat {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "native" => Ok(SymbolFileFormat::Native),
+            "bgb" => Ok(SymbolFileFormat::Bgb),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unknown symbol file format",
+            )),
+        }
+    }
 }
 
 // Compiler Pipeline Implementation -------------------------------------------

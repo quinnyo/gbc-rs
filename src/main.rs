@@ -2,6 +2,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::{self, Command};
+use std::str::FromStr;
 
 // External Dependencies ------------------------------------------------------
 use compiler::compiler::{Compiler, SymbolFileFormat};
@@ -80,11 +81,8 @@ fn main() {
             }
 
             if let Some(sym_fmt) = matches.value_of("symbol-format") {
-                let fmt = match sym_fmt {
-                    "native" => SymbolFileFormat::Native,
-                    "bgb" => SymbolFileFormat::Bgb,
-                    _ => panic!("Clap should not allow other values"),
-                };
+                let fmt = SymbolFileFormat::from_str(sym_fmt)
+                    .expect("Clap should not allow invalid symbol file formats");
                 compiler.set_symbol_format(fmt);
             }
 
