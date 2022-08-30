@@ -1,21 +1,42 @@
 // STD Dependencies -----------------------------------------------------------
-use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Instant;
-
+use std::{fmt, io};
 
 // External Dependencies ------------------------------------------------------
 use colored::Colorize;
 use file_io::{FileReader, FileWriter, Logger};
-use lsp_types::{Diagnostic, DiagnosticSeverity, Url, Range, Position, Location, SymbolKind};
-
+use lsp_types::{Diagnostic, DiagnosticSeverity, Location, Position, Range, SymbolKind, Url};
 
 // Internal Dependencies ------------------------------------------------------
-use crate::generator::{Generator, ROMInfo};
 use crate::error::SourceError;
+use crate::generator::{Generator, ROMInfo};
+use crate::lexer::{
+    EntryStage, ExpressionStage, IncludeStage, IntegerMap, Lexer, MacroDefinition, MacroStage,
+    ValueStage,
+};
 use crate::linker::{AnalysisLint, Linker, SegmentUsage};
-use crate::lexer::{Lexer, IncludeStage, MacroStage, ValueStage, ExpressionStage, EntryStage, IntegerMap, MacroDefinition};
 
+pub enum SymbolFileFormat {
+    Native,
+    Bgb,
+}
+
+impl FromStr for SymbolFileFormat {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "native" => Ok(SymbolFileFormat::Native),
+            "bgb" => Ok(SymbolFileFormat::Bgb),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unknown symbol file format",
+            )),
+        }
+    }
+}
 
 // Compiler Pipeline Implementation -------------------------------------------
 pub struct Compiler {
@@ -26,7 +47,8 @@ pub struct Compiler {
     print_rom_info: bool,
     generate_source_map: Option<PathBuf>,
     generate_symbol_map: Option<PathBuf>,
-    generate_rom: Option<PathBuf>
+    symbol_file_format: SymbolFileFormat,
+    generate_rom: Option<PathBuf>,
 }
 
 impl Compiler {
@@ -40,7 +62,8 @@ impl Compiler {
             print_rom_info: false,
             generate_source_map: None,
             generate_symbol_map: None,
-            generate_rom: None
+            symbol_file_format: SymbolFileFormat::Native,
+            generate_rom: None,
         }
     }
 
@@ -64,6 +87,10 @@ impl Compiler {
         self.generate_symbol_map = Some(path);
     }
 
+    pub fn set_symbol_format(&mut self, fmt: SymbolFileFormat) {
+        self.symbol_file_format = fmt;
+    }
+
     pub fn set_generate_source_map(&mut self, path: PathBuf) {
         self.generate_source_map = Some(path);
     }
@@ -80,8 +107,7 @@ impl Compiler {
         &mut self,
         logger: &mut Logger,
         io: &mut T,
-        file: PathBuf
-
+        file: PathBuf,
     ) -> Result<Linker, CompilationError> {
         colored::control::set_override(!self.no_color);
         self.status(logger, "Compiling", format!("\"{}\" ...", file.display()));
@@ -95,8 +121,7 @@ impl Compiler {
         &mut self,
         logger: &mut Logger,
         io: &mut T,
-        file: PathBuf
-
+        file: PathBuf,
     ) -> Result<Linker, CompilationError> {
         colored::control::set_override(false);
         let (entry_lexer, macro_defs, integers) = self.parse(logger, io, file)?;
@@ -109,20 +134,32 @@ impl Compiler {
         &mut self,
         logger: &mut Logger,
         io: &T,
-        file: PathBuf
-
+        file: PathBuf,
     ) -> Result<(Lexer<EntryStage>, Vec<MacroDefinition>, IntegerMap), CompilationError> {
         let start = Instant::now();
-        let include_lexer = Lexer::<IncludeStage>::from_file(io, &file).map_err(|e| CompilationError::new("file inclusion", e))?;
-        self.status(logger, "File IO", format!("completed in {}ms.", start.elapsed().as_millis()));
+        let include_lexer = Lexer::<IncludeStage>::from_file(io, &file)
+            .map_err(|e| CompilationError::new("file inclusion", e))?;
+        self.status(
+            logger,
+            "File IO",
+            format!("completed in {}ms.", start.elapsed().as_millis()),
+        );
         let start = Instant::now();
-        let mut macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer).map_err(|e| CompilationError::new("macro expansion", e))?;
+        let mut macro_lexer = Lexer::<MacroStage>::from_lexer(include_lexer)
+            .map_err(|e| CompilationError::new("macro expansion", e))?;
         let macro_defs = macro_lexer.data();
-        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer).map_err(|e| CompilationError::new("value construction", e))?;
-        let mut expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer).map_err(|e| CompilationError::new("expression construction", e))?;
+        let value_lexer = Lexer::<ValueStage>::from_lexer(macro_lexer)
+            .map_err(|e| CompilationError::new("value construction", e))?;
+        let mut expr_lexer = Lexer::<ExpressionStage>::from_lexer(value_lexer)
+            .map_err(|e| CompilationError::new("expression construction", e))?;
         let integers = expr_lexer.data().remove(0);
-        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer).map_err(|e| CompilationError::new("entry construction", e))?;
-        self.status(logger, "Parsing", format!("completed in {}ms.", start.elapsed().as_millis()));
+        let entry_lexer = Lexer::<EntryStage>::from_lexer(expr_lexer)
+            .map_err(|e| CompilationError::new("entry construction", e))?;
+        self.status(
+            logger,
+            "Parsing",
+            format!("completed in {}ms.", start.elapsed().as_millis()),
+        );
         Ok((entry_lexer, macro_defs, integers))
     }
 
@@ -132,8 +169,7 @@ impl Compiler {
         io: &mut T,
         entry_lexer: Lexer<EntryStage>,
         macro_defs: Vec<MacroDefinition>,
-        integers: IntegerMap
-
+        integers: IntegerMap,
     ) -> Result<Linker, CompilationError> {
         let start = Instant::now();
         let linker = Linker::from_lexer(
@@ -142,11 +178,14 @@ impl Compiler {
             macro_defs,
             integers,
             self.strip_debug_code,
-            self.optimize_instructions
+            self.optimize_instructions,
+        )
+        .map_err(|e| CompilationError::new("section linking", e))?;
 
-        ).map_err(|e| CompilationError::new("section linking", e))?;
-
-        logger.status("Linking", format!("completed in {}ms.", start.elapsed().as_millis()));
+        logger.status(
+            "Linking",
+            format!("completed in {}ms.", start.elapsed().as_millis()),
+        );
 
         // Report Segment Usage
         if self.print_segment_map {
@@ -155,75 +194,101 @@ impl Compiler {
 
         // Generate symbol file for debuggers
         if let Some(output_file) = self.generate_symbol_map.take() {
-            let symbols = linker.symbol_list().into_iter().map(|(bank, address, name)| {
-                let mut code_size = 0;
-                let mut data_size = 0;
-                let mut variable_size = 0;
-                for s in &linker.analysis.symbols {
-                    if s.name == *name {
-                        if s.kind == SymbolKind::VARIABLE {
-                            variable_size = s.width;
-                            break;
-
-                        } else if s.kind == SymbolKind::FIELD {
-                            data_size = s.width;
-                            break;
-
-                        } else if s.kind == SymbolKind::METHOD || s.kind == SymbolKind::FUNCTION {
-                            code_size = s.width;
-                            break;
+            let symbols = linker
+                .symbol_list()
+                .into_iter()
+                .map(|(bank, address, name)| {
+                    let mut code_size = 0;
+                    let mut data_size = 0;
+                    let mut variable_size = 0;
+                    for s in &linker.analysis.symbols {
+                        if s.name == *name {
+                            if s.kind == SymbolKind::VARIABLE {
+                                variable_size = s.width;
+                                break;
+                            } else if s.kind == SymbolKind::FIELD {
+                                data_size = s.width;
+                                break;
+                            } else if s.kind == SymbolKind::METHOD || s.kind == SymbolKind::FUNCTION
+                            {
+                                code_size = s.width;
+                                break;
+                            }
                         }
                     }
-                }
-                format!("{:0>2}:{:0>4x} {} {}:{}:{}", bank, address, name, code_size, data_size, variable_size)
 
-            }).collect::<Vec<String>>().join("\n");
+                    match self.symbol_file_format {
+                        SymbolFileFormat::Native => format!(
+                            "{:0>2}:{:0>4x} {} {}:{}:{}",
+                            bank, address, name, code_size, data_size, variable_size
+                        ),
+                        SymbolFileFormat::Bgb => format!("{:0>6x} {}", address, name),
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join("\n");
             io.write_file(&output_file, symbols).map_err(|err| {
-                CompilationError::from_string(
-                    format!("Failed to write symbol map to file \"{}\"", err.path.display())
-                )
+                CompilationError::from_string(format!(
+                    "Failed to write symbol map to file \"{}\"",
+                    err.path.display()
+                ))
             })?;
-            logger.status("Written", format!("symbol map to \"{}\".", output_file.display()));
+            logger.status(
+                "Written",
+                format!("symbol map to \"{}\".", output_file.display()),
+            );
         }
 
         // Generate source map file for debuggers
         if let Some(output_file) = self.generate_source_map.take() {
-            let mut addresses: Vec<(usize, Location)> = linker.address_location_map().into_iter().collect();
+            let mut addresses: Vec<(usize, Location)> =
+                linker.address_location_map().into_iter().collect();
             addresses.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
             let base_dir = io.base_dir();
-            let mut locations = addresses.into_iter().map(|(offset, location)| {
-                let p = PathBuf::from(location.uri.path());
-                let relative = p.strip_prefix(base_dir).unwrap_or(&p);
-                format!(
-                    "a {:0>2}:{:0>4x} {:?},{},{}",
-                    offset / 0x4000,
-                    offset % 0x4000,
-                    relative.display(),
-                    location.range.start.line + 1,
-                    location.range.start.character + 1
-                )
-
-            }).collect::<Vec<String>>();
-            let mut scopes = linker.analysis.scopes.iter().map(|s| {
-                format!(
-                    "s {:0>2}:{:0>4X}-{:0>2}:{:0>4X} {} {}",
-                    s.address_range.0 / 0x4000,
-                    s.address_range.0 % 0x4000,
-                    s.address_range.1 / 0x4000,
-                    s.address_range.1 % 0x4000,
-                    s.io_references.join(","),
-                    s.symbol_references.join(",")
-                )
-
-            }).collect::<Vec<String>>();
+            let mut locations = addresses
+                .into_iter()
+                .map(|(offset, location)| {
+                    let p = PathBuf::from(location.uri.path());
+                    let relative = p.strip_prefix(base_dir).unwrap_or(&p);
+                    format!(
+                        "a {:0>2}:{:0>4x} {:?},{},{}",
+                        offset / 0x4000,
+                        offset % 0x4000,
+                        relative.display(),
+                        location.range.start.line + 1,
+                        location.range.start.character + 1
+                    )
+                })
+                .collect::<Vec<String>>();
+            let mut scopes = linker
+                .analysis
+                .scopes
+                .iter()
+                .map(|s| {
+                    format!(
+                        "s {:0>2}:{:0>4X}-{:0>2}:{:0>4X} {} {}",
+                        s.address_range.0 / 0x4000,
+                        s.address_range.0 % 0x4000,
+                        s.address_range.1 / 0x4000,
+                        s.address_range.1 % 0x4000,
+                        s.io_references.join(","),
+                        s.symbol_references.join(",")
+                    )
+                })
+                .collect::<Vec<String>>();
             locations.append(&mut scopes);
-            io.write_file(&output_file, locations.join("\n")).map_err(|err| {
-                CompilationError::from_string(
-                    format!("Failed to write source map to file \"{}\"", err.path.display())
-                )
-            })?;
-            logger.status("Written", format!("source map to \"{}\".", output_file.display()));
+            io.write_file(&output_file, locations.join("\n"))
+                .map_err(|err| {
+                    CompilationError::from_string(format!(
+                        "Failed to write source map to file \"{}\"",
+                        err.path.display()
+                    ))
+                })?;
+            logger.status(
+                "Written",
+                format!("source map to \"{}\".", output_file.display()),
+            );
         }
 
         // Report Warnings
@@ -244,8 +309,7 @@ impl Compiler {
         &mut self,
         logger: &mut Logger,
         io: &mut T,
-        linker: &Linker
-
+        linker: &Linker,
     ) -> Result<(), CompilationError> {
         let start = Instant::now();
         let mut generator = Generator::from_linker(linker);
@@ -256,21 +320,26 @@ impl Compiler {
                 for w in warnings {
                     logger.warning(w);
                 }
-            },
-            Err(err) => return Err(CompilationError::from_string(err))
+            }
+            Err(err) => return Err(CompilationError::from_string(err)),
         }
 
         // Apply checksum etc.
         generator.finalize_rom();
-        logger.status("Validated", format!("ROM verified in {}ms.", start.elapsed().as_millis()));
+        logger.status(
+            "Validated",
+            format!("ROM verified in {}ms.", start.elapsed().as_millis()),
+        );
 
         let info = generator.rom_info();
         if let Some(output_file) = self.generate_rom.take() {
-            io.write_binary_file(&output_file, generator.buffer).map_err(|err| {
-                CompilationError::from_string(
-                    format!("Failed to write ROM to file \"{}\"", err.path.display())
-                )
-            })?;
+            io.write_binary_file(&output_file, generator.buffer)
+                .map_err(|err| {
+                    CompilationError::from_string(format!(
+                        "Failed to write ROM to file \"{}\"",
+                        err.path.display()
+                    ))
+                })?;
             logger.status("Written", format!("ROM to \"{}\".", output_file.display()));
         }
 
@@ -284,15 +353,23 @@ impl Compiler {
     fn print_rom_info(&mut self, logger: &mut Logger, info: ROMInfo) {
         logger.info(format!("ROM Title: {}", info.title));
         logger.info(format!("ROM Version: {}", info.mask_rom_version));
-        logger.info(format!("ROM Checksum: ${:0>2X} / ${:0>4X}", info.checksum_header, info.checksum_rom));
-        logger.info(format!("ROM Size: {} bytes", u32::from(info.rom_size) * 1024));
+        logger.info(format!(
+            "ROM Checksum: ${:0>2X} / ${:0>4X}",
+            info.checksum_header, info.checksum_rom
+        ));
+        logger.info(format!(
+            "ROM Size: {} bytes",
+            u32::from(info.rom_size) * 1024
+        ));
         if info.ram_size > 0 {
-            logger.info(format!("RAM Size: {} bytes", u32::from(info.ram_size) * 1024));
+            logger.info(format!(
+                "RAM Size: {} bytes",
+                u32::from(info.ram_size) * 1024
+            ));
         }
 
         if let Some(cart_type) = info.cart_type {
             logger.info(format!("ROM Mapper: {}", cart_type.mapper));
-
         } else {
             logger.warning("ROM Mapper: Unknown");
         }
@@ -311,18 +388,21 @@ impl Compiler {
                 size - s.bytes_in_use
             );
             let offset = format!("${:0>4x}", s.start_address);
-            logger.log(format!("{: >12} {} {}", s.name.bright_blue(), offset.bright_yellow(), info.bright_green()));
+            logger.log(format!(
+                "{: >12} {} {}",
+                s.name.bright_blue(),
+                offset.bright_yellow(),
+                info.bright_green()
+            ));
             logger.newline();
             for (used, name, start, end) in s.ranges {
                 let display_name = if let Some(name) = name {
                     format!("  ({})", name)
-
                 } else {
                     "".to_string()
                 };
                 let marker = if used {
                     "  ======".to_string()
-
                 } else {
                     "  ~~~~~~".to_string()
                 };
@@ -337,7 +417,6 @@ impl Compiler {
                 );
                 logger.log(if used {
                     line
-
                 } else {
                     line.bright_black().to_string()
                 });
@@ -353,22 +432,20 @@ impl Compiler {
     }
 }
 
-
 // Compiler Error Abstraction -------------------------------------------------
 #[derive(Debug)]
 pub struct CompilationError {
     stage: String,
     source: Option<SourceError>,
-    message: Option<String>
+    message: Option<String>,
 }
 
 impl CompilationError {
-
     fn new(stage: &str, source: SourceError) -> Self {
         Self {
             stage: stage.to_string(),
             source: Some(source),
-            message: None
+            message: None,
         }
     }
 
@@ -376,7 +453,7 @@ impl CompilationError {
         Self {
             stage: "rom generation".to_string(),
             source: None,
-            message: Some(message.into())
+            message: Some(message.into()),
         }
     }
 
@@ -390,12 +467,12 @@ impl CompilationError {
                         range: Range {
                             start: Position {
                                 line: line as u32,
-                                character: col as u32
+                                character: col as u32,
                             },
                             end: Position {
                                 line: line as u32,
-                                character: col as u32
-                            }
+                                character: col as u32,
+                            },
                         },
                         severity: Some(DiagnosticSeverity::ERROR),
                         message: source.raw_message,
@@ -404,14 +481,12 @@ impl CompilationError {
                         source: None,
                         related_information: None,
                         tags: None,
-                        data: None
-                    }
+                        data: None,
+                    },
                 })
-
             } else {
                 None
             }
-
         } else {
             None
         }
@@ -421,13 +496,28 @@ impl CompilationError {
 impl fmt::Display for CompilationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(source) = self.source.as_ref() {
-            write!(f, "       {} Compilation failed during {} phase!\n\n{}", "Error".bright_red(), self.stage, source)
-
+            write!(
+                f,
+                "       {} Compilation failed during {} phase!\n\n{}",
+                "Error".bright_red(),
+                self.stage,
+                source
+            )
         } else if let Some(message) = self.message.as_ref() {
-            write!(f, "       {} Compilation failed during {} phase!\n\n{}", "Error".bright_red(), self.stage, message)
-
+            write!(
+                f,
+                "       {} Compilation failed during {} phase!\n\n{}",
+                "Error".bright_red(),
+                self.stage,
+                message
+            )
         } else {
-            write!(f, "       {} Compilation failed during {} phase!", "Error".bright_red(), self.stage)
+            write!(
+                f,
+                "       {} Compilation failed during {} phase!",
+                "Error".bright_red(),
+                self.stage
+            )
         }
     }
 }
@@ -438,36 +528,58 @@ mod test {
     use regex::Regex;
     use std::path::PathBuf;
 
-    use crate::mocks::MockFileReader;
     use super::{Compiler, Logger};
+    use crate::{compiler::SymbolFileFormat, mocks::MockFileReader};
 
     fn compiler<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S) -> String {
         compiler.set_no_color();
         let mut reader = MockFileReader::new();
         reader.add_file("/main.gbc", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
-        compiler.compile(&mut logger, &mut reader, PathBuf::from("/main.gbc")).expect("Compilation failed");
-        re.replace_all(logger.to_string().as_str(), "XXms").to_string()
+        compiler
+            .compile(&mut logger, &mut reader, PathBuf::from("/main.gbc"))
+            .expect("Compilation failed");
+        re.replace_all(logger.to_string().as_str(), "XXms")
+            .to_string()
     }
 
-    fn compiler_writer<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S) -> (String, MockFileReader) {
+    fn compiler_writer<S: Into<String>>(
+        mut logger: Logger,
+        mut compiler: Compiler,
+        s: S,
+    ) -> (String, MockFileReader) {
         compiler.set_no_color();
         let mut reader = MockFileReader::new();
         reader.add_file("/main.gbc", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
         compiler.set_generate_rom(PathBuf::from("rom.gb"));
-        compiler.compile(&mut logger, &mut reader, PathBuf::from("/main.gbc")).expect("Compilation failed");
-        let output = re.replace_all(logger.to_string().as_str(), "XXms").to_string();
+        compiler
+            .compile(&mut logger, &mut reader, PathBuf::from("/main.gbc"))
+            .expect("Compilation failed");
+        let output = re
+            .replace_all(logger.to_string().as_str(), "XXms")
+            .to_string();
         (output, reader)
     }
 
-    fn compiler_error<S: Into<String>>(mut logger: Logger, mut compiler: Compiler, s: S) -> (String, String) {
+    fn compiler_error<S: Into<String>>(
+        mut logger: Logger,
+        mut compiler: Compiler,
+        s: S,
+    ) -> (String, String) {
         compiler.set_no_color();
         let mut reader = MockFileReader::new();
         reader.add_file("/main.gbc", s.into().as_str());
         let re = Regex::new(r"([0-9]+)ms").unwrap();
-        let err = compiler.compile(&mut logger, &mut reader, PathBuf::from("/main.gbc")).err().expect("Expected a CompilationError");
-        (re.replace_all(logger.to_string().as_str(), "XXms").to_string(), err.to_string())
+        let err = compiler
+            .compile(&mut logger, &mut reader, PathBuf::from("/main.gbc"))
+            .err()
+            .expect("Expected a CompilationError");
+        (
+            re.replace_all(logger.to_string().as_str(), "XXms")
+                .to_string(),
+            err.to_string(),
+        )
     }
 
     // STDOUT -----------------------------------------------------------------
@@ -540,8 +652,27 @@ mod test {
         let mut c = Compiler::new();
         c.set_generate_symbol_map(PathBuf::from("rom.sym"));
         let (output, mut writer) = compiler_writer(l, c, "SECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]\nld hl,storage\nstorage:\n DB $42");
-        let file = writer.get_file("rom.sym").expect("Expected symbol file to be written");
+        let file = writer
+            .get_file("rom.sym")
+            .expect("Expected symbol file to be written");
         assert_eq!(file, "00:0150 _global 7:0:0\n00:0151 _global.local 6:0:0\n00:0157 storage 0:1:0\n00:ff80 variable 0:0:1");
+        assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
+    }
+
+    #[test]
+    fn test_symbol_map_bgb_format() {
+        let l = Logger::new();
+        let mut c = Compiler::new();
+        c.set_generate_symbol_map(PathBuf::from("rom.sym"));
+        c.set_symbol_format(SymbolFileFormat::Bgb);
+        let (output, mut writer) = compiler_writer(l, c, "SECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]\nld hl,storage\nstorage:\n DB $42");
+        let file = writer
+            .get_file("rom.sym")
+            .expect("Expected symbol file to be written");
+        assert_eq!(
+            file,
+            "000150 _global\n000151 _global.local\n000157 storage\n00ff80 variable"
+        );
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written symbol map to \"rom.sym\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
 
@@ -552,7 +683,9 @@ mod test {
         let mut c = Compiler::new();
         c.set_generate_source_map(PathBuf::from("rom.map"));
         let (output, mut writer) = compiler_writer(l, c, "CONST rSCX $FF42\nSECTION HRAM\nvariable: DB\nSECTION ROM0[$150]\n_global:\nld a,a\n.local:\nld a,[variable]\nld a,[$FF40]\nld [rSCX],a\n\ncall _global");
-        let file = writer.get_file("rom.map").expect("Expected source map to be written");
+        let file = writer
+            .get_file("rom.map")
+            .expect("Expected source map to be written");
         assert_eq!(file, "a 00:0150 \"main.gbc\",6,1\na 00:0151 \"main.gbc\",8,1\na 00:0154 \"main.gbc\",9,1\na 00:0157 \"main.gbc\",10,1\na 00:015a \"main.gbc\",12,1\ns 00:0150-00:015A FF40,FF42 _global,variable");
         assert_eq!(output, "   Compiling \"/main.gbc\" ...\n     File IO completed in XXms.\n     Parsing completed in XXms.\n     Linking completed in XXms.\n     Written source map to \"rom.map\".\n   Validated ROM verified in XXms.\n     Written ROM to \"rom.gb\".");
     }
@@ -564,7 +697,9 @@ mod test {
         l.set_silent();
         let c = Compiler::new();
         let (_, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\nbrk");
-        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        let file = writer
+            .get_binary_file("rom.gb")
+            .expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![64, 0, 0, 0])
     }
 
@@ -575,7 +710,9 @@ mod test {
         let mut c = Compiler::new();
         c.set_strip_debug_code();
         let (_, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\nbrk");
-        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        let file = writer
+            .get_binary_file("rom.gb")
+            .expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![0, 0, 0, 0])
     }
 
@@ -586,7 +723,9 @@ mod test {
         l.set_silent();
         let c = Compiler::new();
         let (_, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\nld a,[$ff41]");
-        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        let file = writer
+            .get_binary_file("rom.gb")
+            .expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![250, 65, 255, 0])
     }
 
@@ -597,7 +736,9 @@ mod test {
         let mut c = Compiler::new();
         c.set_optimize_instructions();
         let (_, mut writer) = compiler_writer(l, c, "SECTION ROM0[$150]\nld a,[$ff41]");
-        let file = writer.get_binary_file("rom.gb").expect("Expected ROM file to be written");
+        let file = writer
+            .get_binary_file("rom.gb")
+            .expect("Expected ROM file to be written");
         assert_eq!(file[336..340].to_vec(), vec![240, 65, 0, 0])
     }
 
@@ -646,7 +787,6 @@ mod test {
         let mut c = Compiler::new();
         c.set_print_rom_info();
         assert_eq!(compiler(l, c, header), output)
-
     }
 
     // Warnings ---------------------------------------------------------------
@@ -689,4 +829,3 @@ mod test {
         ));
     }
 }
-
